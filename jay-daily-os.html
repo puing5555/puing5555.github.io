@@ -1608,24 +1608,7 @@ function updateStat() {
   document.getElementById('statDone').textContent = done+'/'+day.tasks.length;
 }
 
-// ── 일기 ──
-async function generateDiary() {
-  const day = getDay();
-  const diaryBox = document.getElementById('diaryBox');
-  diaryBox.textContent = '생성 중...';
-  const dumpTexts = day.dumps.map(d=>d.text).join('\n');
-  const tasksDone = day.tasks.filter(t=>t.done).map(t=>t.text).join(', ');
-  try {
-    const raw = await callClaude(
-      [{role:'user', content:`오늘 덤프: ${dumpTexts||'없음'}\n완료한 일: ${tasksDone||'없음'}`}],
-      'JAY의 오늘 하루를 3-5문장 일기로 써줘. 1인칭. 감성적이고 솔직하게. 한국어.'
-    );
-    day.diary = raw;
-    diaryBox.textContent = raw;
-  } catch(e) {
-    diaryBox.textContent = '생성 실패 🙏';
-  }
-}
+
 
 // ── 메모 뷰 ──
 let _viewingMemoIdx = null;
