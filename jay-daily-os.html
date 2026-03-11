@@ -265,6 +265,18 @@ body {
 .task-pri {
   width: 4px; border-radius: 2px; flex-shrink: 0; align-self: stretch;
 }
+.task-actions {
+  display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; align-items: center;
+}
+.task-card:hover .task-actions { opacity: 1; }
+.task-actions button {
+  width: 22px; height: 22px; border-radius: 5px; border: none;
+  background: var(--surface2); color: var(--text2); font-size: 11px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  padding: 0; font-family: inherit; transition: background 0.1s;
+}
+.task-actions button:hover { background: var(--border2); }
+.task-actions span { width: 22px; }
 
 /* 타임라인 */
 .timeline-item {
@@ -1020,8 +1032,8 @@ async function sendDump() {
   const profileCtx = userProfile.name ? `JAY 프로필: ${userProfile.name}, ${userProfile.job||''}, 집중: ${userProfile.focus||''}` : '';
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"친구처럼 한마디(구어체 1-2문장)","tasks":[{"text":"할일","priority":2,"when":"today","urgent":false}],"schedule":[{"time":"09:00","task":"","note":""}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
-priority: 1=긴급 2=높음 3=보통 4=낮음 / when: today tomorrow week later`;
+{"reply":"친구처럼 한마디(구어체 1-2문장)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
+priority: 1=긴급 2=높음 3=보통 4=낮음 / tasks는 모두 오늘 할일로만 추출. schedule은 추출하지 말 것 — 타임라인은 사용자가 직접 배정함`;
 
   try {
     let userContent = input;
@@ -1035,11 +1047,10 @@ priority: 1=긴급 2=높음 3=보통 4=낮음 / when: today tomorrow week later`
 
     addMsg('ai', parsed.reply || '정리했어!');
 
-    // 데이터 저장
-    (parsed.tasks||[]).forEach(t => { day.tasks.push({...t, done:false}); });
-    (parsed.schedule||[]).forEach(s => { if(s.time && s.task) day.schedule.push(s); });
+    // 데이터 저장 — tasks 전부 오늘로, schedule 무시
+    (parsed.tasks||[]).forEach(t => { day.tasks.push({...t, when:'today', done:false}); });
     (parsed.memo||[]).forEach(m => { if(m.text) memoData.push({...m, id:'m_'+Date.now()+'_'+Math.random(), date:new Date().toISOString()}); });
-    save(); /* saved in-memory */
+    save();
 
     const taskLen = (parsed.tasks||[]).length, memoLen = (parsed.memo||[]).length;
     if (taskLen || memoLen) {
@@ -1557,16 +1568,26 @@ function renderTasks() {
   const day = getDay();
   const tasks = day.tasks.filter(t => t.when === taskFilter || taskFilter === 'all');
   const el = document.getElementById('taskList');
+  const whenOrder = ['today','tomorrow','week','later'];
   const priColors = {1:'var(--red)',2:'var(--accent)',3:'var(--yellow)',4:'var(--muted)'};
   if (!tasks.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">할일이 없어</div></div>'; }
-  else el.innerHTML = tasks.map((t,i) => `
-    <div class="task-card ${t.done?'done':''}">
+  else el.innerHTML = tasks.map((t) => {
+    const ri = day.tasks.indexOf(t);
+    const wi = whenOrder.indexOf(t.when);
+    const canPrev = wi > 0, canNext = wi < whenOrder.length - 1;
+    return `
+    <div class="task-card ${t.done?'done':''}" style="position:relative">
       <div class="task-pri" style="background:${priColors[t.priority]||'var(--muted)'}"></div>
-      <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${day.tasks.indexOf(t)})">
-        ${t.done?'✓':''}
-      </div>
+      <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${ri})">${t.done?'✓':''}</div>
       <div class="task-text">${t.text}</div>
-    </div>`).join('');
+      <div class="task-actions">
+        ${canPrev?`<button onclick="moveTask(${ri},-1)" title="앞으로">←</button>`:'<span></span>'}
+        ${canNext?`<button onclick="moveTask(${ri},1)" title="뒤로">→</button>`:'<span></span>'}
+        <button onclick="scheduleTask(${ri})" title="타임라인에 시간 배정" style="color:var(--blue)">🕐</button>
+        <button onclick="deleteTask(${ri})" title="삭제" style="color:var(--red)">✕</button>
+      </div>
+    </div>`;
+  }).join('');
   document.getElementById('taskCnt').textContent = tasks.filter(t=>!t.done).length;
   const badge = document.getElementById('taskBadge');
   const undone = day.tasks.filter(t=>!t.done&&t.when==='today').length;
@@ -1576,15 +1597,59 @@ function renderTasks() {
   updateStat();
 }
 function toggleTask(i) { const day=getDay(); day.tasks[i].done=!day.tasks[i].done; save(); renderTasks(); }
+const _whenOrder = ['today','tomorrow','week','later'];
+function moveTask(i, dir) {
+  const day = getDay();
+  const t = day.tasks[i];
+  const wi = _whenOrder.indexOf(t.when);
+  const nw = _whenOrder[wi + dir];
+  if (!nw) return;
+  // 타임라인에서 제거 (오늘이 아닌 곳으로 이동 시)
+  if (nw !== 'today') {
+    day.schedule = day.schedule.filter(s => s.task !== t.text);
+  }
+  t.when = nw;
+  save(); renderTasks();
+}
+function deleteTask(i) {
+  const day = getDay();
+  const t = day.tasks[i];
+  day.schedule = day.schedule.filter(s => s.task !== t.text);
+  day.tasks.splice(i, 1);
+  save(); renderTasks();
+}
+function scheduleTask(i) {
+  const day = getDay();
+  const t = day.tasks[i];
+  const time = prompt(`"${t.text}" 시간 배정 (예: 09:30)`);
+  if (!time) return;
+  // 이미 있으면 업데이트
+  const exist = day.schedule.find(s => s.task === t.text);
+  if (exist) { exist.time = time; }
+  else { day.schedule.push({ time, task: t.text, note: '' }); }
+  save(); renderSchedule();
+  showToast(`⏰ ${time} 타임라인 추가됨`);
+}
 function renderSchedule() {
   const day = getDay();
   const el = document.getElementById('scheduleList');
-  if (!day.schedule.length) { el.innerHTML='<div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">일정이 없어</div></div>'; return; }
-  el.innerHTML = day.schedule.sort((a,b)=>a.time.localeCompare(b.time)).map(s=>`
-    <div class="timeline-item">
+  // 오늘 할일에 있는 것만 타임라인에 표시 (오늘 아닌 곳으로 이동되면 자동 제거)
+  day.schedule = day.schedule.filter(s => {
+    const linked = day.tasks.find(t => t.text === s.task);
+    return !linked || linked.when === 'today';
+  });
+  if (!day.schedule.length) { el.innerHTML='<div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">+ 일정 눌러서 시간 배정</div></div>'; return; }
+  el.innerHTML = day.schedule.sort((a,b)=>a.time.localeCompare(b.time)).map((s,i)=>`
+    <div class="timeline-item" style="position:relative" onmouseenter="this.querySelector('.tl-del').style.opacity=1" onmouseleave="this.querySelector('.tl-del').style.opacity=0">
       <div class="timeline-time">${s.time}</div>
-      <div><div class="timeline-task">${s.task}</div>${s.note?`<div class="timeline-note">${s.note}</div>`:''}</div>
+      <div style="flex:1"><div class="timeline-task">${s.task}</div>${s.note?`<div class="timeline-note">${s.note}</div>`:''}</div>
+      <button class="tl-del" onclick="deleteSchedule(${i})" style="opacity:0;transition:opacity 0.15s;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px">✕</button>
     </div>`).join('');
+}
+function deleteSchedule(i) {
+  const day = getDay();
+  day.schedule.splice(i, 1);
+  save(); renderSchedule();
 }
 function openAddTask() {
   document.getElementById('newTaskText').value='';
