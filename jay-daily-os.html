@@ -1060,6 +1060,7 @@ async function callClaude(messages, system) {
 // ── 덤프 ──
 let _sending = false;
 let _attachedPhotos = [];
+let _dumpHistory = []; // 대화 히스토리 유지
 
 async function sendDump() {
   const ta = document.getElementById('dumpInput');
@@ -1089,15 +1090,14 @@ async function sendDump() {
 
   const profileCtx = userProfile.name ? `JAY 프로필: ${userProfile.name}, ${userProfile.job||''}, 집중: ${userProfile.focus||''}` : '';
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
-반드시 JSON만 응답:
-{"reply":"친구처럼 한마디(구어체 1-2문장)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
+반드시 JSON만 응답 (이전 대화 맥락 유지해서 자연스럽게 이어가):
+{"reply":"친구처럼 한마디(구어체 1-2문장, 이전 대화 맥락 반영)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(10자이내)","children":[{"label":"가지1","children":["세부1","세부2"]},{"label":"가지2","children":["세부1"]}]},"focus":"오늘 딱 하나만"}
 
-할일 추출 규칙 (엄격하게):
-- tasks는 JAY가 명시적으로 "해야 해", "할 거야", "해줘", "처리해야", "확인해야" 등 명확한 액션 동사로 표현한 것만 추출
-- "~하고 있어", "~운영 중이야", "~했어" 처럼 현재 상태나 과거 사실은 tasks에 절대 넣지 말 것
-- 단순 근황 공유나 정보 전달은 memo로 처리
-- 불확실하면 tasks를 비워둘 것 (빈 배열 [])
-- priority: 1=긴급 2=높음 3=보통 4=낮음`;
+할일 추출 규칙:
+- tasks는 "해야 해", "할 거야", "해줘" 등 명확한 액션 동사가 있을 때만
+- "~하고 있어", "~했어" 같은 상태/과거는 절대 tasks에 넣지 말 것
+- 불확실하면 tasks:[]
+- mindmap은 대화 주제를 계층형으로 정리 (root→가지→세부). 대화 없으면 null`;
 
   try {
     let userContent = input;
@@ -1105,13 +1105,22 @@ async function sendDump() {
       userContent = [..._attachedPhotos.map(p => ({ type:'image', source:{type:'base64', media_type:p.mime, data:p.base64}})), {type:'text',text:input||'이 사진 정리해줘'}];
       _attachedPhotos = [];
     }
-    const raw = await callClaude([{role:'user', content:userContent}], system);
+
+    // 히스토리에 현재 메시지 추가
+    _dumpHistory.push({ role: 'user', content: userContent });
+
+    // 히스토리 최대 20개 유지 (10턴)
+    if (_dumpHistory.length > 20) _dumpHistory = _dumpHistory.slice(-20);
+
+    const raw = await callClaude(_dumpHistory, system);
     typingEl.remove();
     const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
 
+    // AI 응답도 히스토리에 추가
+    _dumpHistory.push({ role: 'assistant', content: raw });
+
     addMsg('ai', parsed.reply || '정리했어!');
 
-    // 데이터 저장 — tasks 전부 오늘로, schedule 무시
     (parsed.tasks||[]).forEach(t => { day.tasks.push({...t, when:'today', done:false}); });
     (parsed.memo||[]).forEach(m => { if(m.text) memoData.push({...m, id:'m_'+Date.now()+'_'+Math.random(), date:new Date().toISOString()}); });
     save();
@@ -1126,21 +1135,15 @@ async function sendDump() {
     msgs.scrollTop = msgs.scrollHeight;
     updateStat();
 
-    // 마인드맵 업데이트 — 키워드 원 자동 추가
-    const keywords = (parsed.focus ? [parsed.focus] : []).concat(
-      (parsed.tasks||[]).slice(0,2).map(t => t.text.slice(0,10))
-    );
-    const keyword = keywords[0] || input.slice(0,12);
-    if (keyword) {
-      const color = MM_COLORS[_mmColorIdx % MM_COLORS.length];
-      const canvas = document.getElementById('mmCanvas');
-      if (canvas.style.display === 'none') initMMCanvas();
-      addMMNode(keyword, color);
+    // 마인드맵 — 계층 구조로 생성
+    if (parsed.mindmap && parsed.mindmap.root) {
+      buildMMFromStructure(parsed.mindmap);
     }
 
   } catch(e) {
     typingEl.remove();
     addMsg('ai', '오류 났어. 다시 해봐 🙏');
+    console.error(e);
   }
   _sending = false;
 }
@@ -1570,13 +1573,57 @@ function addMMNode(text, color) {
   const node = { id: 'n_'+Date.now()+'_'+Math.random(), text, x, y, color: color || MM_COLORS[_mmColorIdx++ % MM_COLORS.length], r: 36 };
   mmNodes.push(node);
   if (mmNodes.length > 1) {
-    // 직전 노드와 자동 연결
     const prev = mmNodes[mmNodes.length - 2];
     mmEdges.push({ from: prev.id, to: node.id });
   }
   if (canvas.style.display === 'none') initMMCanvas();
   else renderMMCanvas();
   return node;
+}
+
+// 계층형 구조로 마인드맵 생성
+function buildMMFromStructure(mm) {
+  const canvas = document.getElementById('mmCanvas');
+  if (canvas.style.display === 'none') initMMCanvas();
+  const W = canvas.width || 600, H = canvas.height || 400;
+  const cx = W/2 - mmTranslate.x, cy = H/2 - mmTranslate.y;
+  const rootColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
+
+  // 루트 노드
+  const rootNode = { id: 'n_'+Date.now(), text: mm.root, x: cx, y: cy, color: rootColor, r: 44 };
+  mmNodes.push(rootNode);
+
+  const children = mm.children || [];
+  const branchAngles = children.length === 1
+    ? [0]
+    : children.map((_, i) => (i / children.length) * Math.PI * 2 - Math.PI/2);
+
+  children.forEach((branch, bi) => {
+    const bColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
+    const bAngle = branchAngles[bi];
+    const bDist = 160;
+    const bx = cx + Math.cos(bAngle) * bDist;
+    const by = cy + Math.sin(bAngle) * bDist;
+    const branchNode = { id: 'n_'+Date.now()+'_'+bi, text: branch.label||branch, x: bx, y: by, color: bColor, r: 36 };
+    mmNodes.push(branchNode);
+    mmEdges.push({ from: rootNode.id, to: branchNode.id });
+
+    // 세부 노드
+    const subs = Array.isArray(branch.children) ? branch.children : [];
+    subs.forEach((sub, si) => {
+      const spread = subs.length === 1 ? 0 : (si - (subs.length-1)/2) * 0.45;
+      const sAngle = bAngle + spread;
+      const sDist = 130;
+      const sx = bx + Math.cos(sAngle) * sDist;
+      const sy = by + Math.sin(sAngle) * sDist;
+      const subNode = { id: 'n_'+Date.now()+'_'+bi+'_'+si, text: sub, x: sx, y: sy, color: bColor, r: 28 };
+      mmNodes.push(subNode);
+      mmEdges.push({ from: branchNode.id, to: subNode.id });
+    });
+  });
+
+  document.getElementById('mmEmpty').style.display = 'none';
+  renderMMCanvas();
 }
 
 function renameMMNode(text) {
@@ -1615,12 +1662,11 @@ function closeMM() {
   renderMMCanvas();
 }
 function clearDump() {
-  // 대화 초기화
   const msgs = document.getElementById('dumpMessages');
   msgs.innerHTML = '<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>지금 머릿속에 있는 거 다 쏟아내봐 🧠<br>할 일, 걱정, 아이디어, 뭐든</div>';
   getDay().dumps = []; save();
-  // 마인드맵 초기화
-  mmNodes = []; mmEdges = []; mmSelected = null; mmConnectFrom = null; _mmColorIdx = 0;
+  _dumpHistory = []; // 대화 히스토리 초기화
+  mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0;
   mmTranslate = {x:0, y:0};
   const canvas = document.getElementById('mmCanvas');
   canvas.style.display = 'none';
