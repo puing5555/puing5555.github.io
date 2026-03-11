@@ -348,13 +348,26 @@ body {
 /* ── 메모 패널 ── */
 .memo-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  gap: 12px; align-content: start;
 }
 .memo-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 14px; padding: 14px; cursor: pointer; transition: all 0.15s;
+  position: relative; height: fit-content;
 }
 .memo-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.memo-card-actions {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s;
+}
+.memo-card:hover .memo-card-actions { opacity: 1; }
+.memo-card-btn {
+  width: 24px; height: 24px; border-radius: 6px; border: none;
+  background: var(--surface2); color: var(--text2); font-size: 12px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.1s;
+}
+.memo-card-btn:hover { background: var(--border2); }
 .memo-cat { font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
 .memo-text { font-size: 13px; color: var(--text); line-height: 1.6; margin-bottom: 8px; }
 .memo-tags { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -751,6 +764,43 @@ body {
 <!-- 숨김 파일 입력 -->
 <input type="file" id="photoInputPC" accept="image/*" multiple style="display:none" onchange="handlePhotoPC(this)">
 
+<!-- 메모 수정 모달 -->
+<div class="modal-overlay" id="editMemoModal">
+  <div class="modal-box">
+    <div class="modal-title">✏️ 메모 수정</div>
+    <input type="hidden" id="editMemoIdx">
+    <div class="form-group">
+      <label class="form-label">카테고리</label>
+      <select class="form-input" id="editMemoCat">
+        <option>💡 아이디어</option><option>💰 투자/BTC</option>
+        <option>🔧 사업</option><option>📚 학습</option>
+        <option>🤝 인사이트</option><option>🗒️ 기타</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">내용</label>
+      <textarea class="form-input form-textarea" id="editMemoText" style="min-height:120px"></textarea>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeModal('editMemoModal')">취소</button>
+      <button class="btn-primary" onclick="saveEditMemo()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 타임피커 모달 -->
+<div class="modal-overlay" id="timepickerModal">
+  <div class="modal-box" style="width:300px">
+    <div class="modal-title">⏰ 시간 배정</div>
+    <div id="timepickerTask" style="font-size:13px;color:var(--text2);margin-bottom:12px"></div>
+    <select id="timepickerSel" class="form-input" size="8" style="height:200px;overflow-y:auto"></select>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="btn-secondary" onclick="closeModal('timepickerModal')">취소</button>
+      <button class="btn-primary" id="timepickerConfirm">확인</button>
+    </div>
+  </div>
+</div>
+
 <!-- API 키 모달 -->
 <div class="modal-overlay" id="apiKeyModal">
   <div class="modal-box" style="width:440px">
@@ -928,7 +978,7 @@ body {
 </div>
 
 <script>
-let _apiKey = '';
+let _apiKey = localStorage.getItem('jay_apiKey') || '';
 function getApiKey() {
   if (!_apiKey) {
     openModal('apiKeyModal');
@@ -940,22 +990,30 @@ function saveApiKey() {
   const k = document.getElementById('apiKeyInput').value.trim();
   if (!k.startsWith('sk-ant-')) { showToast('올바른 API 키가 아니야 (sk-ant-로 시작)'); return; }
   _apiKey = k;
+  localStorage.setItem('jay_apiKey', k);
   closeModal('apiKeyModal');
-  document.getElementById('apiKeyStatus').textContent = '✅';
+  const st = document.getElementById('apiKeyStatus');
+  if (st) st.textContent = '✅';
   showToast('✅ API 키 저장됨');
 }
 
 const PROXY_BASE = 'https://memo-pied-nu.vercel.app/api';
 const TODAY_KEY = new Date().toISOString().slice(0,10).replace(/-/g,'');
 
-// ── 데이터 (모바일과 동일한 localStorage 키 사용) ──
-let allData = {};
-let goals = [];
-let memoData = [];
-let docsData = [];
-let userProfile = {};
+// ── 데이터 — localStorage 영구 저장 ──
+let allData = JSON.parse(localStorage.getItem('jay_allData')||'{}');
+let goals = JSON.parse(localStorage.getItem('jay_goals')||'[]');
+let memoData = JSON.parse(localStorage.getItem('jay_memoData')||'[]');
+let docsData = JSON.parse(localStorage.getItem('jay_docsData')||'[]');
+let userProfile = JSON.parse(localStorage.getItem('jay_profile')||'{}');
 
-function save() { /* in-memory */ }
+function save() {
+  localStorage.setItem('jay_allData', JSON.stringify(allData));
+  localStorage.setItem('jay_goals', JSON.stringify(goals));
+  localStorage.setItem('jay_memoData', JSON.stringify(memoData));
+  localStorage.setItem('jay_docsData', JSON.stringify(docsData));
+  localStorage.setItem('jay_profile', JSON.stringify(userProfile));
+}
 function getDay() {
   if (!allData[TODAY_KEY]) allData[TODAY_KEY] = { tasks:[], schedule:[], dumps:[], diary:'', report:'' };
   return allData[TODAY_KEY];
@@ -1033,7 +1091,13 @@ async function sendDump() {
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
 {"reply":"친구처럼 한마디(구어체 1-2문장)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
-priority: 1=긴급 2=높음 3=보통 4=낮음 / tasks는 모두 오늘 할일로만 추출. schedule은 추출하지 말 것 — 타임라인은 사용자가 직접 배정함`;
+
+할일 추출 규칙 (엄격하게):
+- tasks는 JAY가 명시적으로 "해야 해", "할 거야", "해줘", "처리해야", "확인해야" 등 명확한 액션 동사로 표현한 것만 추출
+- "~하고 있어", "~운영 중이야", "~했어" 처럼 현재 상태나 과거 사실은 tasks에 절대 넣지 말 것
+- 단순 근황 공유나 정보 전달은 memo로 처리
+- 불확실하면 tasks를 비워둘 것 (빈 배열 [])
+- priority: 1=긴급 2=높음 3=보통 4=낮음`;
 
   try {
     let userContent = input;
@@ -1295,6 +1359,8 @@ function setMMMode(mode) {
 function mmNodeAt(x, y) {
   return mmNodes.find(n => Math.hypot(n.x - x, n.y - y) <= n.r);
 }
+let mmSelectedEdge = null; // 선택된 엣지
+
 function mmEdgeNear(x, y) {
   return mmEdges.find(e => {
     const a = mmNodes.find(n => n.id === e.from);
@@ -1303,8 +1369,7 @@ function mmEdgeNear(x, y) {
     const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
     if (len === 0) return false;
     const t = Math.max(0, Math.min(1, ((x-a.x)*dx + (y-a.y)*dy) / (len*len)));
-    const px = a.x + t*dx - x, py = a.y + t*dy - y;
-    return Math.hypot(px, py) < 10;
+    return Math.hypot(a.x + t*dx - x, a.y + t*dy - y) < 12;
   });
 }
 
@@ -1371,15 +1436,26 @@ function initMMCanvas() {
     // normal 모드
     if (hit) {
       mmSelected = hit.id;
+      mmSelectedEdge = null;
       _mmDragging = { id: hit.id, ox: cx - hit.x, oy: cy - hit.y };
       document.getElementById('mmNodeTitle').value = hit.text;
       document.getElementById('mmNodePanel').style.display = 'block';
       renderMMCanvas();
     } else {
-      mmSelected = null;
-      document.getElementById('mmNodePanel').style.display = 'none';
-      _mmPanning = { sx: e.clientX, sy: e.clientY, tx: mmTranslate.x, ty: mmTranslate.y };
-      renderMMCanvas();
+      // 선 클릭 확인
+      const edgeHit = mmEdgeNear(cx, cy);
+      if (edgeHit) {
+        mmSelectedEdge = edgeHit;
+        mmSelected = null;
+        document.getElementById('mmNodePanel').style.display = 'none';
+        renderMMCanvas();
+        showToast('선 선택됨 — Delete 키로 삭제');
+      } else {
+        mmSelected = null; mmSelectedEdge = null;
+        document.getElementById('mmNodePanel').style.display = 'none';
+        _mmPanning = { sx: e.clientX, sy: e.clientY, tx: mmTranslate.x, ty: mmTranslate.y };
+        renderMMCanvas();
+      }
     }
   });
 
@@ -1399,6 +1475,18 @@ function initMMCanvas() {
   });
 
   canvas.addEventListener('pointerup', () => { _mmDragging = null; _mmPanning = null; });
+
+  // Delete 키 → 선택된 선/원 삭제
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (mmSelectedEdge) {
+      mmEdges = mmEdges.filter(ed => ed !== mmSelectedEdge);
+      mmSelectedEdge = null; renderMMCanvas(); showToast('선 삭제됨');
+    } else if (mmSelected) {
+      deleteMMNode();
+    }
+  });
 }
 
 function renderMMCanvas() {
@@ -1416,10 +1504,18 @@ function renderMMCanvas() {
     const a = mmNodes.find(n => n.id === e.from);
     const b = mmNodes.find(n => n.id === e.to);
     if (!a || !b) return;
+    const isSel = e === mmSelectedEdge;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = a.color + '88'; ctx.lineWidth = 2;
-    ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = isSel ? '#e03030' : a.color + '88';
+    ctx.lineWidth = isSel ? 3 : 2;
+    ctx.setLineDash(isSel ? [] : [5, 4]); ctx.stroke(); ctx.setLineDash([]);
+    // 선택된 선 중간점 표시
+    if (isSel) {
+      const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+      ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI*2);
+      ctx.fillStyle = '#e03030'; ctx.fill();
+    }
   });
 
   // connect 모드 첫 선택 하이라이트
@@ -1621,14 +1717,28 @@ function deleteTask(i) {
 function scheduleTask(i) {
   const day = getDay();
   const t = day.tasks[i];
-  const time = prompt(`"${t.text}" 시간 배정 (예: 09:30)`);
-  if (!time) return;
-  // 이미 있으면 업데이트
+  // 기존 시간배정 확인
   const exist = day.schedule.find(s => s.task === t.text);
-  if (exist) { exist.time = time; }
-  else { day.schedule.push({ time, task: t.text, note: '' }); }
-  save(); renderSchedule();
-  showToast(`⏰ ${time} 타임라인 추가됨`);
+  const currentTime = exist ? exist.time : '';
+  // 30분 단위 시간 목록 생성
+  const times = [];
+  for (let h = 0; h < 24; h++) {
+    times.push(`${String(h).padStart(2,'0')}:00`);
+    times.push(`${String(h).padStart(2,'0')}:30`);
+  }
+  // 드롭다운 모달 표시
+  document.getElementById('timepickerTask').textContent = `"${t.text.slice(0,20)}"`;
+  const sel = document.getElementById('timepickerSel');
+  sel.innerHTML = times.map(tm => `<option value="${tm}" ${tm===currentTime?'selected':''}>${tm}</option>`).join('');
+  document.getElementById('timepickerConfirm').onclick = () => {
+    const time = sel.value;
+    if (exist) { exist.time = time; }
+    else { day.schedule.push({ time, task: t.text, note: '' }); }
+    save(); renderSchedule();
+    closeModal('timepickerModal');
+    showToast(`⏰ ${time} 타임라인 추가됨`);
+  };
+  openModal('timepickerModal');
 }
 function renderSchedule() {
   const day = getDay();
@@ -1845,19 +1955,46 @@ function filterMemo(cat, el) {
   renderMemoGrid(cat);
 }
 
-// Feature 7: Updated renderMemoGrid with openMemoView onclick
 function renderMemoGrid(cat) {
   const el = document.getElementById('memoGrid');
   const filtered = cat==='전체' ? memoData : memoData.filter(m=>m.category===cat);
   if (!filtered.length) { el.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🗂️</div><div class="empty-text">메모가 없어</div></div>'; return; }
   el.innerHTML = filtered.map((m) => {
-    const realIdx = memoData.indexOf(m);
-    return `<div class="memo-card" onclick="openMemoView(${realIdx})">
+    const ri = memoData.indexOf(m);
+    return `<div class="memo-card">
+      <div class="memo-card-actions">
+        <button class="memo-card-btn" onclick="event.stopPropagation();editMemo(${ri})" title="수정">✏️</button>
+        <button class="memo-card-btn" onclick="event.stopPropagation();chatMemo(${ri})" title="AI 대화">💬</button>
+        <button class="memo-card-btn" onclick="event.stopPropagation();deleteMemoCard(${ri})" title="삭제" style="color:var(--red)">✕</button>
+      </div>
       <div class="memo-cat">${m.category}</div>
       <div class="memo-text">${m.text.slice(0,120)}${m.text.length>120?'...':''}</div>
       <div class="memo-tags">${(m.tags||[]).map(t=>`<span class="memo-tag">${t}</span>`).join('')}</div>
     </div>`;
   }).join('');
+}
+function editMemo(i) {
+  const m = memoData[i];
+  document.getElementById('editMemoIdx').value = i;
+  document.getElementById('editMemoText').value = m.text;
+  document.getElementById('editMemoCat').value = m.category;
+  openModal('editMemoModal');
+}
+function saveEditMemo() {
+  const i = parseInt(document.getElementById('editMemoIdx').value);
+  memoData[i].text = document.getElementById('editMemoText').value;
+  memoData[i].category = document.getElementById('editMemoCat').value;
+  save(); closeModal('editMemoModal'); renderMemo();
+}
+function chatMemo(i) {
+  const text = memoData[i].text;
+  switchPanel('dump', document.querySelector('.nav-btn'));
+  setTimeout(() => analyzeText(text), 150);
+}
+function deleteMemoCard(i) {
+  memoData.splice(i, 1);
+  save(); renderMemo();
+  showToast('메모 삭제됨');
 }
 
 function openAddMemo() { openModal('addMemoModal'); }
@@ -1988,7 +2125,7 @@ function saveProfile() {
   document.getElementById('profileName').textContent = userProfile.name||'JAY';
   document.getElementById('profileJob').textContent = userProfile.job||'설정하기 →';
   document.getElementById('profileAvatar').textContent = (userProfile.name||'J')[0].toUpperCase();
-  /* saved in-memory */
+  save();
   closeModal('profileModal');
   showToast('저장됨');
 }
@@ -2030,6 +2167,17 @@ function init() {
   renderTasks();
   renderRightGoals();
   renderMiniCal();
+  // API 키 이미 있으면 아이콘 표시
+  if (_apiKey) {
+    const st = document.getElementById('apiKeyStatus');
+    if (st) st.textContent = '✅';
+  }
+  // 프로필 복원
+  if (userProfile.name) {
+    document.getElementById('profileName').textContent = userProfile.name;
+    document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
+    document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
+  }
 }
 
 window.onload = init;
