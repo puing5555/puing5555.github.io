@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JAY Daily OS · PC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f0eb;
+  --surface: #ffffff;
+  --surface2: #f0ebe5;
+  --surface3: #e8e2db;
+  --border: #ede8e3;
+  --border2: #e0d9d2;
+  --accent: #ff6f0f;
+  --accent-dim: rgba(255,111,15,0.08);
+  --text: #212121;
+  --text2: #6d6360;
+  --muted: #b3a9a4;
+  --red: #e03030;
+  --yellow: #e07b00;
+  --blue: #2277dd;
+  --purple: #7755cc;
+  --green: #00aa66;
+  --sidebar-w: 220px;
+  --right-w: 340px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Noto Sans KR', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  font-size: 14px;
+}
+
+/* ── 왼쪽 사이드바 ── */
+#sidebar {
+  width: var(--sidebar-w);
+  height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-logo {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-logo-title {
+  font-size: 15px; font-weight: 800; color: var(--text); letter-spacing: -0.5px;
+}
+.sidebar-logo-sub {
+  font-size: 11px; color: var(--muted); margin-top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.sidebar-date {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-date-day {
+  font-size: 28px; font-weight: 800; color: var(--text); letter-spacing: -1px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.sidebar-date-str {
+  font-size: 11px; color: var(--muted); margin-top: 2px; font-weight: 500;
+}
+
+.sidebar-nav {
+  flex: 1; padding: 10px 10px; overflow-y: auto;
+}
+.nav-section-label {
+  font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1px;
+  text-transform: uppercase; padding: 10px 10px 4px;
+}
+.nav-btn {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 10px; border: none;
+  background: transparent; color: var(--text2); font-size: 13px; font-weight: 500;
+  cursor: pointer; font-family: inherit; text-align: left; transition: all 0.15s;
+}
+.nav-btn:hover { background: var(--surface2); color: var(--text); }
+.nav-btn.on { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+.nav-btn .nav-icon { font-size: 16px; width: 22px; text-align: center; }
+.nav-badge {
+  margin-left: auto; background: var(--accent); color: #fff;
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 100px;
+}
+
+.sidebar-profile {
+  padding: 14px 16px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+}
+.sidebar-profile:hover { background: var(--surface2); }
+.profile-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-weight: 800; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.profile-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.profile-job { font-size: 11px; color: var(--muted); }
+
+/* ── 중앙 메인 ── */
+#main {
+  flex: 1; height: 100vh; display: flex; flex-direction: column;
+  min-width: 0; overflow: hidden;
+}
+
+.main-header {
+  padding: 16px 24px; border-bottom: 1px solid var(--border);
+  background: var(--surface); display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
+}
+.main-header-title {
+  font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: -0.5px;
+}
+.main-header-sub { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+.main-content {
+  flex: 1; overflow-y: auto; padding: 20px 24px;
+}
+
+/* 패널들 */
+.panel { display: none; flex-direction: column; gap: 16px; height: 100%; }
+.panel.active { display: flex; }
+
+/* ── 덤프 패널 (중앙) ── */
+#panel-dump {
+  display: none; flex-direction: row; gap: 0; height: 100%; overflow: hidden;
+}
+#panel-dump.active { display: flex; }
+
+.dump-chat-col {
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
+  border-right: 1px solid var(--border);
+}
+.dump-map-col {
+  width: 360px; display: flex; flex-direction: column; flex-shrink: 0;
+  background: var(--surface2);
+}
+.dump-col-hdr {
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  letter-spacing: 0.5px; text-transform: uppercase; background: var(--surface);
+  flex-shrink: 0;
+}
+
+.dump-messages {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.msg-user {
+  align-self: flex-end; background: var(--accent); color: #fff;
+  padding: 10px 14px; border-radius: 16px 16px 4px 16px;
+  font-size: 13px; max-width: 80%; line-height: 1.6;
+}
+.msg-ai {
+  align-self: flex-start; background: var(--surface);
+  border: 1px solid var(--border); padding: 12px 14px;
+  border-radius: 4px 16px 16px 16px; font-size: 13px;
+  max-width: 85%; line-height: 1.7;
+}
+.msg-ai-name {
+  font-size: 10px; font-weight: 700; color: var(--accent);
+  letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 4px;
+}
+.msg-meta {
+  align-self: center; font-size: 11px; color: var(--muted);
+  background: var(--surface2); padding: 4px 10px; border-radius: 100px;
+}
+
+.dump-input-area {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+.dump-input-row {
+  display: flex; gap: 8px; align-items: flex-end;
+}
+.dump-ta {
+  flex: 1; border: 1.5px solid var(--border2); border-radius: 12px;
+  padding: 10px 14px; font-size: 13px; font-family: inherit;
+  resize: none; outline: none; background: var(--surface2);
+  color: var(--text); line-height: 1.5; max-height: 120px;
+  transition: border-color 0.15s;
+}
+.dump-ta:focus { border-color: var(--accent); background: var(--surface); }
+.dump-send {
+  width: 38px; height: 38px; border-radius: 50%; border: none;
+  background: var(--accent); color: #fff; font-size: 16px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: opacity 0.15s;
+}
+.dump-send:hover { opacity: 0.85; }
+.dump-icon-btn {
+  width: 34px; height: 34px; border-radius: 50%; border: none;
+  background: var(--surface3); color: var(--text2); font-size: 15px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+
+/* 마인드맵 */
+#mmSvg { flex: 1; width: 100%; touch-action: none; }
+.mm-empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px; color: var(--muted); padding: 24px; text-align: center;
+}
+.mm-empty-icon { font-size: 36px; opacity: 0.2; }
+.mm-empty-text { font-size: 12px; line-height: 1.7; }
+#mmNodePanel {
+  display: none; border-top: 1px solid var(--border);
+  padding: 12px 14px; background: var(--surface); flex-shrink: 0;
+}
+#mmNodeTitle { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.mm-node-btns { display: flex; gap: 6px; }
+.mm-node-btn {
+  flex: 1; padding: 7px; border-radius: 8px; border: none;
+  font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+
+/* ── 오늘 패널 ── */
+#panel-today { overflow: hidden; }
+.today-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; height: 100%;
+}
+.today-col {
+  background: var(--surface); border-radius: 16px; border: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.col-hdr {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.col-hdr-title { font-size: 14px; font-weight: 800; color: var(--text); }
+.col-hdr-cnt {
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+  padding: 1px 7px; border-radius: 100px;
+}
+.col-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+/* 태스크 카드 */
+.task-card {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border);
+  margin-bottom: 6px; background: var(--surface); cursor: pointer;
+  transition: border-color 0.15s;
+}
+.task-card:hover { border-color: var(--border2); }
+.task-card.done { opacity: 0.45; }
+.task-check {
+  width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--border2);
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s; margin-top: 1px;
+}
+.task-check.checked { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 11px; }
+.task-text { font-size: 13px; color: var(--text); flex: 1; line-height: 1.5; }
+.task-card.done .task-text { text-decoration: line-through; color: var(--muted); }
+.task-pri {
+  width: 4px; border-radius: 2px; flex-shrink: 0; align-self: stretch;
+}
+
+/* 타임라인 */
+.timeline-item {
+  display: flex; gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline-time {
+  font-size: 12px; font-weight: 700; color: var(--accent);
+  font-family: 'JetBrains Mono', monospace; width: 44px; flex-shrink: 0; padding-top: 2px;
+}
+.timeline-task { font-size: 13px; color: var(--text); flex: 1; }
+.timeline-note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* 빠른 추가 */
+.quick-add {
+  display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.quick-input {
+  flex: 1; border: 1.5px solid var(--border2); border-radius: 10px;
+  padding: 8px 12px; font-size: 13px; font-family: inherit;
+  outline: none; background: var(--surface2);
+}
+.quick-input:focus { border-color: var(--accent); }
+.quick-btn {
+  padding: 8px 14px; border-radius: 10px; border: none;
+  background: var(--accent); color: #fff; font-size: 13px;
+  font-weight: 700; cursor: pointer; font-family: inherit;
+}
+
+/* ── 목표 패널 ── */
+.goal-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 16px; margin-bottom: 10px;
+  display: flex; gap: 12px; cursor: pointer; transition: border-color 0.15s;
+}
+.goal-card:hover { border-color: var(--border2); }
+.goal-bar { width: 4px; border-radius: 2px; flex-shrink: 0; }
+.goal-body { flex: 1; min-width: 0; }
+.goal-text { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.goal-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.goal-tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 100px;
+  font-weight: 600;
+}
+.goal-progress { margin-top: 8px; }
+.progress-bar {
+  height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden;
+}
+.progress-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+
+/* 목표 상세 */
+#goalDetail {
+  display: none; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px; margin-bottom: 16px;
+}
+#goalDetail.open { display: block; }
+.action-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.action-check {
+  width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--border2);
+  flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.action-check.checked { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 10px; }
+.action-text { flex: 1; font-size: 13px; color: var(--text); }
+
+/* ── 메모 패널 ── */
+.memo-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.memo-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px; cursor: pointer; transition: all 0.15s;
+}
+.memo-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.memo-cat { font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
+.memo-text { font-size: 13px; color: var(--text); line-height: 1.6; margin-bottom: 8px; }
+.memo-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.memo-tag {
+  font-size: 10px; padding: 2px 7px; border-radius: 100px;
+  background: var(--surface2); color: var(--text2);
+}
+
+/* ── 문서 패널 ── */
+.doc-list { display: flex; flex-direction: column; gap: 8px; }
+.doc-item {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; cursor: pointer;
+  display: flex; align-items: center; gap: 12px; transition: all 0.15s;
+}
+.doc-item:hover { border-color: var(--border2); }
+.doc-section-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.doc-title { font-size: 14px; font-weight: 700; color: var(--text); flex: 1; }
+.doc-date { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+/* ── 오른쪽 패널 ── */
+#rightPanel {
+  width: var(--right-w); height: 100vh; background: var(--surface);
+  border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  flex-shrink: 0;
+}
+.right-hdr {
+  padding: 16px 18px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 800; color: var(--text);
+  display: flex; align-items: center; gap: 8px;
+}
+.right-section {
+  border-bottom: 1px solid var(--border); padding: 14px 16px;
+}
+.right-section-title {
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 10px;
+}
+
+/* 목표 실행계획 (오른쪽) */
+.right-goal-card {
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+  margin-bottom: 6px; cursor: pointer; transition: all 0.15s;
+}
+.right-goal-card:hover { border-color: var(--accent); }
+.right-goal-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+.right-goal-text { font-size: 13px; font-weight: 600; color: var(--text); }
+.right-goal-progress { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+/* 캘린더 미니 */
+.mini-cal { }
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  text-align: center;
+}
+.cal-day-label { font-size: 10px; color: var(--muted); font-weight: 600; padding: 2px 0; }
+.cal-day {
+  font-size: 12px; padding: 4px 2px; border-radius: 6px;
+  cursor: pointer; transition: all 0.15s;
+}
+.cal-day:hover { background: var(--surface2); }
+.cal-day.today { background: var(--accent); color: #fff; font-weight: 700; }
+.cal-day.other-month { color: var(--muted); }
+
+/* 다이어리 */
+.diary-box {
+  background: var(--surface2); border-radius: 10px; padding: 12px;
+  font-size: 12px; color: var(--text2); line-height: 1.7;
+}
+.diary-gen-btn {
+  width: 100%; padding: 9px; border-radius: 10px; border: 1.5px solid var(--border2);
+  background: transparent; color: var(--text2); font-size: 12px;
+  cursor: pointer; font-family: inherit; margin-top: 8px;
+  transition: all 0.15s;
+}
+.diary-gen-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 공통 */
+.empty { text-align: center; padding: 32px 16px; color: var(--muted); }
+.empty-icon { font-size: 32px; opacity: 0.3; margin-bottom: 8px; }
+.empty-text { font-size: 13px; line-height: 1.6; }
+
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.chip {
+  padding: 5px 12px; border-radius: 100px; border: 1.5px solid var(--border2);
+  background: transparent; color: var(--text2); font-size: 12px;
+  cursor: pointer; font-family: inherit; font-weight: 500; transition: all 0.15s;
+}
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+/* 로딩 dots */
+@keyframes dotBounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
+.dots span {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); margin: 0 2px; animation: dotBounce 1.2s infinite;
+}
+.dots span:nth-child(2) { animation-delay: 0.2s; }
+.dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* 긴 텍스트 → 문서 썸네일 카드 */
+.doc-thumb-wrap {
+  align-self: flex-end; max-width: 340px;
+  display: flex; flex-direction: column; gap: 0;
+}
+.doc-thumb-card {
+  background: var(--surface); border: 1.5px solid var(--border2);
+  border-radius: 14px 14px 0 0; overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08); cursor: pointer;
+}
+.doc-thumb-canvas-wrap {
+  position: relative; background: #fff; overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+.doc-thumb-canvas-wrap canvas { display: block; width: 100%; }
+.doc-thumb-canvas-wrap::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+  height: 48px; background: linear-gradient(transparent, rgba(255,255,255,0.95));
+  pointer-events: none;
+}
+.doc-thumb-info {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; background: var(--surface);
+}
+.doc-thumb-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: var(--accent-dim); display: flex; align-items: center;
+  justify-content: center; font-size: 16px; flex-shrink: 0;
+}
+.doc-thumb-meta { flex: 1; min-width: 0; }
+.doc-thumb-title { font-size: 12px; font-weight: 700; color: var(--text); }
+.doc-thumb-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.doc-thumb-footer {
+  display: flex; gap: 6px; padding: 8px 10px;
+  background: var(--surface2); border: 1.5px solid var(--border2);
+  border-top: none; border-radius: 0 0 14px 14px;
+}
+.ltc-btn {
+  flex: 1; padding: 7px 4px; border-radius: 8px; border: none;
+  font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
+  transition: opacity 0.15s; text-align: center;
+}
+.ltc-btn:hover { opacity: 0.8; }
+#docViewContent {
+  white-space: pre-wrap; font-size: 13px; color: var(--text2);
+  line-height: 1.8; max-height: 60vh; overflow-y: auto;
+  background: var(--surface2); border-radius: 10px; padding: 16px;
+  margin-top: 12px;
+}
+
+/* 스크롤바 */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* 토스트 */
+#toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: #fff; padding: 10px 20px; border-radius: 100px;
+  font-size: 13px; font-weight: 500; z-index: 9999; opacity: 0;
+  transition: opacity 0.3s; pointer-events: none;
+}
+
+/* 모달 오버레이 */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  z-index: 100; display: none; align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: var(--surface); border-radius: 20px; padding: 24px;
+  width: 480px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+}
+.modal-title { font-size: 17px; font-weight: 800; color: var(--text); margin-bottom: 16px; }
+.form-group { margin-bottom: 14px; }
+.form-label { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px; display: block; }
+.form-input {
+  width: 100%; border: 1.5px solid var(--border2); border-radius: 10px;
+  padding: 9px 12px; font-size: 13px; font-family: inherit;
+  outline: none; background: var(--surface2);
+}
+.form-input:focus { border-color: var(--accent); }
+.form-textarea { resize: vertical; min-height: 80px; }
+.modal-btns { display: flex; gap: 8px; margin-top: 16px; }
+.btn-primary {
+  flex: 1; padding: 11px; border-radius: 12px; border: none;
+  background: var(--accent); color: #fff; font-size: 14px;
+  font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.btn-secondary {
+  padding: 11px 18px; border-radius: 12px; border: 1.5px solid var(--border2);
+  background: transparent; color: var(--text2); font-size: 14px;
+  cursor: pointer; font-family: inherit;
+}
+</style>
+</head>
+<body>
+
+<!-- 사이드바 -->
+<div id="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-title">🧠 JAY Daily OS</div>
+    <div class="sidebar-logo-sub" id="sidebarDate">loading...</div>
+  </div>
+
+  <div class="sidebar-date">
+    <div class="sidebar-date-day" id="sidebarDay">--</div>
+    <div class="sidebar-date-str" id="sidebarDayStr">--</div>
+  </div>
+
+  <div class="sidebar-nav">
+    <div class="nav-section-label">워크스페이스</div>
+    <button class="nav-btn on" onclick="switchPanel('dump',this)">
+      <span class="nav-icon">🧠</span> 브레인덤프
+    </button>
+    <button class="nav-btn" onclick="switchPanel('today',this)">
+      <span class="nav-icon">📋</span> 오늘
+      <span class="nav-badge" id="taskBadge" style="display:none">0</span>
+    </button>
+
+    <div class="nav-section-label" style="margin-top:8px">정리</div>
+    <button class="nav-btn" onclick="switchPanel('goals',this)">
+      <span class="nav-icon">🎯</span> 목표
+    </button>
+    <button class="nav-btn" onclick="switchPanel('memo',this)">
+      <span class="nav-icon">🗂️</span> 메모
+    </button>
+    <button class="nav-btn" onclick="switchPanel('docs',this)">
+      <span class="nav-icon">📄</span> 문서
+    </button>
+  </div>
+
+  <!-- Feature 1: Daily Report Button -->
+  <div style="padding:8px 10px;border-top:1px solid var(--border)">
+    <button class="nav-btn" onclick="openDailyReport()" style="color:var(--accent);font-weight:700">
+      <span class="nav-icon">📊</span> 오늘 리포트
+    </button>
+  </div>
+
+  <div class="sidebar-profile" onclick="openProfileModal()">
+    <div class="profile-avatar" id="profileAvatar">J</div>
+    <div>
+      <div class="profile-name" id="profileName">JAY</div>
+      <div class="profile-job" id="profileJob">설정하기 →</div>
+    </div>
+  </div>
+</div>
+
+<!-- 메인 -->
+<div id="main">
+  <div class="main-header">
+    <div class="main-header-title" id="mainTitle">🧠 브레인덤프</div>
+    <div class="main-header-sub" id="mainSub"></div>
+  </div>
+
+  <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+
+    <!-- 덤프 패널 -->
+    <div id="panel-dump" class="active" style="flex:1;overflow:hidden">
+      <div class="dump-chat-col">
+        <div class="dump-col-hdr">💬 대화</div>
+        <div class="dump-messages" id="dumpMessages">
+          <div class="msg-ai">
+            <div class="msg-ai-name">JAY AI</div>
+            지금 머릿속에 있는 거 다 쏟아내봐 🧠<br>할 일, 걱정, 아이디어, 뭐든
+          </div>
+        </div>
+        <div class="dump-input-area">
+          <div class="dump-input-row">
+            <textarea class="dump-ta" id="dumpInput" rows="1" placeholder="지금 머릿속에 있는 거 쏟아내..."
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';clearTimeout(window._dumpTimer)"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendDump()}"></textarea>
+            <button class="dump-icon-btn" onclick="triggerPhotoPC()" title="사진">📷</button>
+            <button class="dump-icon-btn" onclick="startVoicePC()" id="voiceBtnPC" title="음성">🎙</button>
+            <button class="dump-send" onclick="sendDump()">↑</button>
+          </div>
+        </div>
+      </div>
+      <div class="dump-map-col">
+        <div class="dump-col-hdr">🗺 마인드맵</div>
+        <div id="mmEmpty" class="mm-empty">
+          <div class="mm-empty-icon">🗺</div>
+          <div class="mm-empty-text">덤프에 생각을 입력하면<br>마인드맵이 펼쳐져<br><span style="color:var(--accent);font-weight:600">노드 클릭 → AI 확장</span></div>
+        </div>
+        <svg id="mmSvg" style="display:none;flex:1;width:100%;touch-action:none"></svg>
+        <div id="mmNodePanel">
+          <div id="mmNodeTitle"></div>
+          <div class="mm-node-btns">
+            <button class="mm-node-btn" onclick="expandMM()" style="background:var(--accent);color:#fff">🤖 AI 확장</button>
+            <button class="mm-node-btn" onclick="mmToChat()" style="background:var(--surface2);color:var(--text2)">💬 대화로</button>
+            <button class="mm-node-btn" onclick="closeMM()" style="background:var(--surface2);color:var(--muted);flex:0;padding:7px 12px">✕</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 오늘 패널 -->
+    <div id="panel-today" class="panel" style="padding:20px 24px">
+      <div class="chip-row">
+        <button class="chip on" onclick="filterTasks('today',this)">오늘</button>
+        <button class="chip" onclick="filterTasks('tomorrow',this)">내일</button>
+        <button class="chip" onclick="filterTasks('week',this)">이번주</button>
+        <button class="chip" onclick="filterTasks('later',this)">나중에</button>
+      </div>
+      <div class="today-grid" style="flex:1;overflow:hidden">
+        <div class="today-col">
+          <div class="col-hdr">
+            <span class="col-hdr-title">할 일</span>
+            <span class="col-hdr-cnt" id="taskCnt">0</span>
+            <button onclick="openAddTask()" style="margin-left:auto;padding:5px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ 추가</button>
+          </div>
+          <div class="col-body" id="taskList"></div>
+        </div>
+        <div class="today-col">
+          <div class="col-hdr">
+            <span class="col-hdr-title">타임라인</span>
+            <button onclick="openAddSchedule()" style="margin-left:auto;padding:5px 12px;border-radius:8px;border:none;background:var(--surface2);color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:1px solid var(--border2)">+ 일정</button>
+          </div>
+          <div class="col-body" id="scheduleList"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 목표 패널 -->
+    <div id="panel-goals" class="panel" style="padding:20px 24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:13px;color:var(--muted)">목표를 클릭하면 실행계획이 펼쳐져</div>
+        <button onclick="openAddGoal()" style="padding:8px 16px;border-radius:100px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+ 목표 추가</button>
+      </div>
+      <div id="goalDetailBox" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px"></div>
+      <div id="goalList" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+    <!-- 메모 패널 -->
+    <div id="panel-memo" class="panel" style="padding:20px 24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="chip-row" style="margin:0" id="memoCatChips"></div>
+        <button onclick="openAddMemo()" style="padding:8px 16px;border-radius:100px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">+ 메모</button>
+      </div>
+      <div id="memoGrid" class="memo-grid" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+    <!-- 문서 패널 -->
+    <div id="panel-docs" class="panel" style="padding:20px 24px">
+      <div id="docSectionChips" class="chip-row" style="margin-bottom:16px"></div>
+      <div id="docList" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 오른쪽 패널 -->
+<div id="rightPanel">
+  <div class="right-hdr" style="display:flex;align-items:center;justify-content:space-between">
+    <span>🎯 목표 상기판</span>
+    <button onclick="openAddGoal()" style="padding:4px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">+ 추가</button>
+  </div>
+
+  <!-- 오늘 현황 (작게) -->
+  <div class="right-section">
+    <div class="right-section-title">오늘 현황</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div style="background:var(--surface2);border-radius:10px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--text);font-family:'JetBrains Mono',monospace" id="statDone">0/0</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">할일 완료</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--accent);font-family:'JetBrains Mono',monospace" id="statGoals">0</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">목표 수</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 목표 목록 (크게, 스크롤) -->
+  <div style="flex:1;overflow-y:auto;padding:12px 14px" id="rightGoalList">
+    <div class="empty"><div class="empty-icon">🎯</div><div class="empty-text">목표를 추가해봐<br>항상 여기서 볼 수 있어</div></div>
+  </div>
+
+  <!-- 일기 -->
+  <div class="right-section" style="flex-shrink:0">
+    <div class="right-section-title">오늘 일기</div>
+    <div class="diary-box" id="diaryBox">아직 일기가 없어</div>
+    <button class="diary-gen-btn" onclick="generateDiary()">✨ AI 일기 생성</button>
+  </div>
+</div>
+
+<!-- 숨김 파일 입력 -->
+<input type="file" id="photoInputPC" accept="image/*" multiple style="display:none" onchange="handlePhotoPC(this)">
+
+<!-- docViewModal -->
+<div class="modal-overlay" id="docViewModal">
+  <div class="modal-box" style="width:600px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="modal-title" style="margin:0">📄 전체 텍스트</div>
+      <button onclick="closeModal('docViewModal')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div id="docViewText" style="white-space:pre-wrap;font-size:13px;color:var(--text2);line-height:1.8;max-height:60vh;overflow-y:auto;background:var(--surface2);border-radius:10px;padding:16px;margin-top:12px"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-primary" onclick="analyzeText(document.getElementById('docViewText').textContent);closeModal('docViewModal')">🤖 분석해줘</button>
+      <button class="btn-secondary" onclick="closeModal('docViewModal')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Feature 2a: reportModal -->
+<div class="modal-overlay" id="reportModal">
+  <div class="modal-box" style="width:560px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div class="modal-title" style="margin:0">📊 오늘 데일리 리포트</div>
+      <button onclick="closeModal('reportModal')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div id="reportContent" style="font-size:13px;color:var(--text2);line-height:1.8;max-height:60vh;overflow-y:auto;background:var(--surface2);border-radius:10px;padding:16px"></div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="btn-primary" onclick="openDailyReport()">🔄 새로 생성</button>
+      <button class="btn-secondary" onclick="closeModal('reportModal')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Feature 2b: memoViewModal -->
+<div class="modal-overlay" id="memoViewModal">
+  <div class="modal-box" style="width:520px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div id="memoViewCat" style="font-size:11px;font-weight:700;color:var(--accent)"></div>
+      <button onclick="closeModal('memoViewModal')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div id="memoViewText" style="white-space:pre-wrap;font-size:13px;color:var(--text);line-height:1.8;max-height:55vh;overflow-y:auto;background:var(--surface2);border-radius:10px;padding:16px;margin-top:8px"></div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="btn-primary" onclick="analyzeMemoView()">🤖 AI 분석</button>
+      <button class="btn-secondary" onclick="deleteMemoView()" style="color:var(--red);border-color:var(--red)">🗑️ 삭제</button>
+      <button class="btn-secondary" onclick="closeModal('memoViewModal')">닫기</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- 모달들 -->
+<div class="modal-overlay" id="profileModal">
+  <div class="modal-box">
+    <div class="modal-title">⚙️ 프로필 설정</div>
+    <div class="form-group">
+      <label class="form-label">이름</label>
+      <input class="form-input" id="pName" placeholder="JAY">
+    </div>
+    <div class="form-group">
+      <label class="form-label">하는 일</label>
+      <textarea class="form-input form-textarea" id="pJob" placeholder="한국 기업가, 태국 거주..."></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">오늘 집중할 것</label>
+      <input class="form-input" id="pFocus" placeholder="오늘 가장 중요한 것">
+    </div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeModal('profileModal')">취소</button>
+      <button class="btn-primary" onclick="saveProfile()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addTaskModal">
+  <div class="modal-box">
+    <div class="modal-title">✅ 할일 추가</div>
+    <div class="form-group">
+      <label class="form-label">할일</label>
+      <input class="form-input" id="newTaskText" placeholder="무엇을 해야 해?" onkeydown="if(event.key==='Enter')saveTask()">
+    </div>
+    <div class="form-group">
+      <label class="form-label">언제</label>
+      <select class="form-input" id="newTaskWhen">
+        <option value="today">오늘</option>
+        <option value="tomorrow">내일</option>
+        <option value="week">이번주</option>
+        <option value="later">나중에</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">우선순위</label>
+      <select class="form-input" id="newTaskPri">
+        <option value="1">🔴 긴급</option>
+        <option value="2" selected>🟠 높음</option>
+        <option value="3">🟡 보통</option>
+        <option value="4">⚪ 낮음</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeModal('addTaskModal')">취소</button>
+      <button class="btn-primary" onclick="saveTask()">추가</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addGoalModal">
+  <div class="modal-box">
+    <div class="modal-title">🎯 목표 추가</div>
+    <div class="form-group">
+      <label class="form-label">목표</label>
+      <input class="form-input" id="newGoalText" placeholder="무엇을 이루고 싶어?">
+    </div>
+    <div class="form-group">
+      <label class="form-label">이유</label>
+      <input class="form-input" id="newGoalWhy" placeholder="왜 중요해?">
+    </div>
+    <div class="form-group">
+      <label class="form-label">마감</label>
+      <input class="form-input" type="date" id="newGoalDeadline">
+    </div>
+    <div class="form-group">
+      <label class="form-label">유형</label>
+      <select class="form-input" id="newGoalType">
+        <option value="life">🌟 인생</option>
+        <option value="long">📅 장기 (1년+)</option>
+        <option value="mid">📆 중기 (3-6개월)</option>
+        <option value="short">⚡ 단기 (1개월)</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeModal('addGoalModal')">취소</button>
+      <button class="btn-primary" onclick="saveGoal()">추가</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addMemoModal">
+  <div class="modal-box">
+    <div class="modal-title">🗂️ 메모 추가</div>
+    <div class="form-group">
+      <label class="form-label">카테고리</label>
+      <select class="form-input" id="newMemoCat">
+        <option>💡 아이디어</option>
+        <option>💰 투자/BTC</option>
+        <option>🔧 사업</option>
+        <option>📚 학습</option>
+        <option>🤝 인사이트</option>
+        <option>🗒️ 기타</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">내용</label>
+      <textarea class="form-input form-textarea" id="newMemoText" placeholder="생각을 자유롭게..."></textarea>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeModal('addMemoModal')">취소</button>
+      <button class="btn-primary" onclick="saveMemo()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const PROXY_BASE = 'https://memo-pied-nu.vercel.app/api';
+const TODAY_KEY = new Date().toISOString().slice(0,10).replace(/-/g,'');
+
+// ── 데이터 (모바일과 동일한 localStorage 키 사용) ──
+let allData = {};
+let goals = [];
+let memoData = [];
+let docsData = [];
+let userProfile = {};
+
+function save() { /* in-memory */ }
+function getDay() {
+  if (!allData[TODAY_KEY]) allData[TODAY_KEY] = { tasks:[], schedule:[], dumps:[], diary:'', report:'' };
+  return allData[TODAY_KEY];
+}
+
+// ── 날짜 ──
+function initDate() {
+  const now = new Date();
+  const days = ['일','월','화','수','목','금','토'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('sidebarDay').textContent = now.getDate();
+  document.getElementById('sidebarDayStr').textContent = `${days[now.getDay()]}요일 · ${months[now.getMonth()]} ${now.getFullYear()}`;
+  document.getElementById('sidebarDate').textContent = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+}
+
+// ── 패널 전환 ──
+let currentPanel = 'dump';
+function switchPanel(name, el) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('on'));
+  if (el) el.classList.add('on');
+  document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById('panel-' + name);
+  if (panel) panel.classList.add('active');
+  currentPanel = name;
+  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', goals:'🎯 목표', memo:'🗂️ 메모', docs:'📄 문서' };
+  document.getElementById('mainTitle').textContent = titles[name] || name;
+  if (name === 'today') renderTasks();
+  if (name === 'goals') renderGoals();
+  if (name === 'memo') renderMemo();
+  if (name === 'docs') renderDocs();
+}
+
+// ── API ──
+async function callClaude(messages, system) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 4000, system, messages })
+  });
+  const data = await res.json();
+  return data.content[0].text;
+}
+
+// ── 덤프 ──
+let _sending = false;
+let _attachedPhotos = [];
+let mmData = { root: null };
+let mmSelected = null;
+let mmOffset = { x:0, y:0 };
+const MM_COLORS = ['#ff6f0f','#7755cc','#2277dd','#e07b00','#e03030','#00aa66'];
+
+async function sendDump() {
+  const ta = document.getElementById('dumpInput');
+  const input = ta.value.trim();
+  if (!input || _sending) return;
+
+  // 유튜브 URL 감지
+  const ytMatch = input.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/);
+  if (ytMatch && input.length < 120) {
+    ta.value = ''; ta.style.height = 'auto';
+    showYtOptions(input, ytMatch[1]);
+    return;
+  }
+
+  _sending = true;
+  const msgs = document.getElementById('dumpMessages');
+  addMsg('user', input);
+  ta.value = ''; ta.style.height = 'auto';
+
+  const typingEl = document.createElement('div');
+  typingEl.className = 'msg-ai';
+  typingEl.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>';
+  msgs.appendChild(typingEl); msgs.scrollTop = msgs.scrollHeight;
+
+  const day = getDay();
+  day.dumps.push({ time: new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text: input.slice(0,200) }); save();
+
+  const profileCtx = userProfile.name ? `JAY 프로필: ${userProfile.name}, ${userProfile.job||''}, 집중: ${userProfile.focus||''}` : '';
+  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
+반드시 JSON만 응답:
+{"reply":"친구처럼 한마디(구어체 1-2문장)","tasks":[{"text":"할일","priority":2,"when":"today","urgent":false}],"schedule":[{"time":"09:00","task":"","note":""}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
+priority: 1=긴급 2=높음 3=보통 4=낮음 / when: today tomorrow week later`;
+
+  try {
+    let userContent = input;
+    if (_attachedPhotos.length) {
+      userContent = [..._attachedPhotos.map(p => ({ type:'image', source:{type:'base64', media_type:p.mime, data:p.base64}})), {type:'text',text:input||'이 사진 정리해줘'}];
+      _attachedPhotos = [];
+    }
+    const raw = await callClaude([{role:'user', content:userContent}], system);
+    typingEl.remove();
+    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+
+    addMsg('ai', parsed.reply || '정리했어!');
+
+    // 데이터 저장
+    (parsed.tasks||[]).forEach(t => { day.tasks.push({...t, done:false}); });
+    (parsed.schedule||[]).forEach(s => { if(s.time && s.task) day.schedule.push(s); });
+    (parsed.memo||[]).forEach(m => { if(m.text) memoData.push({...m, id:'m_'+Date.now()+'_'+Math.random(), date:new Date().toISOString()}); });
+    save(); /* saved in-memory */
+
+    const taskLen = (parsed.tasks||[]).length, memoLen = (parsed.memo||[]).length;
+    if (taskLen || memoLen) {
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      meta.textContent = `할일 ${taskLen}개 · 메모 ${memoLen}개 저장됨`;
+      msgs.appendChild(meta);
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+    updateStat();
+
+    // 마인드맵 업데이트
+    if (!mmData.root) initMM(input.slice(0,25));
+    else mmData.root.children.push({ id:'n_'+Date.now(), text:input.slice(0,20), color:MM_COLORS[mmData.root.children.length%MM_COLORS.length], children:[], level:1 });
+    renderMM();
+
+  } catch(e) {
+    typingEl.remove();
+    addMsg('ai', '오류 났어. 다시 해봐 🙏');
+  }
+  _sending = false;
+}
+
+function addMsg(role, text) {
+  const msgs = document.getElementById('dumpMessages');
+  const div = document.createElement('div');
+
+  // 긴 텍스트 (500자 이상) → 문서 썸네일 카드
+  if (role === 'user' && text.length >= 500) {
+    const thumbId = 'thumb_' + Date.now();
+    const charCount = text.length.toLocaleString();
+    const lineCount = text.split('\n').length;
+    const wordCount = text.trim().split(/\s+/).length.toLocaleString();
+    div.className = 'doc-thumb-wrap';
+    div.innerHTML = `
+      <div class="doc-thumb-card" onclick="openDocView('${thumbId}')">
+        <div class="doc-thumb-canvas-wrap">
+          <canvas id="${thumbId}" width="320" height="180"></canvas>
+        </div>
+        <div class="doc-thumb-info">
+          <div class="doc-thumb-icon">📄</div>
+          <div class="doc-thumb-meta">
+            <div class="doc-thumb-title">붙여넣은 텍스트</div>
+            <div class="doc-thumb-sub">${charCount}자 · ${lineCount}줄 · ${wordCount}단어</div>
+          </div>
+        </div>
+      </div>
+      <div class="doc-thumb-footer">
+        <button class="ltc-btn" style="background:var(--accent);color:#fff" onclick="analyzeText(window._docTexts['${thumbId}'])">🤖 분석</button>
+        <button class="ltc-btn" style="background:var(--surface);color:var(--text2);border:1px solid var(--border2)" onclick="summarizeText(window._docTexts['${thumbId}'])">📝 요약</button>
+        <button class="ltc-btn" style="background:var(--surface);color:var(--text2);border:1px solid var(--border2)" onclick="bulletText(window._docTexts['${thumbId}'])">🎯 bullet</button>
+      </div>`;
+    msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+    // canvas에 텍스트 렌더링
+    window._docTexts = window._docTexts || {};
+    window._docTexts[thumbId] = text;
+    requestAnimationFrame(() => renderDocCanvas(thumbId, text));
+    return;
+  }
+
+  div.className = role === 'ai' ? 'msg-ai' : 'msg-user';
+  if (role === 'ai') div.innerHTML = `<div class="msg-ai-name">JAY AI</div>${text.replace(/\n/g,'<br>')}`;
+  else div.textContent = text;
+  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderDocCanvas(id, text) {
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  // 배경
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  // 줄 긋기 (노트 스타일)
+  ctx.strokeStyle = '#f0ebe5';
+  ctx.lineWidth = 1;
+  for (let y = 22; y < H; y += 18) {
+    ctx.beginPath(); ctx.moveTo(12, y); ctx.lineTo(W-12, y); ctx.stroke();
+  }
+  // 텍스트 렌더링
+  ctx.fillStyle = '#212121';
+  ctx.font = '11px "Noto Sans KR", sans-serif';
+  const lines = text.replace(/\t/g, '  ').split('\n');
+  let y = 16, lineIdx = 0;
+  for (const line of lines) {
+    if (y > H - 8) break;
+    // 줄바꿈 처리
+    const words = line.split(' ');
+    let cur = '';
+    for (const word of words) {
+      const test = cur ? cur + ' ' + word : word;
+      if (ctx.measureText(test).width > W - 24) {
+        ctx.fillText(cur, 12, y); y += 18; lineIdx++;
+        if (y > H - 8) break;
+        cur = word;
+      } else { cur = test; }
+    }
+    if (cur && y <= H - 8) { ctx.fillText(cur, 12, y); y += 18; }
+  }
+  // 왼쪽 빨간 선 (노트 느낌)
+  ctx.strokeStyle = '#ffcccc';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(28, H); ctx.stroke();
+}
+
+function openDocView(thumbId) {
+  const text = (window._docTexts || {})[thumbId];
+  if (!text) return;
+  document.getElementById('docViewText').textContent = text;
+  document.getElementById('docViewModal').classList.add('open');
+}
+
+function toggleLTC(id, btn) {
+  const body = document.getElementById(id);
+  body.classList.toggle('expanded');
+  btn.textContent = body.classList.contains('expanded') ? '접기' : '펼쳐보기';
+}
+
+async function analyzeText(text) {
+  const msgs = document.getElementById('dumpMessages');
+  const loading = document.createElement('div');
+  loading.className = 'msg-ai';
+  loading.innerHTML = '<div class="msg-ai-name">JAY AI</div><div class="dots"><span></span><span></span><span></span></div>';
+  msgs.appendChild(loading); msgs.scrollTop = msgs.scrollHeight;
+  try {
+    const raw = await callClaude([{role:'user',content:`다음 텍스트를 분석해줘:\n\n${text.slice(0,8000)}`}],
+      'JAY의 AI 비서. 텍스트를 분석해서 핵심 내용, 중요 포인트, JAY에게 필요한 액션을 친구처럼 한국어로 설명해. 마크다운 사용 가능.');
+    loading.innerHTML = `<div class="msg-ai-name">JAY AI · 분석</div>${raw.replace(/\n/g,'<br>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/#{1,3} (.+?)(<br>|$)/g,'<strong style="display:block;margin:6px 0 2px;font-size:13px">$1</strong>')}`;
+  } catch(e) { loading.innerHTML = '<div class="msg-ai-name">JAY AI</div>분석 실패 🙏'; }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function summarizeText(text) {
+  const msgs = document.getElementById('dumpMessages');
+  const loading = document.createElement('div');
+  loading.className = 'msg-ai';
+  loading.innerHTML = '<div class="msg-ai-name">JAY AI</div><div class="dots"><span></span><span></span><span></span></div>';
+  msgs.appendChild(loading); msgs.scrollTop = msgs.scrollHeight;
+  try {
+    const raw = await callClaude([{role:'user',content:text.slice(0,8000)}],
+      '텍스트를 3-5문장으로 핵심만 한국어 요약. 간결하게.');
+    loading.innerHTML = `<div class="msg-ai-name">JAY AI · 요약</div>${raw.replace(/\n/g,'<br>')}`;
+  } catch(e) { loading.innerHTML = '<div class="msg-ai-name">JAY AI</div>요약 실패 🙏'; }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function bulletText(text) {
+  const msgs = document.getElementById('dumpMessages');
+  const loading = document.createElement('div');
+  loading.className = 'msg-ai';
+  loading.innerHTML = '<div class="msg-ai-name">JAY AI</div><div class="dots"><span></span><span></span><span></span></div>';
+  msgs.appendChild(loading); msgs.scrollTop = msgs.scrollHeight;
+  try {
+    const raw = await callClaude([{role:'user',content:text.slice(0,8000)}],
+      '핵심 내용을 bullet 포인트 5-10개로 한국어 정리. • 기호 사용.');
+    loading.innerHTML = `<div class="msg-ai-name">JAY AI · 정리</div>${raw.replace(/\n/g,'<br>')}`;
+  } catch(e) { loading.innerHTML = '<div class="msg-ai-name">JAY AI</div>정리 실패 🙏'; }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── 유튜브 ──
+function showYtOptions(url, videoId) {
+  const msgs = document.getElementById('dumpMessages');
+  addMsg('user', url);
+  const div = document.createElement('div');
+  div.className = 'msg-ai';
+  div.innerHTML = `<div class="msg-ai-name">JAY AI</div>유튜브 영상 감지됨 🎬 뭐 해줄까?
+<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+  <button onclick="ytProcess('${videoId}','summarize')" style="padding:8px 14px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">📝 요약해줘</button>
+  <button onclick="ytProcess('${videoId}','translate')" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;text-align:left">🌐 번역해줘</button>
+  <button onclick="ytProcess('${videoId}','bullet')" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;text-align:left">🎯 핵심 bullet 정리</button>
+</div>`;
+  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function ytProcess(videoId, mode) {
+  const msgs = document.getElementById('dumpMessages');
+  msgs.querySelectorAll('button').forEach(b => b.disabled = true);
+  const loading = document.createElement('div');
+  loading.className = 'msg-ai';
+  loading.innerHTML = '<div class="msg-ai-name">JAY AI</div><div class="dots"><span></span><span></span><span></span></div> 자막 추출 중...';
+  msgs.appendChild(loading);
+  try {
+    let r = await fetch(`${PROXY_BASE}/transcript?videoId=${videoId}&lang=ko`);
+    let d = await r.json();
+    let transcript = (d.content||[]).map(c=>c.text).join(' ');
+    if (!transcript) { r = await fetch(`${PROXY_BASE}/transcript?videoId=${videoId}`); d = await r.json(); transcript = (d.content||[]).map(c=>c.text).join(' '); }
+    if (!transcript) throw new Error('자막 없음');
+    loading.innerHTML = '<div class="msg-ai-name">JAY AI</div><div class="dots"><span></span><span></span><span></span></div> AI 처리 중...';
+    const systemMap = {
+      summarize: '유튜브 자막 분석해서 한국어로.\n# 핵심 요약\n## 주요 내용\n• 포인트\n## 인사이트\n## 한줄 결론',
+      translate: '유튜브 자막을 자연스러운 한국어로 완전 번역. 타임스탬프 없애고 문단으로.',
+      bullet: '핵심 정보만 한국어 bullet 리스트로. 실행 가능한 인사이트 위주.'
+    };
+    const raw = await callClaude([{role:'user',content:`자막:\n${transcript.slice(0,12000)}`}], systemMap[mode]);
+    loading.remove();
+    const result = document.createElement('div');
+    result.className = 'msg-ai';
+    result.innerHTML = `<div class="msg-ai-name">JAY AI · ${{summarize:'요약',translate:'번역',bullet:'정리'}[mode]}</div>` + raw.replace(/\n/g,'<br>').replace(/#{1,3} (.+?)(<br>|$)/g,'<strong style="display:block;margin:6px 0 2px">$1</strong>');
+    msgs.appendChild(result); msgs.scrollTop = msgs.scrollHeight;
+  } catch(e) {
+    loading.innerHTML = `<div class="msg-ai-name">JAY AI</div>실패 😅 ${e.message === '자막 없음' ? '자막이 없는 영상이야' : '다시 해봐'}`;
+  }
+}
+
+// ── 마인드맵 ──
+let _mmDrag = null;
+function initMM(rootText) {
+  mmData.root = { id:'root', text:rootText, color:'var(--accent)', children:[], level:0 };
+  mmOffset = {x:0,y:0};
+  document.getElementById('mmEmpty').style.display = 'none';
+  document.getElementById('mmSvg').style.display = 'block';
+  renderMM();
+}
+function renderMM() {
+  const svg = document.getElementById('mmSvg');
+  if (!svg || !mmData.root) return;
+  const W = svg.clientWidth || 360, H = svg.clientHeight || 400;
+  const cx = W/2 + mmOffset.x, cy = H/2 + mmOffset.y;
+  const allNodes = [], allEdges = [];
+  function layout(node, px, py, a1, a2, r) {
+    node.x = px; node.y = py; allNodes.push(node);
+    if (!node.children.length) return;
+    const step = (a2-a1)/node.children.length;
+    node.children.forEach((c,i) => {
+      const a = a1+step*i+step/2;
+      const nx = px+Math.cos(a)*r, ny = py+Math.sin(a)*r;
+      allEdges.push({x1:px,y1:py,x2:nx,y2:ny,color:c.color});
+      layout(c,nx,ny,a-Math.PI/3,a+Math.PI/3,r*0.75);
+    });
+  }
+  layout(mmData.root, cx, cy, 0, Math.PI*2, 120);
+  svg.innerHTML = allEdges.map(e=>`<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" stroke="${e.color}" stroke-width="2" stroke-opacity="0.4" stroke-dasharray="4 3"/>`).join('') +
+    allNodes.map(n => {
+      const r = n.level===0?38:n.level===1?30:22;
+      const fs = n.level===0?12:10;
+      const sel = mmSelected?.id===n.id;
+      const words = n.text.split(' ');
+      const l1 = words.slice(0,Math.ceil(words.length/2)).join(' ');
+      const l2 = words.length>1?words.slice(Math.ceil(words.length/2)).join(' '):'';
+      return `<g onclick="selectMM('${n.id}')" style="cursor:pointer">
+        <circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${n.color}" fill-opacity="${sel?1:0.12}" stroke="${n.color}" stroke-width="${sel?2.5:1.5}"/>
+        <text x="${n.x}" y="${n.y-(l2?fs*0.6:0)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" font-weight="600" fill="${sel?'#fff':n.color}" font-family="Noto Sans KR,sans-serif">${l1}</text>
+        ${l2?`<text x="${n.x}" y="${n.y+fs*0.9}" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" font-weight="600" fill="${sel?'#fff':n.color}" font-family="Noto Sans KR,sans-serif">${l2}</text>`:''}
+      </g>`;
+    }).join('');
+  svg.onpointerdown = e => { _mmDrag = {sx:e.clientX-mmOffset.x, sy:e.clientY-mmOffset.y}; };
+  svg.onpointermove = e => { if(!_mmDrag)return; mmOffset.x=e.clientX-_mmDrag.sx; mmOffset.y=e.clientY-_mmDrag.sy; renderMM(); };
+  svg.onpointerup = () => { _mmDrag=null; };
+}
+function findMMNode(id, node) {
+  if (!node) return null;
+  if (node.id===id) return node;
+  for (const c of node.children) { const f=findMMNode(id,c); if(f) return f; }
+  return null;
+}
+function selectMM(id) {
+  mmSelected = findMMNode(id, mmData.root);
+  if (!mmSelected) return;
+  renderMM();
+  document.getElementById('mmNodeTitle').textContent = mmSelected.text;
+  document.getElementById('mmNodePanel').style.display = 'block';
+}
+function closeMM() { mmSelected=null; document.getElementById('mmNodePanel').style.display='none'; renderMM(); }
+async function expandMM() {
+  if (!mmSelected) return;
+  const node = mmSelected;
+  document.getElementById('mmNodePanel').style.display='none';
+  try {
+    const raw = await callClaude([{role:'user',content:`"${node.text}" 에서 연결되는 아이디어/키워드 4개를 JSON으로:\n{"nodes":["키워드1","키워드2","키워드3","키워드4"]}\nJSON만 반환. 한국어.`}], '브레인스토밍 도우미. JSON만 반환.');
+    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    (parsed.nodes||[]).forEach((text,i) => {
+      node.children.push({id:'n_'+Date.now()+'_'+i, text, color:MM_COLORS[(MM_COLORS.indexOf(node.color)+1+i)%MM_COLORS.length], children:[], level:(node.level||0)+1});
+    });
+    renderMM();
+  } catch(e) { showToast('확장 실패'); }
+}
+function mmToChat() {
+  if (!mmSelected) return;
+  const ta = document.getElementById('dumpInput');
+  ta.value = mmSelected.text + '에 대해 더 깊이 생각해봐';
+  ta.focus(); closeMM();
+}
+
+// ── 사진/음성 ──
+function triggerPhotoPC() { document.getElementById('photoInputPC').click(); }
+async function handlePhotoPC(input) {
+  const files = Array.from(input.files); input.value='';
+  for (const f of files) {
+    const b64 = await new Promise(res => { const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.readAsDataURL(f); });
+    _attachedPhotos.push({base64:b64, mime:f.type});
+  }
+  showToast(`사진 ${files.length}장 첨부됨`);
+}
+let _voiceRec = null;
+function startVoicePC() {
+  const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+  if (!SR) { showToast('음성 미지원 브라우저'); return; }
+  const btn = document.getElementById('voiceBtnPC');
+  if (_voiceRec) { _voiceRec.stop(); _voiceRec=null; btn.style.background='var(--surface3)'; btn.textContent='🎙'; return; }
+  const r = new SR(); r.lang='ko-KR'; r.continuous=true; r.interimResults=true; _voiceRec=r;
+  btn.style.background='var(--red)'; btn.style.color='#fff'; btn.textContent='⏹';
+  r.onresult = e => { let final=''; for(let i=e.resultIndex;i<e.results.length;i++) if(e.results[i].isFinal) final+=e.results[i][0].transcript; if(final){const ta=document.getElementById('dumpInput');ta.value=(ta.value+' '+final).trim();} };
+  r.onend = () => { _voiceRec=null; btn.style.background='var(--surface3)'; btn.style.color='var(--text2)'; btn.textContent='🎙'; };
+  r.start(); showToast('🎙 음성 인식 중...');
+}
+
+// ── 할일 ──
+let taskFilter = 'today';
+function filterTasks(f, el) {
+  taskFilter = f;
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  if(el) el.classList.add('on');
+  renderTasks();
+}
+function renderTasks() {
+  const day = getDay();
+  const tasks = day.tasks.filter(t => t.when === taskFilter || taskFilter === 'all');
+  const el = document.getElementById('taskList');
+  const priColors = {1:'var(--red)',2:'var(--accent)',3:'var(--yellow)',4:'var(--muted)'};
+  if (!tasks.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">할일이 없어</div></div>'; }
+  else el.innerHTML = tasks.map((t,i) => `
+    <div class="task-card ${t.done?'done':''}">
+      <div class="task-pri" style="background:${priColors[t.priority]||'var(--muted)'}"></div>
+      <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${day.tasks.indexOf(t)})">
+        ${t.done?'✓':''}
+      </div>
+      <div class="task-text">${t.text}</div>
+    </div>`).join('');
+  document.getElementById('taskCnt').textContent = tasks.filter(t=>!t.done).length;
+  const badge = document.getElementById('taskBadge');
+  const undone = day.tasks.filter(t=>!t.done&&t.when==='today').length;
+  badge.style.display = undone ? 'inline' : 'none';
+  badge.textContent = undone;
+  renderSchedule();
+  updateStat();
+}
+function toggleTask(i) { const day=getDay(); day.tasks[i].done=!day.tasks[i].done; save(); renderTasks(); }
+function renderSchedule() {
+  const day = getDay();
+  const el = document.getElementById('scheduleList');
+  if (!day.schedule.length) { el.innerHTML='<div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">일정이 없어</div></div>'; return; }
+  el.innerHTML = day.schedule.sort((a,b)=>a.time.localeCompare(b.time)).map(s=>`
+    <div class="timeline-item">
+      <div class="timeline-time">${s.time}</div>
+      <div><div class="timeline-task">${s.task}</div>${s.note?`<div class="timeline-note">${s.note}</div>`:''}</div>
+    </div>`).join('');
+}
+function openAddTask() {
+  document.getElementById('newTaskText').value='';
+  openModal('addTaskModal');
+  setTimeout(()=>document.getElementById('newTaskText').focus(),100);
+}
+function saveTask() {
+  const text = document.getElementById('newTaskText').value.trim();
+  if (!text) return;
+  const day = getDay();
+  day.tasks.push({ text, priority:parseInt(document.getElementById('newTaskPri').value), when:document.getElementById('newTaskWhen').value, urgent:false, done:false });
+  save(); closeModal('addTaskModal'); renderTasks();
+}
+function openAddSchedule() {
+  const time = prompt('시간 (예: 09:00)'); if(!time) return;
+  const task = prompt('일정'); if(!task) return;
+  const note = prompt('메모 (선택)') || '';
+  getDay().schedule.push({time,task,note}); save(); renderSchedule();
+}
+
+// ── 목표 ──
+const GOAL_COLORS = {life:'#7755cc',long:'#2277dd',mid:'#e07b00',short:'#ff6f0f',ultra:'#e03030'};
+let selectedGoalIdx = null;
+
+function renderGoals() {
+  const el = document.getElementById('goalList');
+  if (!goals.length) { el.innerHTML='<div class="empty"><div class="empty-icon">🎯</div><div class="empty-text">목표를 추가해봐</div></div>'; return; }
+  el.innerHTML = goals.map((g,i) => {
+    const color = GOAL_COLORS[g.type||'mid'] || 'var(--accent)';
+    const prog = g._progress || 0;
+    return `<div class="goal-card" onclick="selectGoal(${i})">
+      <div class="goal-bar" style="background:${color}"></div>
+      <div class="goal-body">
+        <div class="goal-text">${g.text}</div>
+        <div class="goal-meta">
+          ${g.deadline?`<span class="goal-tag" style="background:${color}22;color:${color}">${g.deadline}</span>`:''}
+          ${g.why?`<span class="goal-tag" style="background:var(--surface2);color:var(--text2)">${g.why.slice(0,20)}</span>`:''}
+        </div>
+        <div class="goal-progress">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:11px;color:var(--muted)">진행률</span>
+            <span style="font-size:11px;font-weight:700;color:${color}">${prog}%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${prog}%;background:${color}"></div></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  renderRightGoals();
+}
+
+function selectGoal(i) {
+  selectedGoalIdx = i;
+  const g = goals[i];
+  const box = document.getElementById('goalDetailBox');
+  const color = GOAL_COLORS[g.type||'mid'] || 'var(--accent)';
+  const actions = g._actionPlan || [];
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+      <div>
+        <div style="font-size:16px;font-weight:800;color:var(--text)">${g.text}</div>
+        ${g.why?`<div style="font-size:12px;color:var(--muted);margin-top:4px">${g.why}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button onclick="deleteGoal(${i})" style="background:none;border:1.5px solid var(--red);border-radius:8px;color:var(--red);cursor:pointer;font-size:13px;padding:4px 8px">🗑️</button>
+        <button onclick="document.getElementById('goalDetailBox').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:12px;font-weight:700;color:var(--text2)">진행률</span>
+        <span style="font-size:12px;font-weight:700;color:${color}">${g._progress||0}%</span>
+      </div>
+      <input type="range" min="0" max="100" value="${g._progress||0}" oninput="updateGoalProgress(${i},this.value)" style="width:100%;accent-color:${color}">
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="font-size:12px;font-weight:700;color:var(--text2)">실행계획</span>
+      <div style="display:flex;gap:6px">
+        <button onclick="generateActionPlanPC(${i})" id="actionGenBtn${i}" style="padding:5px 12px;border-radius:8px;border:none;background:${color};color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🚀 만들기</button>
+        <button onclick="addAllActionsToToday(${i})" style="padding:5px 12px;border-radius:8px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;cursor:pointer;font-family:inherit">📋 오늘에 추가</button>
+      </div>
+    </div>
+    <div id="actionList${i}">
+      ${actions.length ? actions.map((a,ai)=>`
+        <div class="action-item">
+          <div class="action-check ${a.done?'checked':''}" onclick="toggleAction(${i},${ai})">${a.done?'✓':''}</div>
+          <div class="action-text" style="${a.done?'text-decoration:line-through;color:var(--muted)':''}">${a.text}</div>
+          <button onclick="addActionToToday(${i},${ai})" style="padding:3px 8px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);font-size:10px;cursor:pointer">+오늘</button>
+        </div>`).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0">AI로 실행계획을 만들어봐</div>'}
+    </div>`;
+}
+
+// Feature 3: Updated updateGoalProgress (also calls renderRightGoals)
+function updateGoalProgress(i, val) {
+  goals[i]._progress = parseInt(val);
+  renderGoals();
+  renderRightGoals();
+}
+
+async function generateActionPlanPC(i) {
+  const g = goals[i];
+  const btn = document.getElementById(`actionGenBtn${i}`);
+  if (btn) { btn.disabled=true; btn.textContent='생성 중...'; }
+  try {
+    const raw = await callClaude([{role:'user',content:`목표: "${g.text}"\n${g.why?'이유: '+g.why:''}\n${g.deadline?'마감: '+g.deadline:''}\n\n5~7개 구체적 실행 할일 JSON으로:\n{"items":[{"text":"할일","note":"팁"}]}`}],
+      'JAY의 목표 실행계획 전문가. JSON만 반환.');
+    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    goals[i]._actionPlan = (parsed.items||[]).map(a=>({text:a.text, note:a.note||'', done:false}));
+    /* saved in-memory */
+    selectGoal(i);
+  } catch(e) { showToast('생성 실패'); }
+  if (btn) { btn.disabled=false; btn.textContent='🔄 재생성'; }
+}
+
+function toggleAction(gi, ai) {
+  goals[gi]._actionPlan[ai].done = !goals[gi]._actionPlan[ai].done;
+  /* saved in-memory */
+  selectGoal(gi);
+}
+function addActionToToday(gi, ai) {
+  const a = goals[gi]._actionPlan[ai];
+  getDay().tasks.push({text:a.text, priority:2, when:'today', urgent:false, done:false});
+  save(); showToast('오늘 할일에 추가됨');
+}
+function addAllActionsToToday(gi) {
+  const actions = goals[gi]._actionPlan || [];
+  actions.filter(a=>!a.done).forEach(a => getDay().tasks.push({text:a.text, priority:2, when:'today', urgent:false, done:false}));
+  save(); showToast(`${actions.filter(a=>!a.done).length}개 오늘에 추가됨`);
+}
+
+function openAddGoal() { openModal('addGoalModal'); }
+function saveGoal() {
+  const text = document.getElementById('newGoalText').value.trim();
+  if (!text) return;
+  goals.push({ text, why:document.getElementById('newGoalWhy').value, deadline:document.getElementById('newGoalDeadline').value, type:document.getElementById('newGoalType').value, createdAt:new Date().toISOString(), _actionPlan:[], _progress:0 });
+  /* saved in-memory */
+  closeModal('addGoalModal'); renderGoals();
+}
+
+// Feature 5: deleteGoal function
+function deleteGoal(i) {
+  goals.splice(i, 1);
+  selectedGoalIdx = null;
+  document.getElementById('goalDetailBox').style.display = 'none';
+  renderGoals();
+  renderRightGoals();
+  showToast('삭제됨');
+}
+
+// Feature 6: Fixed renderRightGoals using template literals
+function renderRightGoals() {
+  const el = document.getElementById('rightGoalList');
+  document.getElementById('statGoals').textContent = goals.length;
+  if (!goals.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🎯</div><div class="empty-text">목표를 추가해봐<br>항상 여기서 볼 수 있어</div></div>';
+    return;
+  }
+  const typeLabel = {life:'🌟 인생', long:'📅 장기', mid:'📆 중기', short:'⚡ 단기'};
+  el.innerHTML = goals.map((g, i) => {
+    const color = GOAL_COLORS[g.type||'mid'] || 'var(--accent)';
+    const prog = g._progress || 0;
+    const sel = selectedGoalIdx === i;
+    const borderColor = sel ? color : 'var(--border)';
+    const bgColor = sel ? color + '11' : 'var(--surface)';
+    return `<div style="padding:14px;border-radius:14px;border:1.5px solid ${borderColor};margin-bottom:10px;cursor:pointer;background:${bgColor}" onclick="switchPanel('goals',null);selectGoal(${i})">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;margin-top:3px"></div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.4;flex:1">${g.text}</div>
+        <span style="font-size:11px;font-weight:800;color:${color};flex-shrink:0">${prog}%</span>
+      </div>
+      ${g.why ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;padding-left:18px;line-height:1.5">💬 ${g.why.slice(0,45)}${g.why.length>45?'...':''}</div>` : ''}
+      <div style="padding-left:18px">
+        <div style="height:5px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-bottom:5px">
+          <div style="height:100%;width:${prog}%;background:${color};border-radius:3px"></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);font-family:monospace">${g.deadline ? '⏰ ' + g.deadline + ' · ' : ''}${typeLabel[g.type]||''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 메모 ──
+function renderMemo() {
+  const cats = ['전체', ...new Set(memoData.map(m=>m.category))];
+  const chipsEl = document.getElementById('memoCatChips');
+  chipsEl.innerHTML = cats.map((c,i)=>`<button class="chip ${i===0?'on':''}" onclick="filterMemo('${c}',this)">${c}</button>`).join('');
+  renderMemoGrid('전체');
+}
+function filterMemo(cat, el) {
+  document.querySelectorAll('#memoCatChips .chip').forEach(c=>c.classList.remove('on'));
+  if(el) el.classList.add('on');
+  renderMemoGrid(cat);
+}
+
+// Feature 7: Updated renderMemoGrid with openMemoView onclick
+function renderMemoGrid(cat) {
+  const el = document.getElementById('memoGrid');
+  const filtered = cat==='전체' ? memoData : memoData.filter(m=>m.category===cat);
+  if (!filtered.length) { el.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🗂️</div><div class="empty-text">메모가 없어</div></div>'; return; }
+  el.innerHTML = filtered.map((m) => {
+    const realIdx = memoData.indexOf(m);
+    return `<div class="memo-card" onclick="openMemoView(${realIdx})">
+      <div class="memo-cat">${m.category}</div>
+      <div class="memo-text">${m.text.slice(0,120)}${m.text.length>120?'...':''}</div>
+      <div class="memo-tags">${(m.tags||[]).map(t=>`<span class="memo-tag">${t}</span>`).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function openAddMemo() { openModal('addMemoModal'); }
+function saveMemo() {
+  const text = document.getElementById('newMemoText').value.trim();
+  if (!text) return;
+  memoData.push({ id:'m_'+Date.now(), category:document.getElementById('newMemoCat').value, text, tags:[], date:new Date().toISOString() });
+  /* saved in-memory */
+  closeModal('addMemoModal');
+  renderMemo();
+}
+
+// ── 문서 ──
+function renderDocs() {
+  const el = document.getElementById('docList');
+  const chips = document.getElementById('docSectionChips');
+  if (!docsData.length) {
+    chips.innerHTML = '';
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📄</div><div class="empty-text">문서가 없어<br>덤프에 긴 텍스트를 붙여넣으면 자동으로 생성돼</div></div>';
+    return;
+  }
+  const sections = ['전체', ...new Set(docsData.map(d=>d.section||'기타'))];
+  chips.innerHTML = sections.map((s,i)=>`<button class="chip ${i===0?'on':''}" onclick="filterDocs('${s}',this)">${s}</button>`).join('');
+  renderDocList('전체');
+}
+function filterDocs(sec, el) {
+  document.querySelectorAll('#docSectionChips .chip').forEach(c=>c.classList.remove('on'));
+  if(el) el.classList.add('on');
+  renderDocList(sec);
+}
+function renderDocList(sec) {
+  const el = document.getElementById('docList');
+  const filtered = sec==='전체' ? docsData : docsData.filter(d=>(d.section||'기타')===sec);
+  if (!filtered.length) { el.innerHTML='<div class="empty"><div class="empty-icon">📄</div><div class="empty-text">문서가 없어</div></div>'; return; }
+  const sectionColors = {'기타':'var(--muted)','아이디어':'var(--accent)','사업':'var(--blue)','투자':'var(--green)'};
+  el.innerHTML = filtered.map((d)=>`
+    <div class="doc-item" onclick="openDocItemView(${docsData.indexOf(d)})">
+      <div class="doc-section-dot" style="background:${sectionColors[d.section||'기타']||'var(--muted)'}"></div>
+      <div class="doc-title">${d.title||'제목 없음'}</div>
+      <div class="doc-date">${(d.date||'').slice(0,10)}</div>
+    </div>`).join('');
+}
+function openDocItemView(i) {
+  const d = docsData[i];
+  if (!d) return;
+  document.getElementById('docViewText').textContent = d.text||'';
+  openModal('docViewModal');
+}
+
+// ── 통계 ──
+function updateStat() {
+  const day = getDay();
+  const done = day.tasks.filter(t=>t.done).length;
+  document.getElementById('statDone').textContent = done+'/'+day.tasks.length;
+}
+
+// ── 일기 ──
+async function generateDiary() {
+  const day = getDay();
+  const diaryBox = document.getElementById('diaryBox');
+  diaryBox.textContent = '생성 중...';
+  const dumpTexts = day.dumps.map(d=>d.text).join('\n');
+  const tasksDone = day.tasks.filter(t=>t.done).map(t=>t.text).join(', ');
+  try {
+    const raw = await callClaude(
+      [{role:'user', content:`오늘 덤프: ${dumpTexts||'없음'}\n완료한 일: ${tasksDone||'없음'}`}],
+      'JAY의 오늘 하루를 3-5문장 일기로 써줘. 1인칭. 감성적이고 솔직하게. 한국어.'
+    );
+    day.diary = raw;
+    diaryBox.textContent = raw;
+  } catch(e) {
+    diaryBox.textContent = '생성 실패 🙏';
+  }
+}
+
+// ── 메모 뷰 ──
+let _viewingMemoIdx = null;
+function openMemoView(idx) {
+  _viewingMemoIdx = idx;
+  const m = memoData[idx];
+  if (!m) return;
+  document.getElementById('memoViewCat').textContent = m.category;
+  document.getElementById('memoViewText').textContent = m.text;
+  openModal('memoViewModal');
+}
+function analyzeMemoView() {
+  if (_viewingMemoIdx === null) return;
+  const m = memoData[_viewingMemoIdx];
+  closeModal('memoViewModal');
+  switchPanel('dump', document.querySelectorAll('.nav-btn')[0]);
+  analyzeText(m.text);
+}
+function deleteMemoView() {
+  if (_viewingMemoIdx === null) return;
+  memoData.splice(_viewingMemoIdx, 1);
+  _viewingMemoIdx = null;
+  closeModal('memoViewModal');
+  renderMemo();
+  showToast('삭제됨');
+}
+
+// ── 데일리 리포트 ──
+async function openDailyReport() {
+  openModal('reportModal');
+  const rc = document.getElementById('reportContent');
+  rc.innerHTML = '<div class="dots"><span></span><span></span><span></span></div> 리포트 생성 중...';
+  const day = getDay();
+  const done = day.tasks.filter(t => t.done).length;
+  const total = day.tasks.length;
+  const dumpTexts = day.dumps.map(d => d.text).join('\n');
+  const taskList = day.tasks.map(t => `[${t.done ? '✅' : '⬜'}] ${t.text}`).join('\n');
+  const goalList = goals.map(g => `• ${g.text} (${g._progress || 0}%)`).join('\n');
+  try {
+    const raw = await callClaude(
+      [{role:'user', content:
+        `오늘 날짜: ${TODAY_KEY}\n\n` +
+        `## 오늘 덤프 내용\n${dumpTexts || '없음'}\n\n` +
+        `## 할일 현황 (${done}/${total} 완료)\n${taskList || '없음'}\n\n` +
+        `## 목표 현황\n${goalList || '없음'}`
+      }],
+      'JAY의 AI 비서. 오늘 하루 리포트를 작성해. 형식: # 오늘 요약 / ## 잘한 것 / ## 내일 TOP 3 액션. 간결하고 실용적으로.'
+    );
+    rc.innerHTML = raw
+      .replace(/\n/g, '<br>')
+      .replace(/#{1,3} (.+?)(<br>|$)/g, '<strong style="display:block;margin:10px 0 4px;font-size:14px;color:var(--text)">$1</strong>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  } catch(e) {
+    rc.textContent = '리포트 생성 실패 🙏';
+  }
+}
+
+// ── 모달 ──
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function openProfileModal() {
+  document.getElementById('pName').value = userProfile.name||'';
+  document.getElementById('pJob').value = userProfile.job||'';
+  document.getElementById('pFocus').value = userProfile.focus||'';
+  openModal('profileModal');
+}
+function saveProfile() {
+  userProfile.name = document.getElementById('pName').value;
+  userProfile.job = document.getElementById('pJob').value;
+  userProfile.focus = document.getElementById('pFocus').value;
+  document.getElementById('profileName').textContent = userProfile.name||'JAY';
+  document.getElementById('profileJob').textContent = userProfile.job||'설정하기 →';
+  document.getElementById('profileAvatar').textContent = (userProfile.name||'J')[0].toUpperCase();
+  /* saved in-memory */
+  closeModal('profileModal');
+  showToast('저장됨');
+}
+
+// ── 토스트 ──
+let _toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(()=>{ t.style.opacity='0'; }, 2000);
+}
+
+// ── 미니 캘린더 ──
+// Feature 9: renderMiniCal with null check
+function renderMiniCal() {
+  const calEl = document.getElementById('miniCal');
+  if (!calEl) return;
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const lastDate = new Date(year, month+1, 0).getDate();
+  const days = ['일','월','화','수','목','금','토'];
+  let html = '<div class="cal-grid">';
+  days.forEach(d => html += `<div class="cal-day-label">${d}</div>`);
+  for(let i=0;i<firstDay;i++) html += '<div class="cal-day other-month"></div>';
+  for(let d=1;d<=lastDate;d++) {
+    const isToday = d===now.getDate();
+    html += `<div class="cal-day ${isToday?'today':''}">${d}</div>`;
+  }
+  html += '</div>';
+  calEl.innerHTML = html;
+}
+
+// ── 초기화 ──
+function init() {
+  initDate();
+  renderTasks();
+  renderRightGoals();
+  renderMiniCal();
+}
+
+window.onload = init;
+</script>
+</body>
+</html>
