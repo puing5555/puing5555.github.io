@@ -143,8 +143,8 @@ body {
   border-right: 1px solid var(--border);
 }
 .dump-map-col {
-  width: 360px; display: flex; flex-direction: column; flex-shrink: 0;
-  background: var(--surface2);
+  flex: 1; display: flex; flex-direction: column; flex-shrink: 0;
+  background: var(--surface2); min-width: 0;
 }
 .dump-col-hdr {
   padding: 10px 16px; border-bottom: 1px solid var(--border);
@@ -605,7 +605,10 @@ body {
     <!-- 덤프 패널 -->
     <div id="panel-dump" class="active" style="flex:1;overflow:hidden">
       <div class="dump-chat-col">
-        <div class="dump-col-hdr">💬 대화</div>
+        <div class="dump-col-hdr" style="display:flex;align-items:center;justify-content:space-between">
+          <span>💬 대화</span>
+          <button onclick="clearDump()" title="대화 + 마인드맵 초기화" style="padding:3px 10px;border-radius:8px;border:2px solid var(--red);background:transparent;color:var(--red);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px">🗑 청소</button>
+        </div>
         <div class="dump-messages" id="dumpMessages">
           <div class="msg-ai">
             <div class="msg-ai-name">JAY AI</div>
@@ -624,18 +627,26 @@ body {
         </div>
       </div>
       <div class="dump-map-col">
-        <div class="dump-col-hdr">🗺 마인드맵</div>
+        <div class="dump-col-hdr" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span>🗺 마인드맵</span>
+          <div style="margin-left:auto;display:flex;gap:4px">
+            <button id="mmModeNormal" onclick="setMMMode('normal')" title="선택/이동" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
+            <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">＋ 추가</button>
+            <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 후 다른 원 클릭 → 연결" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🔗 연결</button>
+            <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✂ 삭제</button>
+          </div>
+        </div>
         <div id="mmEmpty" class="mm-empty">
           <div class="mm-empty-icon">🗺</div>
-          <div class="mm-empty-text">덤프에 생각을 입력하면<br>마인드맵이 펼쳐져<br><span style="color:var(--accent);font-weight:600">노드 클릭 → AI 확장</span></div>
+          <div class="mm-empty-text">대화하면 키워드가 자동으로 생겨<br><span style="color:var(--accent);font-weight:600">＋추가 모드로 직접 원 추가 가능</span></div>
         </div>
-        <svg id="mmSvg" style="display:none;flex:1;width:100%;touch-action:none"></svg>
-        <div id="mmNodePanel">
-          <div id="mmNodeTitle"></div>
-          <div class="mm-node-btns">
-            <button class="mm-node-btn" onclick="expandMM()" style="background:var(--accent);color:#fff">🤖 AI 확장</button>
-            <button class="mm-node-btn" onclick="mmToChat()" style="background:var(--surface2);color:var(--text2)">💬 대화로</button>
-            <button class="mm-node-btn" onclick="closeMM()" style="background:var(--surface2);color:var(--muted);flex:0;padding:7px 12px">✕</button>
+        <canvas id="mmCanvas" style="display:none;flex:1;width:100%;cursor:crosshair" touch-action="none"></canvas>
+        <div id="mmNodePanel" style="display:none;border-top:1px solid var(--border);padding:10px 14px;background:var(--surface);flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px">
+            <input id="mmNodeTitle" style="flex:1;border:1.5px solid var(--border2);border-radius:8px;padding:5px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface2)" onchange="renameMMNode(this.value)" placeholder="노드 이름">
+            <button onclick="expandMMNode()" style="padding:5px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🤖 AI확장</button>
+            <button onclick="deleteMMNode()" style="padding:5px 10px;border-radius:8px;border:none;background:var(--red);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">삭제</button>
+            <button onclick="closeMM()" style="padding:5px 8px;border-radius:8px;border:none;background:var(--surface3);color:var(--text2);font-size:11px;cursor:pointer">✕</button>
           </div>
         </div>
       </div>
@@ -979,10 +990,6 @@ async function callClaude(messages, system) {
 // ── 덤프 ──
 let _sending = false;
 let _attachedPhotos = [];
-let mmData = { root: null };
-let mmSelected = null;
-let mmOffset = { x:0, y:0 };
-const MM_COLORS = ['#ff6f0f','#7755cc','#2277dd','#e07b00','#e03030','#00aa66'];
 
 async function sendDump() {
   const ta = document.getElementById('dumpInput');
@@ -1044,10 +1051,17 @@ priority: 1=긴급 2=높음 3=보통 4=낮음 / when: today tomorrow week later`
     msgs.scrollTop = msgs.scrollHeight;
     updateStat();
 
-    // 마인드맵 업데이트
-    if (!mmData.root) initMM(input.slice(0,25));
-    else mmData.root.children.push({ id:'n_'+Date.now(), text:input.slice(0,20), color:MM_COLORS[mmData.root.children.length%MM_COLORS.length], children:[], level:1 });
-    renderMM();
+    // 마인드맵 업데이트 — 키워드 원 자동 추가
+    const keywords = (parsed.focus ? [parsed.focus] : []).concat(
+      (parsed.tasks||[]).slice(0,2).map(t => t.text.slice(0,10))
+    );
+    const keyword = keywords[0] || input.slice(0,12);
+    if (keyword) {
+      const color = MM_COLORS[_mmColorIdx % MM_COLORS.length];
+      const canvas = document.getElementById('mmCanvas');
+      if (canvas.style.display === 'none') initMMCanvas();
+      addMMNode(keyword, color);
+    }
 
   } catch(e) {
     typingEl.remove();
@@ -1239,83 +1253,273 @@ async function ytProcess(videoId, mode) {
   }
 }
 
-// ── 마인드맵 ──
-let _mmDrag = null;
-function initMM(rootText) {
-  mmData.root = { id:'root', text:rootText, color:'var(--accent)', children:[], level:0 };
-  mmOffset = {x:0,y:0};
+// ── 마인드맵 (자유 캔버스) ──
+let mmNodes = [];   // {id, text, x, y, color, r}
+let mmEdges = [];   // {from, to}  (id 기반)
+let mmMode = 'normal'; // normal | add | connect | delete
+let mmSelected = null; // node id
+let mmConnectFrom = null; // connect 모드에서 첫번째 선택 node id
+let _mmDragging = null; // {id, ox, oy}
+let _mmPanning = null;  // {sx, sy, tx, ty}
+let mmTranslate = {x:0, y:0};
+const MM_COLORS = ['#ff6f0f','#7755cc','#2277dd','#e07b00','#e03030','#00aa66'];
+let _mmColorIdx = 0;
+
+function setMMMode(mode) {
+  mmMode = mode;
+  mmConnectFrom = null;
+  mmSelected = null;
+  const btns = {normal:'mmModeNormal', add:'mmModeAdd', connect:'mmModeConnect', delete:'mmModeDelete'};
+  Object.entries(btns).forEach(([m, id]) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    if (m === mode) { b.style.background = 'var(--accent)'; b.style.color = '#fff'; b.style.borderColor = 'var(--accent)'; }
+    else { b.style.background = 'transparent'; b.style.color = 'var(--text2)'; b.style.borderColor = 'var(--border2)'; }
+  });
+  const canvas = document.getElementById('mmCanvas');
+  canvas.style.cursor = mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : mode === 'connect' ? 'cell' : 'grab';
+  renderMMCanvas();
+}
+
+function mmNodeAt(x, y) {
+  return mmNodes.find(n => Math.hypot(n.x - x, n.y - y) <= n.r);
+}
+function mmEdgeNear(x, y) {
+  return mmEdges.find(e => {
+    const a = mmNodes.find(n => n.id === e.from);
+    const b = mmNodes.find(n => n.id === e.to);
+    if (!a || !b) return false;
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    if (len === 0) return false;
+    const t = Math.max(0, Math.min(1, ((x-a.x)*dx + (y-a.y)*dy) / (len*len)));
+    const px = a.x + t*dx - x, py = a.y + t*dy - y;
+    return Math.hypot(px, py) < 10;
+  });
+}
+
+function initMMCanvas() {
+  const canvas = document.getElementById('mmCanvas');
   document.getElementById('mmEmpty').style.display = 'none';
-  document.getElementById('mmSvg').style.display = 'block';
-  renderMM();
+  canvas.style.display = 'block';
+
+  const resize = () => {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height - (document.getElementById('mmNodePanel').style.display !== 'none' ? 52 : 0);
+    renderMMCanvas();
+  };
+  new ResizeObserver(resize).observe(canvas.parentElement);
+  resize();
+
+  // 포인터 이벤트
+  canvas.addEventListener('pointerdown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left - mmTranslate.x;
+    const cy = e.clientY - rect.top - mmTranslate.y;
+    const hit = mmNodeAt(cx, cy);
+
+    if (mmMode === 'add') {
+      if (!hit) {
+        const text = prompt('키워드 입력:');
+        if (!text) return;
+        const color = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
+        mmNodes.push({ id: 'n_'+Date.now(), text, x: cx, y: cy, color, r: 36 });
+        renderMMCanvas();
+      }
+      return;
+    }
+
+    if (mmMode === 'delete') {
+      if (hit) {
+        mmNodes = mmNodes.filter(n => n.id !== hit.id);
+        mmEdges = mmEdges.filter(e => e.from !== hit.id && e.to !== hit.id);
+        if (mmSelected === hit.id) { mmSelected = null; document.getElementById('mmNodePanel').style.display = 'none'; }
+        renderMMCanvas();
+      } else {
+        const edge = mmEdgeNear(cx, cy);
+        if (edge) { mmEdges = mmEdges.filter(e => e !== edge); renderMMCanvas(); }
+      }
+      return;
+    }
+
+    if (mmMode === 'connect') {
+      if (hit) {
+        if (!mmConnectFrom) {
+          mmConnectFrom = hit.id;
+          showToast('연결할 두 번째 원 클릭');
+        } else if (mmConnectFrom !== hit.id) {
+          const exists = mmEdges.find(e => (e.from===mmConnectFrom&&e.to===hit.id)||(e.from===hit.id&&e.to===mmConnectFrom));
+          if (!exists) mmEdges.push({ from: mmConnectFrom, to: hit.id });
+          mmConnectFrom = null;
+          renderMMCanvas();
+        }
+      }
+      return;
+    }
+
+    // normal 모드
+    if (hit) {
+      mmSelected = hit.id;
+      _mmDragging = { id: hit.id, ox: cx - hit.x, oy: cy - hit.y };
+      document.getElementById('mmNodeTitle').value = hit.text;
+      document.getElementById('mmNodePanel').style.display = 'block';
+      renderMMCanvas();
+    } else {
+      mmSelected = null;
+      document.getElementById('mmNodePanel').style.display = 'none';
+      _mmPanning = { sx: e.clientX, sy: e.clientY, tx: mmTranslate.x, ty: mmTranslate.y };
+      renderMMCanvas();
+    }
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (_mmDragging) {
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left - mmTranslate.x;
+      const cy = e.clientY - rect.top - mmTranslate.y;
+      const node = mmNodes.find(n => n.id === _mmDragging.id);
+      if (node) { node.x = cx - _mmDragging.ox; node.y = cy - _mmDragging.oy; }
+      renderMMCanvas();
+    } else if (_mmPanning) {
+      mmTranslate.x = _mmPanning.tx + (e.clientX - _mmPanning.sx);
+      mmTranslate.y = _mmPanning.ty + (e.clientY - _mmPanning.sy);
+      renderMMCanvas();
+    }
+  });
+
+  canvas.addEventListener('pointerup', () => { _mmDragging = null; _mmPanning = null; });
 }
-function renderMM() {
-  const svg = document.getElementById('mmSvg');
-  if (!svg || !mmData.root) return;
-  const W = svg.clientWidth || 360, H = svg.clientHeight || 400;
-  const cx = W/2 + mmOffset.x, cy = H/2 + mmOffset.y;
-  const allNodes = [], allEdges = [];
-  function layout(node, px, py, a1, a2, r) {
-    node.x = px; node.y = py; allNodes.push(node);
-    if (!node.children.length) return;
-    const step = (a2-a1)/node.children.length;
-    node.children.forEach((c,i) => {
-      const a = a1+step*i+step/2;
-      const nx = px+Math.cos(a)*r, ny = py+Math.sin(a)*r;
-      allEdges.push({x1:px,y1:py,x2:nx,y2:ny,color:c.color});
-      layout(c,nx,ny,a-Math.PI/3,a+Math.PI/3,r*0.75);
-    });
+
+function renderMMCanvas() {
+  const canvas = document.getElementById('mmCanvas');
+  if (!canvas || canvas.style.display === 'none') return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(mmTranslate.x, mmTranslate.y);
+
+  // 연결선
+  mmEdges.forEach(e => {
+    const a = mmNodes.find(n => n.id === e.from);
+    const b = mmNodes.find(n => n.id === e.to);
+    if (!a || !b) return;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = a.color + '88'; ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+  });
+
+  // connect 모드 첫 선택 하이라이트
+  if (mmConnectFrom) {
+    const n = mmNodes.find(n => n.id === mmConnectFrom);
+    if (n) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI*2);
+      ctx.strokeStyle = '#2277dd'; ctx.lineWidth = 2.5; ctx.stroke();
+    }
   }
-  layout(mmData.root, cx, cy, 0, Math.PI*2, 120);
-  svg.innerHTML = allEdges.map(e=>`<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" stroke="${e.color}" stroke-width="2" stroke-opacity="0.4" stroke-dasharray="4 3"/>`).join('') +
-    allNodes.map(n => {
-      const r = n.level===0?38:n.level===1?30:22;
-      const fs = n.level===0?12:10;
-      const sel = mmSelected?.id===n.id;
-      const words = n.text.split(' ');
-      const l1 = words.slice(0,Math.ceil(words.length/2)).join(' ');
-      const l2 = words.length>1?words.slice(Math.ceil(words.length/2)).join(' '):'';
-      return `<g onclick="selectMM('${n.id}')" style="cursor:pointer">
-        <circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${n.color}" fill-opacity="${sel?1:0.12}" stroke="${n.color}" stroke-width="${sel?2.5:1.5}"/>
-        <text x="${n.x}" y="${n.y-(l2?fs*0.6:0)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" font-weight="600" fill="${sel?'#fff':n.color}" font-family="Noto Sans KR,sans-serif">${l1}</text>
-        ${l2?`<text x="${n.x}" y="${n.y+fs*0.9}" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" font-weight="600" fill="${sel?'#fff':n.color}" font-family="Noto Sans KR,sans-serif">${l2}</text>`:''}
-      </g>`;
-    }).join('');
-  svg.onpointerdown = e => { _mmDrag = {sx:e.clientX-mmOffset.x, sy:e.clientY-mmOffset.y}; };
-  svg.onpointermove = e => { if(!_mmDrag)return; mmOffset.x=e.clientX-_mmDrag.sx; mmOffset.y=e.clientY-_mmDrag.sy; renderMM(); };
-  svg.onpointerup = () => { _mmDrag=null; };
+
+  // 노드
+  mmNodes.forEach(n => {
+    const sel = n.id === mmSelected;
+    // 그림자
+    ctx.shadowColor = 'rgba(0,0,0,0.12)'; ctx.shadowBlur = sel ? 12 : 6;
+    // 원
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
+    ctx.fillStyle = sel ? n.color : n.color + '22';
+    ctx.fill();
+    ctx.strokeStyle = n.color; ctx.lineWidth = sel ? 2.5 : 1.5;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // 텍스트
+    ctx.fillStyle = sel ? '#fff' : n.color;
+    ctx.font = `600 11px "Noto Sans KR", sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // 긴 텍스트 2줄 처리
+    const words = n.text.split(' ');
+    if (words.length > 2 || n.text.length > 8) {
+      const mid = Math.ceil(words.length / 2);
+      const l1 = words.slice(0, mid).join(' ');
+      const l2 = words.slice(mid).join(' ');
+      ctx.fillText(l1, n.x, n.y - 7);
+      ctx.fillText(l2, n.x, n.y + 7);
+    } else {
+      ctx.fillText(n.text, n.x, n.y);
+    }
+  });
+
+  ctx.restore();
 }
-function findMMNode(id, node) {
-  if (!node) return null;
-  if (node.id===id) return node;
-  for (const c of node.children) { const f=findMMNode(id,c); if(f) return f; }
-  return null;
+
+function addMMNode(text, color) {
+  // AI가 추가할 때 — 기존 노드들 피해서 배치
+  const canvas = document.getElementById('mmCanvas');
+  const W = canvas.width || 400, H = canvas.height || 400;
+  const angle = (mmNodes.length * 137.5) * Math.PI / 180;
+  const r = 100 + mmNodes.length * 20;
+  const x = W/2 - mmTranslate.x + Math.cos(angle) * r;
+  const y = H/2 - mmTranslate.y + Math.sin(angle) * r;
+  const node = { id: 'n_'+Date.now()+'_'+Math.random(), text, x, y, color: color || MM_COLORS[_mmColorIdx++ % MM_COLORS.length], r: 36 };
+  mmNodes.push(node);
+  if (mmNodes.length > 1) {
+    // 직전 노드와 자동 연결
+    const prev = mmNodes[mmNodes.length - 2];
+    mmEdges.push({ from: prev.id, to: node.id });
+  }
+  if (canvas.style.display === 'none') initMMCanvas();
+  else renderMMCanvas();
+  return node;
 }
-function selectMM(id) {
-  mmSelected = findMMNode(id, mmData.root);
+
+function renameMMNode(text) {
+  const node = mmNodes.find(n => n.id === mmSelected);
+  if (node) { node.text = text; renderMMCanvas(); }
+}
+function deleteMMNode() {
   if (!mmSelected) return;
-  renderMM();
-  document.getElementById('mmNodeTitle').textContent = mmSelected.text;
-  document.getElementById('mmNodePanel').style.display = 'block';
+  mmNodes = mmNodes.filter(n => n.id !== mmSelected);
+  mmEdges = mmEdges.filter(e => e.from !== mmSelected && e.to !== mmSelected);
+  mmSelected = null;
+  document.getElementById('mmNodePanel').style.display = 'none';
+  renderMMCanvas();
 }
-function closeMM() { mmSelected=null; document.getElementById('mmNodePanel').style.display='none'; renderMM(); }
-async function expandMM() {
-  if (!mmSelected) return;
-  const node = mmSelected;
-  document.getElementById('mmNodePanel').style.display='none';
+async function expandMMNode() {
+  const node = mmNodes.find(n => n.id === mmSelected);
+  if (!node) return;
+  document.getElementById('mmNodePanel').style.display = 'none';
+  showToast('AI 확장 중...');
   try {
     const raw = await callClaude([{role:'user',content:`"${node.text}" 에서 연결되는 아이디어/키워드 4개를 JSON으로:\n{"nodes":["키워드1","키워드2","키워드3","키워드4"]}\nJSON만 반환. 한국어.`}], '브레인스토밍 도우미. JSON만 반환.');
     const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
-    (parsed.nodes||[]).forEach((text,i) => {
-      node.children.push({id:'n_'+Date.now()+'_'+i, text, color:MM_COLORS[(MM_COLORS.indexOf(node.color)+1+i)%MM_COLORS.length], children:[], level:(node.level||0)+1});
+    (parsed.nodes||[]).forEach((text, i) => {
+      const angle = (i / (parsed.nodes.length)) * Math.PI * 2 + Math.random();
+      const dist = 120 + Math.random() * 40;
+      const newNode = { id:'n_'+Date.now()+'_'+i, text, x: node.x + Math.cos(angle)*dist, y: node.y + Math.sin(angle)*dist, color: MM_COLORS[(_mmColorIdx++) % MM_COLORS.length], r: 32 };
+      mmNodes.push(newNode);
+      mmEdges.push({ from: node.id, to: newNode.id });
     });
-    renderMM();
+    renderMMCanvas();
   } catch(e) { showToast('확장 실패'); }
 }
-function mmToChat() {
-  if (!mmSelected) return;
-  const ta = document.getElementById('dumpInput');
-  ta.value = mmSelected.text + '에 대해 더 깊이 생각해봐';
-  ta.focus(); closeMM();
+function closeMM() {
+  mmSelected = null;
+  document.getElementById('mmNodePanel').style.display = 'none';
+  renderMMCanvas();
+}
+function clearDump() {
+  // 대화 초기화
+  const msgs = document.getElementById('dumpMessages');
+  msgs.innerHTML = '<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>지금 머릿속에 있는 거 다 쏟아내봐 🧠<br>할 일, 걱정, 아이디어, 뭐든</div>';
+  getDay().dumps = []; save();
+  // 마인드맵 초기화
+  mmNodes = []; mmEdges = []; mmSelected = null; mmConnectFrom = null; _mmColorIdx = 0;
+  mmTranslate = {x:0, y:0};
+  const canvas = document.getElementById('mmCanvas');
+  canvas.style.display = 'none';
+  document.getElementById('mmEmpty').style.display = 'flex';
+  document.getElementById('mmNodePanel').style.display = 'none';
+  showToast('🗑 청소 완료');
 }
 
 // ── 사진/음성 ──
