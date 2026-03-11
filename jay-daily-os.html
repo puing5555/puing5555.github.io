@@ -720,12 +720,6 @@ body {
     <div class="empty"><div class="empty-icon">🎯</div><div class="empty-text">목표를 추가해봐<br>항상 여기서 볼 수 있어</div></div>
   </div>
 
-  <!-- 일기 -->
-  <div class="right-section" style="flex-shrink:0">
-    <div class="right-section-title">오늘 일기</div>
-    <div class="diary-box" id="diaryBox">아직 일기가 없어</div>
-    <button class="diary-gen-btn" onclick="generateDiary()">✨ AI 일기 생성</button>
-  </div>
 </div>
 
 <!-- 숨김 파일 입력 -->
@@ -938,7 +932,7 @@ function switchPanel(name, el) {
 async function callClaude(messages, system) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 4000, system, messages })
   });
   const data = await res.json();
