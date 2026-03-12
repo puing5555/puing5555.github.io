@@ -2401,9 +2401,12 @@ function loadSession(id) {
     document.getElementById('mmCanvas').style.display = 'none';
   }
 
+  // 대화 히스토리 복원 (AI 맥락 + turnCount 정상화)
+  _dumpHistory = s.messages.map(m => ({ role: m.role, content: m.text }));
+
   // 읽기전용 표시
   if (!s.live) {
-    msgs.innerHTML += `<div class="msg-meta" style="align-self:center;font-size:11px;color:var(--muted);background:var(--surface2);padding:6px 14px;border-radius:100px;margin-top:8px">📖 ${s.date} ${s.time} 세션 — 읽기 전용 · New 버튼으로 새 대화 시작</div>`;
+    msgs.innerHTML += `<div class="msg-meta" style="align-self:center;font-size:11px;color:var(--muted);background:var(--surface2);padding:6px 14px;border-radius:100px;margin-top:8px">📖 ${s.date} ${s.time} 세션 불러옴 · 이어서 대화 가능 · New로 초기화</div>`;
   }
 
   msgs.scrollTop = msgs.scrollHeight;
