@@ -1163,23 +1163,23 @@ async function sendDump() {
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(6자이내)","children":[{"label":"개념A(5자이내)","children":[{"label":"세부a(5자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
 
+mindmap 구조 예시 (반드시 이 형식):
+{"root":"루틴문제","children":[
+  {"label":"원인","children":[{"label":"불규칙","children":[]},{"label":"의지부족","children":[]}]},
+  {"label":"영향","children":[{"label":"몸무거움","children":[]},{"label":"계획실패","children":[]}]}
+]}
+→ 이렇게 부모→자식 계층으로. 절대 flat하게 나열하지 마.
+→ 기존 노드: [${existingNodes || '없음'}] — 이미 있는 건 children에 포함 금지
+
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
-  ? `- 답변 모드: 구체적 액션/판단을 직접 줘.
-- solutions 필드에 핵심 실행 항목 배열. 예) ["기상고정","물한잔","10분운동"] — 6자 이내.
-- mindmap은 null.`
-  : `- 탐색 모드: 질문 1개로 끝내. solutions는 [].`}
+  ? `- 답변 모드: 구체적 액션/판단 직접 줘.
+- solutions: ["실행항목1","실행항목2",...] 5자 이내 배열. mindmap은 null.`
+  : `- 탐색 모드: 질문 1개로 끝내. solutions: [].
+- mindmap: 대화에서 나온 개념들을 인과/계층 트리로. root는 ${rootNode ? `"${rootNode.text}"` : '첫 대화의 핵심 주제'}.`}
 - 1-2문장 구어체, 이전 맥락 반영
 
-마인드맵 규칙 (탐색 모드만):
-- ${currentRoot}
-- 기존 노드: [${existingNodes || '없음'}] — 비슷하면 추가 금지
-- root: 첫 대화면 핵심주제, 이후엔 기존 루트 유지
-- 인과관계/계층 트리로 구성. 예) 루틴문제→원인들→각원인의세부→해결방향. 모든 개념이 부모-자식 관계로 연결
-- children 깊이는 최대 3단계. 각 노드 최대 자식 3개
-- 텍스트 5자 이내
-
-할일 규칙: "해야해", "할거야" 같은 명확한 액션만.`;
+할일 규칙: 명확한 액션만. 상태/사실 금지.`;
 
 
   try {
@@ -1262,21 +1262,17 @@ ${isAnswerMode
     renderRightDumps(); // 우측 패널 업데이트
 
     // 마인드맵 처리
-    // 마인드맵 처리
     if (isAnswerMode) {
-      // 답변 모드: AI가 반환한 solutions 배열을 직접 노드로
       const solutions = parsed.solutions || [];
       if (solutions.length > 0 && mmRootId) {
         mmSnapshot();
         const rootText = mmNodes.find(n => n.id === mmRootId)?.text || '';
-        const fakeMap = {
+        buildMMFromStructure({
           root: rootText,
-          branches: solutions.map(label => ({ label: String(label).slice(0,6), parentLabel: rootText }))
-        };
-        buildMMFromStructure(fakeMap);
+          children: solutions.map(s => ({ label: String(s).slice(0,5), children: [] }))
+        });
       }
-    } else if (parsed.mindmap && parsed.mindmap.root) {
-      // 탐색 모드: AI가 생성한 마인드맵 사용
+    } else if (parsed.mindmap && (parsed.mindmap.children?.length || parsed.mindmap.branches?.length)) {
       mmSnapshot();
       buildMMFromStructure(parsed.mindmap);
     }
