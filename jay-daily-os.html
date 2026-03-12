@@ -140,8 +140,8 @@ body {
 }
 #panel-dump.active { display: grid; }
 .dump-chat-col {
-  display: flex; flex-direction: column; min-width: 0; overflow: hidden;
-  border-right: none;
+  display: flex; flex-direction: column; min-width: 0;
+  overflow: hidden; position: relative;
 }
 .dump-map-col {
   display: flex; flex-direction: column;
@@ -2422,12 +2422,12 @@ function init() {
     e.stopPropagation();
     _rDragging = true;
     _rStartX = e.clientX;
-    const cols = getComputedStyle(dumpPanel).gridTemplateColumns.split(' ');
-    _rStartW = parseFloat(cols[0]);
+    // 인라인 스타일 먼저, 없으면 420 기본값
+    const inlineGrid = dumpPanel.style.gridTemplateColumns;
+    _rStartW = inlineGrid ? parseFloat(inlineGrid.split(' ')[0]) : 420;
     resizer.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-    // 캔버스 이벤트 차단
     const canvas = document.getElementById('mmCanvas');
     if (canvas) canvas.style.pointerEvents = 'none';
   });
