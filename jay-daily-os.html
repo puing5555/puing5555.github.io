@@ -1207,7 +1207,8 @@ mindmap 규칙:
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
   ? `- 답변 모드: 구체적 액션/판단 직접 줘.
-- solutions: ["실행항목1","실행항목2",...] 8자 이내 배열(3~6개). mindmap은 null.`
+- solutions: 카테고리별 그룹. 형식: [{"group":"카테고리명(4자이내)","items":["항목1","항목2"]}] (2~4그룹, 항목 각 1~3개, 8자이내). mindmap은 null.
+- 예: [{"group":"시간","items":["블록배정","우선순위"]},{"group":"실행","items":["주간리뷰","체크리스트"]}]`
   : `- 탐색 모드: 질문 1개로 끝내. solutions: [].
 - mindmap: 대화에서 나온 개념들을 인과/계층 트리로. root는 ${rootNode ? `"${rootNode.text}"` : '첫 대화의 핵심 주제'}.`}
 - 1-2문장 구어체, 이전 맥락 반영
@@ -1309,17 +1310,24 @@ ${isAnswerMode
       let solutions = parsed.solutions || [];
       // solutions가 비었으면 reply 텍스트에서 추출 시도
       if (solutions.length === 0 && parsed.reply) {
-        solutions = _extractSolutionsFromReply(parsed.reply);
+        const extracted = _extractSolutionsFromReply(parsed.reply);
+        if (extracted.length > 0) solutions = [{ group: '해결', items: extracted }];
       }
       if (solutions.length > 0 && mmRootId) {
         mmSnapshot();
         const rootText = mmNodes.find(n => n.id === mmRootId)?.text || '';
-        // 답변 모드 노드: "해결" 브랜치 아래에 솔루션 배치
-        const solutionBranch = {
-          root: rootText,
-          children: [{ label: '💡해결', children: solutions.map(s => ({ label: String(s).slice(0, 8), children: [] })) }]
-        };
-        buildMMFromStructure(solutionBranch);
+        let solutionChildren;
+        // 그룹 구조 지원: [{group, items}] 형식
+        if (solutions[0] && solutions[0].group) {
+          solutionChildren = solutions.map(g => ({
+            label: '💡' + String(g.group || '해결').slice(0, 5),
+            children: (g.items || []).map(item => ({ label: String(item).slice(0, 10), children: [] }))
+          }));
+        } else {
+          // flat 배열 호환 (레거시)
+          solutionChildren = [{ label: '💡해결', children: solutions.map(s => ({ label: String(s).slice(0, 10), children: [] })) }];
+        }
+        buildMMFromStructure({ root: rootText, children: solutionChildren });
       }
     } else if (parsed.mindmap && (parsed.mindmap.children?.length || parsed.mindmap.branches?.length)) {
       mmSnapshot();
