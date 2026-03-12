@@ -1135,16 +1135,18 @@ async function sendDump() {
   const existingNodes = mmNodes.filter(n => n.id !== mmRootId).map(n => n.text).join(', ');
 
   const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
-  const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|답|해결|방향|어떻게 해|뭘 해야|추천|선택|골라|뭐냐|뭐지|알려줘/.test(input);
+  const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|해결|방향|뭘 해야|추천|선택|골라|뭐냐|뭐지|알려줘|뭐야|뭔데|줘봐|줘봐|알려|방법/.test(input);
+  // 3턴 미만이어도 해결/답변 키워드 있으면 답변 모드
+  const isAnswerMode = isAskingForAnswer || turnCount >= 5;
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","branches":[{"label":"가지텍스트(6자이내)","parentLabel":null}]},"focus":"오늘 딱 하나만"}
 
 대화 모드 (지금 ${turnCount}턴):
-${turnCount < 3 || !isAskingForAnswer
-  ? `- 탐색 모드: 질문으로 생각을 더 꺼내게 도와줘. 답 주지 말고 "왜?", "그럼 어떻게 될 것 같아?", "가장 걱정되는 게 뭐야?" 같은 질문 1개로 끝내`
-  : `- 답변 모드: JAY가 결론/방향을 원함. 구체적 액션이나 판단을 줘. "이렇게 해봐", "A보다 B가 낫겠어" 식으로 직접적으로`}
+${isAnswerMode
+  ? `- 답변 모드: JAY가 결론/방향을 원함. 구체적 액션이나 판단을 줘. "이렇게 해봐", "A보다 B가 낫겠어" 식으로 직접적으로`
+  : `- 탐색 모드: 질문으로 생각을 더 꺼내게 도와줘. 답 주지 말고 "왜?", "그럼 어떻게 될 것 같아?", "가장 걱정되는 게 뭐야?" 같은 질문 1개로 끝내`}
 - 단, 답 주고 나서도 JAY가 다시 막히면 탐색 모드로 자연스럽게 전환
 - 1-2문장 구어체, 이전 맥락 반영
 
@@ -1152,8 +1154,8 @@ ${turnCount < 3 || !isAskingForAnswer
 - ${currentRoot}
 - 기존 노드 전체: [${existingNodes || '없음'}] ← 이 목록에 있는 텍스트와 동일하거나 비슷한 건 절대 추가하지 마
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
-${isAskingForAnswer
-  ? `- 지금은 답변/해결책 요청: 해결책/액션 항목들을 각각 별도 가지로. "기상시간 고정", "물 한잔" 같은 구체적 실행 항목으로`
+${isAnswerMode
+  ? `- 지금은 답변/해결책 요청: 해결책/액션 항목들을 각각 별도 가지로. "기상시간 고정", "물 한잔" 같은 구체적 실행 항목으로. 반드시 가지 생성`
   : `- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 절대 묶거나 생략하지 마`}
 - 기존 노드와 동일/유사한 텍스트면 mindmap:null 반환
 - 노드 텍스트는 반드시 6자 이내로
