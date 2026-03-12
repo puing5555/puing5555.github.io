@@ -1680,6 +1680,8 @@ function initMMCanvas() {
     }
   });
 
+  let _mmMergeTarget = null; // 드래그 중 병합 대상 노드
+
   canvas.addEventListener('pointermove', e => {
     if (_mmDragging) {
       const rect = canvas.getBoundingClientRect();
@@ -1696,6 +1698,18 @@ function initMMCanvas() {
           if (nd) { nd.x += dx; nd.y += dy; }
         });
         node.x += dx; node.y += dy;
+
+        // 병합 대상 감지: 드래그 중인 노드와 겹치는 다른 노드
+        _mmMergeTarget = null;
+        for (const other of mmNodes) {
+          if (other.id === node.id || other.id === mmRootId && node.id !== mmRootId) continue;
+          if (node.id === mmRootId) continue; // 루트는 병합 안 함
+          const d = Math.hypot(other.x - node.x, other.y - node.y);
+          if (d < (node.r + other.r) * 0.6) {
+            _mmMergeTarget = other.id;
+            break;
+          }
+        }
       }
       renderMMCanvas();
     } else if (_mmPanning) {
@@ -1724,7 +1738,21 @@ function initMMCanvas() {
     }
   });
 
-  canvas.addEventListener('pointerup', () => { _mmDragging = null; _mmPanning = null; });
+  canvas.addEventListener('pointerup', () => {
+    // 드래그 종료 시 병합 대상이 있으면 병합 실행
+    if (_mmDragging && _mmMergeTarget) {
+      const dragId = _mmDragging.id;
+      const targetId = _mmMergeTarget;
+      _mmMergeTarget = null;
+      _mmDragging = null;
+      _mmPanning = null;
+      mergeMMNodes(dragId, targetId);
+      return;
+    }
+    _mmMergeTarget = null;
+    _mmDragging = null;
+    _mmPanning = null;
+  });
 
   // 스크롤 줌
   canvas.addEventListener('wheel', e => {
@@ -1829,13 +1857,18 @@ function renderMMCanvas() {
   // 노드
   mmNodes.forEach(n => {
     const sel = n.id === mmSelected;
-    ctx.shadowColor = 'rgba(0,0,0,0.10)'; ctx.shadowBlur = sel ? 14 : 5;
+    const isMergeTarget = _mmMergeTarget && n.id === _mmMergeTarget;
+    ctx.shadowColor = isMergeTarget ? 'rgba(34,119,221,0.5)' : 'rgba(0,0,0,0.10)';
+    ctx.shadowBlur = isMergeTarget ? 20 : sel ? 14 : 5;
     // 원 — 내부 흰색, 테두리만 색상
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = isMergeTarget ? 'rgba(34,119,221,0.08)' : '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = n.color; ctx.lineWidth = sel ? 2.5 : 1.8;
+    ctx.strokeStyle = isMergeTarget ? '#2277dd' : n.color;
+    ctx.lineWidth = isMergeTarget ? 3 : sel ? 2.5 : 1.8;
+    if (isMergeTarget) ctx.setLineDash([6, 3]);
     ctx.stroke();
+    if (isMergeTarget) ctx.setLineDash([]);
     ctx.shadowBlur = 0;
     // 텍스트 — 항상 해당 색상
     ctx.fillStyle = n.color;
@@ -2085,6 +2118,53 @@ function resizeMMNode(r) {
   const node = mmNodes.find(n => n.id === mmSelected);
   if (node) { node.r = r; document.getElementById('mmNodeSizeVal').textContent = r; renderMMCanvas(); }
 }
+// 두 노드 병합: dragNode를 targetNode에 합침
+function mergeMMNodes(dragId, targetId) {
+  const dragNode = mmNodes.find(n => n.id === dragId);
+  const targetNode = mmNodes.find(n => n.id === targetId);
+  if (!dragNode || !targetNode) return;
+  if (dragId === mmRootId) return; // 루트는 병합 불가
+
+  mmSnapshot();
+
+  // 텍스트 병합 (중복 제거)
+  const a = targetNode.text.trim(), b = dragNode.text.trim();
+  if (a.includes(b) || b.includes(a)) {
+    targetNode.text = a.length >= b.length ? a : b;
+  } else {
+    // 합쳐서 최대 12자
+    const merged = a + ' ' + b;
+    targetNode.text = merged.length <= 12 ? merged : merged.slice(0, 12);
+  }
+
+  // 크기는 둘 중 큰 것 + 약간
+  targetNode.r = Math.min(60, Math.max(targetNode.r, dragNode.r) + 4);
+
+  // dragNode의 엣지를 targetNode로 이관
+  mmEdges.forEach(e => {
+    if (e.from === dragId) e.from = targetId;
+    if (e.to === dragId) e.to = targetId;
+  });
+  // 자기 자신 연결 제거
+  mmEdges = mmEdges.filter(e => e.from !== e.to);
+  // 중복 엣지 제거
+  const edgeSet = new Set();
+  mmEdges = mmEdges.filter(e => {
+    const key = [e.from, e.to].sort().join('|');
+    if (edgeSet.has(key)) return false;
+    edgeSet.add(key);
+    return true;
+  });
+
+  // dragNode 삭제
+  mmNodes = mmNodes.filter(n => n.id !== dragId);
+  mmSelected = targetNode.id;
+
+  showToast(`병합: ${targetNode.text}`);
+  renderMMCanvas();
+  upsertLiveSession();
+}
+
 function deleteMMNode() {
   if (!mmSelected) return;
   mmSnapshot();
