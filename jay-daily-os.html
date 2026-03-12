@@ -2058,7 +2058,7 @@ function deleteGoal(i) {
 // 세션 = 청소 또는 첫 오픈 시 저장되는 대화 묶음
 // 구조: [{id, date, summary, messages:[{role,text}], savedAt}]
 let sessionHistory = JSON.parse(localStorage.getItem('jay_sessions') || '[]');
-let _currentSessionMsgs = JSON.parse(localStorage.getItem('jay_currentSession') || '[]'); // 복원
+let _currentSessionMsgs = JSON.parse(localStorage.getItem('jay_currentSession') || '[]'); // 진행중 세션 복원
 
 function recordSessionMsg(role, text) {
   _currentSessionMsgs.push({ role, text: text.slice(0, 300) });
@@ -2456,12 +2456,15 @@ window.onload = () => {
   init();
   renderRightDumps();
   // 새로고침 후 미분석 세션 백그라운드 처리 (API 키 로드 후 약간 딜레이)
+  // 단, 현재 진행중인 세션(jay_currentSession)은 분석하지 않음
   setTimeout(() => analyzeUnprocessedSessions(), 1500);
 };
 
 // 새로고침/탭 닫기 시 현재 세션 자동 저장
 window.addEventListener('beforeunload', () => {
-  saveCurrentSession();
+  if (_currentSessionMsgs.length >= 2) {
+    saveCurrentSession();
+  }
 });
 </script>
 </body>
