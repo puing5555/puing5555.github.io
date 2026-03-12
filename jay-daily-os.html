@@ -148,15 +148,21 @@ body {
 }
 /* 리사이즈 구분선 */
 .dump-resizer {
-  width: 8px; cursor: col-resize; background: transparent; flex-shrink: 0;
-  position: relative; z-index: 10;
+  width: 12px; cursor: col-resize; flex-shrink: 0;
+  background: transparent; position: relative; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+}
+.dump-resizer::before {
+  content: '⋮'; color: var(--border2); font-size: 16px; line-height: 1;
+  transition: color 0.15s;
 }
 .dump-resizer::after {
-  content: ''; position: absolute; top: 0; left: 3px;
+  content: ''; position: absolute; top: 0; left: 5px;
   width: 2px; height: 100%; background: var(--border);
   transition: background 0.15s;
 }
-.dump-resizer:hover::after, .dump-resizer.dragging::after { background: var(--border2); }
+.dump-resizer:hover::before, .dump-resizer.dragging::before { color: var(--accent); }
+.dump-resizer:hover::after, .dump-resizer.dragging::after { background: var(--accent); }
 .dump-col-hdr {
   padding: 10px 16px; border-bottom: 1px solid var(--border);
   font-size: 12px; font-weight: 700; color: var(--muted);
