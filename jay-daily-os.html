@@ -1867,10 +1867,24 @@ function recalcMMDepths() {
   });
 }
 
+let _mmSaveTimer = null;
 function renderMMCanvas() {
   recalcMMDepths();
   const canvas = document.getElementById('mmCanvas');
   if (!canvas || canvas.style.display === 'none') return;
+
+  // 디바운스 세션 저장 (1초 후 자동 저장 — 렌더링마다가 아닌 변경 멈춘 후)
+  clearTimeout(_mmSaveTimer);
+  _mmSaveTimer = setTimeout(() => {
+    if (_currentSessionMsgs.length > 0) upsertLiveSession();
+    // beforeunload용 상태도 업데이트
+    if (mmNodes.length > 0) {
+      localStorage.setItem('jay_mmState', JSON.stringify({
+        nodes: mmNodes, edges: mmEdges, rootId: mmRootId
+      }));
+    }
+  }, 1000);
+
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
