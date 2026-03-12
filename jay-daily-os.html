@@ -1161,25 +1161,25 @@ async function sendDump() {
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","branches":[{"label":"가지텍스트(6자이내)","parentLabel":null}]},"solutions":[],"focus":"오늘 딱 하나만"}
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(6자이내)","children":[{"label":"개념A(5자이내)","children":[{"label":"세부a(5자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
 
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
-  ? `- 답변 모드: JAY가 결론/방향을 원함. 구체적 액션이나 판단을 줘. "이렇게 해봐" 식으로 직접적으로.
-- solutions 필드에 핵심 실행 항목을 배열로. 예) ["기상시간고정","물한잔","10분운동"] — 각 항목 6자 이내, 완전히 새로운 해결책/액션만.
-- mindmap은 null로.`
-  : `- 탐색 모드: 질문으로 생각을 더 꺼내게 도와줘. 답 주지 말고 질문 1개로 끝내.
-- solutions는 빈 배열 [].`}
+  ? `- 답변 모드: 구체적 액션/판단을 직접 줘.
+- solutions 필드에 핵심 실행 항목 배열. 예) ["기상고정","물한잔","10분운동"] — 6자 이내.
+- mindmap은 null.`
+  : `- 탐색 모드: 질문 1개로 끝내. solutions는 [].`}
 - 1-2문장 구어체, 이전 맥락 반영
 
 마인드맵 규칙 (탐색 모드만):
 - ${currentRoot}
-- 기존 노드 전체: [${existingNodes || '없음'}]
-- root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
-- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 기존 노드 목록과 비슷하면 추가 금지
-- 노드 텍스트는 반드시 6자 이내로
+- 기존 노드: [${existingNodes || '없음'}] — 비슷하면 추가 금지
+- root: 첫 대화면 핵심주제, 이후엔 기존 루트 유지
+- 인과관계/계층 트리로 구성. 예) 루틴문제→원인들→각원인의세부→해결방향. 모든 개념이 부모-자식 관계로 연결
+- children 깊이는 최대 3단계. 각 노드 최대 자식 3개
+- 텍스트 5자 이내
 
-할일 규칙: "해야해", "할거야" 같은 명확한 액션만. 상태/사실은 tasks금지.`;
+할일 규칙: "해야해", "할거야" 같은 명확한 액션만.`;
 
 
   try {
@@ -1861,78 +1861,66 @@ function buildMMFromStructure(mm) {
       text: mm.root || '주제',
       x: cx, y: cy,
       color: MM_COLORS[_mmColorIdx++ % MM_COLORS.length],
-      r: 52
+      r: 52, _depth: 0
     };
     mmNodes.push(rootNode);
     mmRootId = rootNode.id;
   }
 
-  // ── 매 대화: 기존 트리에 가지 추가 ──
-  const branches = mm.branches || mm.children || [];
-  const existingBranchCount = mmNodes.filter(n => n._depth === 1).length;
+  // ── 재귀 트리 빌더 ──
+  function _addTreeNode(children, parentId, parentDepth, parentX, parentY, startAngle, angleSpan) {
+    if (!children || !children.length) return;
+    children.forEach((child, ci) => {
+      const label = (child.label || child).toString().slice(0, 6);
+      if (!label) return;
 
-  branches.forEach((branch, bi) => {  // 제한 없음
-    const branchLabel = branch.label || branch;
-    const parentLabel = branch.parentLabel || null;
+      // 중복 체크
+      const isDup = mmNodes.some(n => {
+        if (n.id === parentId) return false;
+        const a = n.text.replace(/\s/g,''), b = label.replace(/\s/g,'');
+        return a === b || a.includes(b) || b.includes(a) ||
+          (a.length >= 2 && b.length >= 2 && a.slice(0,2) === b.slice(0,2));
+      });
+      if (isDup) return;
 
-    // parentLabel이 있으면 기존 노드에 children으로 붙이기
-    const parentNode = parentLabel
-      ? (mmNodes.find(n => n.text === parentLabel) || mmNodes.find(n => n.id === mmRootId))
-      : mmNodes.find(n => n.id === mmRootId);
-    if (!parentNode) return;
+      const depth = parentDepth + 1;
+      const r = depth === 1 ? 38 : depth === 2 ? 28 : 22;
+      const dist = depth === 1 ? 170 : depth === 2 ? 130 : 100;
+      const color = depth === 1
+        ? MM_COLORS[_mmColorIdx++ % MM_COLORS.length]
+        : (mmNodes.find(n => n.id === parentId)?.color || MM_COLORS[0]);
 
-    // 전체 노드에서 유사 텍스트 중복 체크
-    const isDuplicate = mmNodes.some(n => {
-      if (n.id === parentNode.id) return false;
-      const a = n.text.replace(/\s/g,''), b = branchLabel.replace(/\s/g,'');
-      if (a === b || a.includes(b) || b.includes(a)) return true;
-      // 앞 2글자 일치하면 같은 개념으로 판단
-      if (a.length >= 2 && b.length >= 2 && a.slice(0,2) === b.slice(0,2)) return true;
-      return false;
+      // 각도: 부모 기준으로 자식들을 균등 배치
+      const total = children.length;
+      const angle = startAngle + angleSpan * (ci / Math.max(total - 1, 1) - 0.5);
+      const nx = parentX + Math.cos(angle) * dist;
+      const ny = parentY + Math.sin(angle) * dist;
+
+      const node = { id: 'n_' + Date.now() + '_' + depth + '_' + ci, text: label, x: nx, y: ny, color, r, _depth: depth };
+      mmNodes.push(node);
+      mmEdges.push({ from: parentId, to: node.id });
+
+      // 자식의 자식 — 각도 범위를 좁혀서 재귀
+      if (Array.isArray(child.children) && child.children.length) {
+        _addTreeNode(child.children, node.id, depth, nx, ny, angle, Math.min(angleSpan * 0.7, Math.PI * 0.8));
+      }
     });
-    if (isDuplicate) return;
+  }
 
-    const parentDepth = parentNode._depth ?? 0;
-    const childDepth = parentDepth + 1;
+  const rootNodeObj = mmNodes.find(n => n.id === mmRootId);
+  const topChildren = mm.children || mm.branches || [];
 
-    const bColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
+  // 기존 depth-1 자식 수 기반으로 시작 각도 오프셋
+  const existingChildren = mmEdges.filter(e => e.from === mmRootId).length;
+  const totalTop = existingChildren + topChildren.length;
+  const baseAngle = existingChildren > 0
+    ? (existingChildren / totalTop) * Math.PI * 2 - Math.PI / 2
+    : -Math.PI / 2;
 
-    // 각도 계산 — parentNode 기준
-    const siblingCount = mmEdges.filter(e => e.from === parentNode.id).length;
-    const bIdx = siblingCount + bi;
-    const bAngle = (bIdx / Math.max(siblingCount + branches.length, 1)) * Math.PI * 2 - Math.PI / 2;
-    const bDist = parentDepth === 0 ? 170 : 130;
-    const bx = parentNode.x + Math.cos(bAngle) * bDist;
-    const by = parentNode.y + Math.sin(bAngle) * bDist;
-
-    const branchNode = {
-      id: 'b_' + Date.now() + '_' + bi,
-      text: branchLabel, x: bx, y: by,
-      color: bColor, r: childDepth === 1 ? 38 : 28, _depth: childDepth, _angle: bAngle
-    };
-    mmNodes.push(branchNode);
-    mmEdges.push({ from: parentNode.id, to: branchNode.id });
-
-    const subs = (Array.isArray(branch.children) ? branch.children : (branch.subs || []));
-    subs.forEach((sub, si) => {
-      const subLabel = typeof sub === 'string' ? sub : sub.label;
-      if (!subLabel) return;
-      const spread = subs.length === 1 ? 0 : (si - (subs.length - 1) / 2) * 0.55;
-      const sAngle = bAngle + spread;
-      const sDist = 110;
-      const sx = bx + Math.cos(sAngle) * sDist;
-      const sy = by + Math.sin(sAngle) * sDist;
-      const subNode = {
-        id: 'n_' + Date.now() + '_' + bi + '_' + si,
-        text: subLabel, x: sx, y: sy,
-        color: bColor, r: 24, _depth: childDepth + 1
-      };
-      mmNodes.push(subNode);
-      mmEdges.push({ from: branchNode.id, to: subNode.id });
-    });
-  });
+  _addTreeNode(topChildren, mmRootId, 0, rootNodeObj.x, rootNodeObj.y, baseAngle, Math.PI * 2);
 
   document.getElementById('mmEmpty').style.display = 'none';
+  recalcMMDepths();
   renderMMCanvas();
 }
 
