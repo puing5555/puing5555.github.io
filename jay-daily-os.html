@@ -1137,7 +1137,7 @@ async function sendDump() {
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","parentLabel":"기존노드텍스트(루트에붙이면null)","children":[]}]},"focus":"오늘 딱 하나만"}
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","branches":[{"label":"가지텍스트(6자이내)","parentLabel":null}]},"focus":"오늘 딱 하나만"}
 
 대화 모드 (지금 ${turnCount}턴):
 ${turnCount < 3 || !isAskingForAnswer
@@ -1175,7 +1175,16 @@ ${turnCount < 3 || !isAskingForAnswer
 
     const raw = await callClaude(_dumpHistory, system);
     typingEl.remove();
-    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    } catch(jsonErr) {
+      // JSON 파싱 실패 시 reply 텍스트만 추출 시도
+      console.warn('JSON parse failed, raw:', raw);
+      const replyMatch = raw.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      parsed = { reply: replyMatch ? replyMatch[1].replace(/\\n/g,'\n') : raw.slice(0, 300) };
+    }
 
     // AI 응답도 히스토리에 추가
     _dumpHistory.push({ role: 'assistant', content: raw });
