@@ -1443,8 +1443,11 @@ function initMMCanvas() {
 
   const resize = () => {
     const rect = canvas.parentElement.getBoundingClientRect();
+    const hdr = canvas.parentElement.querySelector('.dump-col-hdr');
+    const hdrH = hdr ? hdr.getBoundingClientRect().height : 44;
+    const nodePanelH = document.getElementById('mmNodePanel').style.display !== 'none' ? 52 : 0;
     canvas.width = rect.width;
-    canvas.height = rect.height - (document.getElementById('mmNodePanel').style.display !== 'none' ? 52 : 0);
+    canvas.height = rect.height - hdrH - nodePanelH;
     renderMMCanvas();
   };
   new ResizeObserver(resize).observe(canvas.parentElement);
