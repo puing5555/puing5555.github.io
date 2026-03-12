@@ -1091,6 +1091,8 @@ async function callClaude(messages, system) {
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 4000, system, messages })
   });
   const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error?.message || `API ${res.status}: ${JSON.stringify(data)}`);
+  if (!data.content?.[0]?.text) throw new Error('빈 응답: ' + JSON.stringify(data));
   return data.content[0].text;
 }
 
@@ -1247,8 +1249,8 @@ ${turnCount < 3 || !isAskingForAnswer
 
   } catch(e) {
     typingEl.remove();
-    addMsg('ai', '오류 났어. 다시 해봐 🙏');
-    console.error(e);
+    console.error('sendDump error:', e, e.stack);
+    addMsg('ai', `오류: ${e.message || e}`);
   }
   _sending = false;
 }
