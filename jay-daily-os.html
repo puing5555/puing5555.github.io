@@ -1179,19 +1179,47 @@ ${turnCount < 3 || !isAskingForAnswer
     addMsg('ai', parsed.reply || '정리했어!');
     recordSessionMsg('ai', parsed.reply || '');
 
-    (parsed.tasks||[]).forEach(t => { day.tasks.push({...t, when:'today', done:false}); });
-    (parsed.memo||[]).forEach(m => { if(m.text) memoData.push({...m, id:'m_'+Date.now()+'_'+Math.random(), date:new Date().toISOString()}); });
+    // 유사도 체크 함수 — 핵심 키워드 겹치면 중복으로 판단
+    const isSimilar = (a, b) => {
+      const norm = s => s.replace(/\s|하기|만들기|챙기기|정하기|공부|읽기/g,'').toLowerCase();
+      const na = norm(a), nb = norm(b);
+      if (na === nb) return true;
+      if (na.length < 3 || nb.length < 3) return na === nb;
+      // 한쪽이 다른쪽을 포함하면 중복
+      if (na.includes(nb) || nb.includes(na)) return true;
+      // 4자 이상 공통 부분이 있으면 중복
+      for (let i = 0; i <= na.length - 4; i++) {
+        if (nb.includes(na.slice(i, i+4))) return true;
+      }
+      return false;
+    };
+
+    const existingTasks = (day.tasks||[]).map(t => t.text);
+    let addedTasks = 0, addedMemos = 0;
+    (parsed.tasks||[]).forEach(t => {
+      if (!existingTasks.some(e => isSimilar(e, t.text))) {
+        day.tasks.push({...t, when:'today', done:false});
+        existingTasks.push(t.text);
+        addedTasks++;
+      }
+    });
+    (parsed.memo||[]).forEach(m => {
+      if (!m.text) return;
+      if (!memoData.some(e => isSimilar(e.text, m.text))) {
+        memoData.push({...m, id:'m_'+Date.now()+'_'+Math.random(), date:new Date().toISOString()});
+        addedMemos++;
+      }
+    });
     save();
     // 사이드바 뱃지 실시간 업데이트
     const undone = (getDay().tasks||[]).filter(t=>!t.done).length;
     const badge = document.getElementById('taskBadge');
     if (badge) { badge.textContent = undone; badge.style.display = undone ? 'inline' : 'none'; }
 
-    const taskLen = (parsed.tasks||[]).length, memoLen = (parsed.memo||[]).length;
-    if (taskLen || memoLen) {
+    if (addedTasks || addedMemos) {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
-      meta.textContent = `할일 ${taskLen}개 · 메모 ${memoLen}개 저장됨`;
+      meta.textContent = `할일 ${addedTasks}개 · 메모 ${addedMemos}개 저장됨`;
       msgs.appendChild(meta);
     }
     msgs.scrollTop = msgs.scrollHeight;
