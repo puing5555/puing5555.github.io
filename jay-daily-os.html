@@ -139,8 +139,8 @@ body {
 #panel-dump.active { display: flex; }
 
 .dump-chat-col {
-  display: flex; flex-direction: column; min-width: 240px;
-  border-right: 1px solid var(--border); flex-shrink: 0;
+  width: 420px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 200px;
+  border-right: none;
 }
 .dump-map-col {
   flex: 1; display: flex; flex-direction: column;
@@ -148,11 +148,15 @@ body {
 }
 /* 리사이즈 구분선 */
 .dump-resizer {
-  width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0;
-  border-right: 1px solid var(--border); transition: background 0.15s;
-  z-index: 10;
+  width: 8px; cursor: col-resize; background: transparent; flex-shrink: 0;
+  position: relative; z-index: 10;
 }
-.dump-resizer:hover, .dump-resizer.dragging { background: var(--border2); border-color: var(--border2); }
+.dump-resizer::after {
+  content: ''; position: absolute; top: 0; left: 3px;
+  width: 2px; height: 100%; background: var(--border);
+  transition: background 0.15s;
+}
+.dump-resizer:hover::after, .dump-resizer.dragging::after { background: var(--border2); }
 .dump-col-hdr {
   padding: 10px 16px; border-bottom: 1px solid var(--border);
   font-size: 12px; font-weight: 700; color: var(--muted);
@@ -2402,30 +2406,32 @@ function init() {
     document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
     document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
   }
-  // 리사이저 초기 너비 설정
+  // 리사이저
   const chatCol = document.querySelector('.dump-chat-col');
   const savedW = localStorage.getItem('jay_chatColW');
   if (savedW) chatCol.style.width = savedW + 'px';
-  else chatCol.style.width = '420px';
 
-  // 드래그 리사이저
   const resizer = document.getElementById('dumpResizer');
   let _rDragging = false, _rStartX = 0, _rStartW = 0;
+
   resizer.addEventListener('pointerdown', e => {
-    _rDragging = true; _rStartX = e.clientX; _rStartW = chatCol.offsetWidth;
+    e.preventDefault();
+    _rDragging = true;
+    _rStartX = e.clientX;
+    _rStartW = chatCol.getBoundingClientRect().width;
     resizer.classList.add('dragging');
     resizer.setPointerCapture(e.pointerId);
   });
   resizer.addEventListener('pointermove', e => {
     if (!_rDragging) return;
-    const newW = Math.max(240, Math.min(window.innerWidth - 400, _rStartW + (e.clientX - _rStartX)));
+    const newW = Math.max(200, Math.min(window.innerWidth - 300, _rStartW + (e.clientX - _rStartX)));
     chatCol.style.width = newW + 'px';
   });
-  resizer.addEventListener('pointerup', e => {
+  resizer.addEventListener('pointerup', () => {
     if (!_rDragging) return;
     _rDragging = false;
     resizer.classList.remove('dragging');
-    localStorage.setItem('jay_chatColW', chatCol.offsetWidth);
+    localStorage.setItem('jay_chatColW', Math.round(chatCol.getBoundingClientRect().width));
   });
 }
 
