@@ -1013,7 +1013,7 @@ body {
 </div>
 
 <!-- 메모 AI 대화 모달 -->
-<div class="modal-overlay" id="memoChatModal" onclick="if(event.target===this)saveMemoChat();closeModal('memoChatModal')" style="z-index:1100">
+<div class="modal-overlay" id="memoChatModal" onclick="if(event.target===this){saveMemoChat();closeModal('memoChatModal')}" style="z-index:1100">
   <div class="modal-box" style="width:580px;max-width:95vw;height:72vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
     <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
       <div style="font-weight:700;font-size:15px">💬 AI 대화</div>
