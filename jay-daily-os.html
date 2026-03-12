@@ -2455,12 +2455,16 @@ function loadSession(id) {
   }
 
   // 대화 히스토리 복원 (AI 맥락 + turnCount 정상화)
-  _dumpHistory = s.messages.map(m => ({
-    role: m.role,
-    content: m.role === 'assistant'
-      ? (() => { try { return JSON.parse(m.text.replace(/```json|```/g,'')).reply || m.text; } catch(e) { return m.text; } })()
-      : m.text
-  }));
+  _dumpHistory = s.messages
+    .filter(m => m.role === 'user' || m.role === 'ai' || m.role === 'assistant')
+    .map(m => ({
+      role: m.role === 'ai' ? 'assistant' : m.role,
+      content: m.role === 'ai' || m.role === 'assistant'
+        ? (() => { try { return JSON.parse(m.text.replace(/```json|```/g,'')).reply || m.text; } catch(e) { return m.text; } })()
+        : m.text
+    }));
+  // API는 반드시 user로 시작해야 함
+  while (_dumpHistory.length && _dumpHistory[0].role !== 'user') _dumpHistory.shift();
 
   // 읽기전용 표시
   if (!s.live) {
