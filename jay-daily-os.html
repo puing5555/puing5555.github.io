@@ -1197,13 +1197,12 @@ async function sendDump() {
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","children":[{"label":"개념A(8자이내)","children":[{"label":"세부a(8자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
 
-mindmap 구조 예시 (반드시 이 형식):
-{"root":"루틴문제","children":[
-  {"label":"원인","children":[{"label":"불규칙","children":[]},{"label":"의지부족","children":[]}]},
-  {"label":"영향","children":[{"label":"몸무거움","children":[]},{"label":"계획실패","children":[]}]}
-]}
-→ 이렇게 부모→자식 계층으로. 절대 flat하게 나열하지 마.
-→ 기존 노드: [${existingNodes || '없음'}] — 이미 있는 건 children에 포함 금지
+mindmap 규칙:
+→ 이번 대화에서 새로 나온 개념만 추가. 기존 노드 반복 금지.
+→ root는 반드시 기존 루트 "${rootNode?.text || '주제'}" 유지.
+→ children에 새 개념 1~3개만. 기존 노드의 자식으로 붙일 때: {"label":"기존노드명","children":[{"label":"새개념","children":[]}]}
+→ 기존 노드: [${existingNodes || '없음'}] — 이미 있는 건 children의 label에 포함 금지
+→ 새로운 게 없으면 mindmap: null
 
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
@@ -1990,61 +1989,121 @@ function buildMMFromStructure(mm) {
 
   const rootNodeObj = mmNodes.find(n => n.id === mmRootId);
   const topChildren = mm.children || mm.branches || [];
+
+  // 새로 추가된 노드 ID 수집
+  const beforeIds = new Set(mmNodes.map(n => n.id));
   _addTreeNodes(topChildren, mmRootId, 0);
+  const newNodeIds = new Set(mmNodes.filter(n => !beforeIds.has(n.id)).map(n => n.id));
 
-  // ── 서브트리 크기 계산 (잎노드 수) ──
-  function _subtreeSize(nodeId) {
-    const kids = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
-    if (!kids.length) return 1;
-    return kids.reduce((s, kid) => s + _subtreeSize(kid), 0);
-  }
+  // ── 새 노드만 부모 근처에 배치 (기존 노드 위치 보존) ──
+  if (newNodeIds.size > 0) {
+    newNodeIds.forEach(nid => {
+      const node = mmNodes.find(n => n.id === nid);
+      if (!node) return;
+      const parentEdge = mmEdges.find(e => e.to === nid);
+      if (!parentEdge) return;
+      const parent = mmNodes.find(n => n.id === parentEdge.from);
+      if (!parent) return;
 
-  // ── 서브트리 크기 비례 방사형 레이아웃 ──
-  function _layoutTree(nodeId, cx, cy, angleStart, angleEnd, depth) {
-    const kids = mmEdges
-      .filter(e => e.from === nodeId)
-      .map(e => mmNodes.find(n => n.id === e.to))
-      .filter(Boolean);
-    if (!kids.length) return;
+      // 부모의 기존 자식들 위치 파악해서 빈 각도 찾기
+      const siblings = mmEdges.filter(e => e.from === parent.id && e.to !== nid)
+        .map(e => mmNodes.find(n => n.id === e.to)).filter(Boolean);
 
-    const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
-    const dist = depth === 0 ? 210 : depth === 1 ? 165 : 125;
-    const totalAngle = angleEnd - angleStart;
+      const depth = (parent._depth ?? 0) + 1;
+      const dist = depth === 1 ? 210 : depth === 2 ? 165 : 125;
 
-    // 최소 각도: 자식 수에 따라 동적 계산 (겹침 방지)
-    const minSpanPerKid = Math.min(Math.PI * 0.3, totalAngle / kids.length);
-    // 총 minSpan이 totalAngle 초과하면 균등 분할
-    const totalMin = minSpanPerKid * kids.length;
-    const useEqual = totalMin >= totalAngle;
-
-    let cursor = angleStart;
-    kids.forEach((child, i) => {
-      let actualSpan;
-      if (useEqual) {
-        actualSpan = totalAngle / kids.length;
+      if (siblings.length === 0) {
+        // 첫 자식: 부모에서 아래쪽
+        const angle = Math.PI * 0.5 + (Math.random() - 0.5) * 0.3;
+        node.x = parent.x + Math.cos(angle) * dist;
+        node.y = parent.y + Math.sin(angle) * dist;
       } else {
-        const size = _subtreeSize(child.id);
-        const propSpan = totalAngle * (size / totalSize);
-        actualSpan = Math.max(propSpan, minSpanPerKid);
+        // 기존 자식들의 각도 분석, 빈 각도에 배치
+        const angles = siblings.map(s => Math.atan2(s.y - parent.y, s.x - parent.x));
+        angles.sort((a, b) => a - b);
+        // 가장 큰 갭 찾기
+        let bestGap = 0, bestAngle = 0;
+        for (let i = 0; i < angles.length; i++) {
+          const next = i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2;
+          const gap = next - angles[i];
+          if (gap > bestGap) { bestGap = gap; bestAngle = angles[i] + gap / 2; }
+        }
+        node.x = parent.x + Math.cos(bestAngle) * dist;
+        node.y = parent.y + Math.sin(bestAngle) * dist;
       }
-      const midAngle = cursor + actualSpan / 2;
-
-      child.x = cx + Math.cos(midAngle) * dist;
-      child.y = cy + Math.sin(midAngle) * dist;
-
-      _layoutTree(child.id, child.x, child.y, midAngle - actualSpan/2, midAngle + actualSpan/2, depth + 1);
-      cursor += actualSpan;
+      node._depth = depth;
     });
+
+    // 새 노드끼리만 겹침 해소
+    _resolveNewNodeOverlaps(newNodeIds);
   }
-
-  _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
-
-  // ── 노드 겹침 해소 (반발력 기반) ──
-  _resolveNodeOverlaps();
+  // 첫 대화 (루트만 있었을 때)는 전체 레이아웃 한 번 실행
+  else if (mmNodes.length <= 1) {
+    // ── 서브트리 크기 계산 (잎노드 수) ──
+    function _subtreeSize(nodeId) {
+      const kids = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
+      if (!kids.length) return 1;
+      return kids.reduce((s, kid) => s + _subtreeSize(kid), 0);
+    }
+    function _layoutTree(nodeId, cx, cy, angleStart, angleEnd, depth) {
+      const kids = mmEdges
+        .filter(e => e.from === nodeId)
+        .map(e => mmNodes.find(n => n.id === e.to))
+        .filter(Boolean);
+      if (!kids.length) return;
+      const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
+      const dist = depth === 0 ? 210 : depth === 1 ? 165 : 125;
+      const totalAngle = angleEnd - angleStart;
+      const minSpanPerKid = Math.min(Math.PI * 0.3, totalAngle / kids.length);
+      const totalMin = minSpanPerKid * kids.length;
+      const useEqual = totalMin >= totalAngle;
+      let cursor = angleStart;
+      kids.forEach((child, i) => {
+        let actualSpan = useEqual ? totalAngle / kids.length
+          : Math.max(totalAngle * (_subtreeSize(child.id) / totalSize), minSpanPerKid);
+        const midAngle = cursor + actualSpan / 2;
+        child.x = cx + Math.cos(midAngle) * dist;
+        child.y = cy + Math.sin(midAngle) * dist;
+        _layoutTree(child.id, child.x, child.y, midAngle - actualSpan/2, midAngle + actualSpan/2, depth + 1);
+        cursor += actualSpan;
+      });
+    }
+    _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
+    _resolveNodeOverlaps();
+  }
 
   document.getElementById('mmEmpty').style.display = 'none';
   recalcMMDepths();
   renderMMCanvas();
+}
+
+// 새 노드만 대상으로 겹침 해소 (기존 노드는 움직이지 않음)
+function _resolveNewNodeOverlaps(newIds) {
+  const ITERATIONS = 8;
+  const PADDING = 18;
+  const newNodes = mmNodes.filter(n => newIds.has(n.id));
+  if (newNodes.length < 1) return;
+
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    let moved = false;
+    for (const newN of newNodes) {
+      for (const other of mmNodes) {
+        if (other.id === newN.id) continue;
+        const dx = newN.x - other.x, dy = newN.y - other.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const minDist = newN.r + other.r + PADDING;
+        if (dist < minDist) {
+          const push = (minDist - dist);
+          const nx = dx / dist, ny = dy / dist;
+          // 새 노드만 밀어냄
+          newN.x += nx * push;
+          newN.y += ny * push;
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 // 노드 겹침 해소: 반복적으로 겹치는 노드를 밀어냄
