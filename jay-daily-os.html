@@ -1657,6 +1657,9 @@ function initMMCanvas() {
         if (!alreadyLinked) {
           mmSnapshot();
           mmEdges.push({ from: hit.id, to: _pendingConnect });
+          // 연결된 고아 노드 → 부모 색상 상속
+          const orphanNode = mmNodes.find(n => n.id === _pendingConnect);
+          if (orphanNode) orphanNode.color = hit.color;
           showToast('연결됨');
         }
         _pendingConnect = null;
@@ -1788,6 +1791,10 @@ function initMMCanvas() {
         _mmDragging = null; _mmPanning = null;
         mmSnapshot();
         mmEdges.push({ from: dragId, to: targetId });
+        // 드래그한 노드 → 대상 노드 색상 상속
+        const dragNode = mmNodes.find(n => n.id === dragId);
+        const targetNode = mmNodes.find(n => n.id === targetId);
+        if (dragNode && targetNode) dragNode.color = targetNode.color;
         showToast('연결됨');
         renderMMCanvas();
         upsertLiveSession();
