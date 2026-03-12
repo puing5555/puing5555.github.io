@@ -2746,10 +2746,8 @@ function openMemoView(idx) {
 }
 function analyzeMemoView() {
   if (_viewingMemoIdx === null) return;
-  const m = memoData[_viewingMemoIdx];
   closeModal('memoViewModal');
-  switchPanel('dump', document.querySelectorAll('.nav-btn')[0]);
-  analyzeText(m.text);
+  chatMemo(_viewingMemoIdx);
 }
 function deleteMemoView() {
   if (_viewingMemoIdx === null) return;
