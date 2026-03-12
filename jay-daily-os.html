@@ -3420,13 +3420,61 @@ function resizerDown(e) {
 window.onload = () => {
   init();
   renderRightDumps();
-  // 새로고침 후 미분석 세션 백그라운드 처리 (API 키 로드 후 약간 딜레이)
-  // 단, 현재 진행중인 세션(jay_currentSession)은 분석하지 않음
+
+  // F5 새로고침 시 마인드맵 복원
+  const savedMM = localStorage.getItem('jay_mmState');
+  if (savedMM) {
+    try {
+      const mm = JSON.parse(savedMM);
+      if (mm.nodes && mm.nodes.length) {
+        mmNodes = mm.nodes;
+        mmEdges = mm.edges || [];
+        mmRootId = mm.rootId;
+        // 브레인덤프 패널 활성화 시 캔버스에 렌더링
+        const canvas = document.getElementById('mmCanvas');
+        if (canvas) {
+          document.getElementById('mmEmpty').style.display = 'none';
+          canvas.style.display = 'block';
+          if (!canvas._mmInited) initMMCanvas();
+          else requestAnimationFrame(() => renderMMCanvas());
+        }
+      }
+    } catch(e) { console.warn('mmState restore failed', e); }
+    localStorage.removeItem('jay_mmState'); // 1회용: 복원 후 삭제
+  }
+
+  // 진행중 세션이 있으면 대화 메시지도 복원
+  if (_currentSessionMsgs.length > 0) {
+    const msgs = document.getElementById('dumpMessages');
+    if (msgs) {
+      msgs.innerHTML = _currentSessionMsgs.map(m => m.role === 'user'
+        ? `<div class="msg-user">${m.text}</div>`
+        : `<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>${m.text}</div>`
+      ).join('');
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+    // 대화 히스토리도 복원
+    _dumpHistory = _currentSessionMsgs
+      .filter(m => m.role === 'user' || m.role === 'ai' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role === 'ai' ? 'assistant' : m.role,
+        content: m.text
+      }));
+    while (_dumpHistory.length && _dumpHistory[0].role !== 'user') _dumpHistory.shift();
+  }
+
+  // 새로고침 후 미분석 세션 백그라운드 처리
   setTimeout(() => analyzeUnprocessedSessions(), 1500);
 };
 
 // 새로고침/탭 닫기 시 현재 세션 자동 저장
 window.addEventListener('beforeunload', () => {
+  // 마인드맵 상태 저장 (F5 복원용)
+  if (mmNodes.length > 0) {
+    localStorage.setItem('jay_mmState', JSON.stringify({
+      nodes: mmNodes, edges: mmEdges, rootId: mmRootId
+    }));
+  }
   if (_currentSessionMsgs.length >= 2) {
     saveCurrentSession();
   }
