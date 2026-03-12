@@ -1976,6 +1976,7 @@ function renderTasks() {
         ${canNext?`<button onclick="moveTask(${ri},1)" title="뒤로">→</button>`:'<span></span>'}
         <button onclick="editTask(${ri})" title="수정" style="color:var(--blue)">✏️</button>
         <button onclick="scheduleTask(${ri})" title="타임라인에 시간 배정" style="color:var(--blue)">🕐</button>
+        <button onclick="sendToGoal(${ri})" title="목표로 보내기" style="color:var(--accent)">🎯</button>
         <button onclick="deleteTask(${ri})" title="삭제" style="color:var(--red)">✕</button>
       </div>
     </div>`;
@@ -2197,6 +2198,18 @@ function addAllActionsToToday(gi) {
 }
 
 function openAddGoal() { openModal('addGoalModal'); }
+function sendToGoal(i) {
+  const task = getDay().tasks[i];
+  if (!task) return;
+  // 기존 목표 모달에 텍스트 미리 채우기
+  document.getElementById('newGoalText').value = task.text;
+  document.getElementById('newGoalWhy').value = '';
+  document.getElementById('newGoalDeadline').value = '';
+  document.getElementById('newGoalType').value = 'short';
+  openModal('addGoalModal');
+  setTimeout(() => document.getElementById('newGoalWhy').focus(), 100);
+}
+
 function saveGoal() {
   const text = document.getElementById('newGoalText').value.trim();
   if (!text) return;
