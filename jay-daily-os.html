@@ -1135,7 +1135,7 @@ async function sendDump() {
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","children":[]}]},"focus":"오늘 딱 하나만"}
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","parentLabel":"기존노드텍스트(루트에붙이면null)","children":[]}]},"focus":"오늘 딱 하나만"}
 
 대화 모드 (지금 ${turnCount}턴):
 ${turnCount < 3 || !isAskingForAnswer
@@ -1149,8 +1149,8 @@ ${turnCount < 3 || !isAskingForAnswer
 - 기존 가지: [${existingBranches || '없음'}]
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
 - branches: 입력에서 언급된 모든 구별되는 개념/문제/항목을 빠짐없이 각각 별도 가지로. 예) "다이어트도 안되고 운동도 안되고 몸이 무거워지는 느낌" → 다이어트, 운동, 몸무거움 3개 가지. 절대로 묶거나 생략하지 마.
-- 해결책/방향을 제시할 때: "해결책" 같은 부모 노드 만들지 말고 각 해결책 항목을 직접 가지로. 예) 해결책이 3개면 → 가지 3개
-- 기존 가지와 완전히 동일한 텍스트만 중복으로 판단해서 제외. 비슷해 보여도 다르면 추가해.
+- 단, 기존 가지의 구체화/해결책/아이디어를 말하는 경우: 새 가지 만들지 말고 해당 기존 가지의 children으로 넣어. 예) "해결책" 노드가 이미 있는데 해결책 아이디어를 추가하면 → 해결책의 children으로
+- 기존 가지와 완전히 동일한 텍스트만 중복으로 판단해서 제외.
 - 각 가지 children은 생략
 - 대화 내용 없으면 mindmap:null
 - 노드 텍스트는 반드시 6자 이내로 (초과시 핵심만 줄여서)
@@ -1783,42 +1783,54 @@ function buildMMFromStructure(mm) {
 
   branches.forEach((branch, bi) => {  // 제한 없음
     const branchLabel = branch.label || branch;
-    // 이미 같은 텍스트 가지가 있으면 skip
-    if (mmNodes.find(n => n.text === branchLabel && n._depth === 1)) return;
+    const parentLabel = branch.parentLabel || null;
+
+    // parentLabel이 있으면 기존 노드에 children으로 붙이기
+    const parentNode = parentLabel
+      ? mmNodes.find(n => n.text === parentLabel)
+      : mmNodes.find(n => n.id === mmRootId);
+    if (!parentNode) return;
+
+    // 이미 같은 텍스트 노드가 해당 부모 아래 있으면 skip
+    const parentDepth = parentNode._depth ?? 0;
+    const childDepth = parentDepth + 1;
+    const alreadyExists = mmEdges
+      .filter(e => e.from === parentNode.id)
+      .map(e => mmNodes.find(n => n.id === e.to))
+      .some(n => n?.text === branchLabel);
+    if (alreadyExists) return;
 
     const bColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
-    const root = mmNodes.find(n => n.id === mmRootId);
-    if (!root) return;
 
-    // 가지 각도 — 기존 가지 수 기반으로 균등 배치
-    const totalBranches = existingBranchCount + branches.length;
-    const bIdx = existingBranchCount + bi;
-    const bAngle = (bIdx / Math.max(totalBranches, 1)) * Math.PI * 2 - Math.PI / 2;
-    const bDist = 170;
-    const bx = root.x + Math.cos(bAngle) * bDist;
-    const by = root.y + Math.sin(bAngle) * bDist;
+    // 각도 계산 — parentNode 기준
+    const siblingCount = mmEdges.filter(e => e.from === parentNode.id).length;
+    const bIdx = siblingCount + bi;
+    const bAngle = (bIdx / Math.max(siblingCount + branches.length, 1)) * Math.PI * 2 - Math.PI / 2;
+    const bDist = parentDepth === 0 ? 170 : 130;
+    const bx = parentNode.x + Math.cos(bAngle) * bDist;
+    const by = parentNode.y + Math.sin(bAngle) * bDist;
 
     const branchNode = {
       id: 'b_' + Date.now() + '_' + bi,
       text: branchLabel, x: bx, y: by,
-      color: bColor, r: 38, _depth: 1, _angle: bAngle
+      color: bColor, r: childDepth === 1 ? 38 : 28, _depth: childDepth, _angle: bAngle
     };
     mmNodes.push(branchNode);
-    mmEdges.push({ from: mmRootId, to: branchNode.id });
+    mmEdges.push({ from: parentNode.id, to: branchNode.id });
 
-    const subs = (Array.isArray(branch.children) ? branch.children : (branch.subs || [])).slice(0, 2);
+    const subs = (Array.isArray(branch.children) ? branch.children : (branch.subs || []));
     subs.forEach((sub, si) => {
       const subLabel = typeof sub === 'string' ? sub : sub.label;
       if (!subLabel) return;
       const spread = subs.length === 1 ? 0 : (si - (subs.length - 1) / 2) * 0.55;
       const sAngle = bAngle + spread;
-      const sDist = 130;
+      const sDist = 110;
       const sx = bx + Math.cos(sAngle) * sDist;
       const sy = by + Math.sin(sAngle) * sDist;
       const subNode = {
         id: 'n_' + Date.now() + '_' + bi + '_' + si,
         text: subLabel, x: sx, y: sy,
-        color: bColor, r: 28, _depth: 2
+        color: bColor, r: 24, _depth: childDepth + 1
       };
       mmNodes.push(subNode);
       mmEdges.push({ from: branchNode.id, to: subNode.id });
