@@ -2455,7 +2455,12 @@ function loadSession(id) {
   }
 
   // 대화 히스토리 복원 (AI 맥락 + turnCount 정상화)
-  _dumpHistory = s.messages.map(m => ({ role: m.role, content: m.text }));
+  _dumpHistory = s.messages.map(m => ({
+    role: m.role,
+    content: m.role === 'assistant'
+      ? (() => { try { return JSON.parse(m.text.replace(/```json|```/g,'')).reply || m.text; } catch(e) { return m.text; } })()
+      : m.text
+  }));
 
   // 읽기전용 표시
   if (!s.live) {
