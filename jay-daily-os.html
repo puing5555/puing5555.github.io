@@ -134,9 +134,10 @@ body {
 
 /* ── 덤프 패널 (중앙) ── */
 #panel-dump {
-  height: 100%; overflow: hidden;
+  flex: 1; overflow: hidden;
   display: none;
   grid-template-columns: 420px 12px 1fr;
+  min-height: 0;
 }
 #panel-dump.active { display: grid; }
 .dump-chat-col {
