@@ -139,7 +139,6 @@ body {
   grid-template-columns: 420px 12px 1fr;
 }
 #panel-dump.active { display: grid; }
-
 .dump-chat-col {
   display: flex; flex-direction: column; min-width: 0; overflow: hidden;
   border-right: none;
@@ -636,7 +635,7 @@ body {
   <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
 
     <!-- 덤프 패널 -->
-    <div id="panel-dump" class="active" style="flex:1;overflow:hidden;display:grid;grid-template-columns:420px 12px 1fr;height:100%">
+    <div id="panel-dump" class="active">
       <div class="dump-chat-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;justify-content:space-between">
           <span>💬 대화</span>
