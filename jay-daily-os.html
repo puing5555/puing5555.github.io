@@ -1214,6 +1214,16 @@ ${isAnswerMode
     addMsg('ai', parsed.reply || '정리했어!');
     recordSessionMsg('ai', parsed.reply || '');
 
+    // ── 1. 생각 구조화 요약 카드 (3턴마다 자동) ──
+    if (turnCount > 0 && turnCount % 3 === 0) {
+      setTimeout(() => showThoughtSummaryCard(), 400);
+    }
+
+    // ── 2. 핵심 질문 도출 (5턴 이후 탐색 모드일 때 4턴마다) ──
+    if (turnCount >= 5 && turnCount % 4 === 1 && !isAnswerMode) {
+      setTimeout(() => showKeyQuestionCard(), 400);
+    }
+
     // 유사도 체크 함수 — 핵심 키워드 겹치면 중복으로 판단
     const isSimilar = (a, b) => {
       const norm = s => s.replace(/\s|하기|만들기|챙기기|정하기|공부|읽기/g,'').toLowerCase();
@@ -2032,7 +2042,16 @@ function closeMM() {
   renderMMCanvas();
 }
 function clearDump() {
-  clearAndAnalyze(); // 세션 저장 + AI 분석
+  // ── 3. 세션 마무리 요약 (대화가 있을 때만) ──
+  if (_dumpHistory.filter(m => m.role === 'user').length >= 2) {
+    showSessionWrapup().then(() => _doClearDump());
+  } else {
+    _doClearDump();
+  }
+}
+
+function _doClearDump() {
+  clearAndAnalyze();
   const msgs = document.getElementById('dumpMessages');
   msgs.innerHTML = '<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>지금 머릿속에 있는 거 다 쏟아내봐 🧠<br>할 일, 걱정, 아이디어, 뭐든</div>';
   getDay().dumps = []; save();
@@ -2047,6 +2066,75 @@ function clearDump() {
   document.getElementById('mmEmpty').style.display = 'flex';
   document.getElementById('mmNodePanel').style.display = 'none';
   renderRightDumps();
+}
+
+// ── 1. 생각 구조화 요약 카드 ──
+async function showThoughtSummaryCard() {
+  if (_dumpHistory.length < 4) return;
+  const msgs = document.getElementById('dumpMessages');
+  try {
+    const convSummary = _dumpHistory.slice(-8).map(m =>
+      `${m.role === 'user' ? 'JAY' : 'AI'}: ${typeof m.content === 'string' ? m.content.slice(0,200) : ''}`
+    ).join('\n');
+    const raw = await callClaude(
+      [{ role: 'user', content: `다음 대화에서 지금까지 나온 핵심 생각들을 3줄로 요약해. 각 줄은 "• " 로 시작. 짧고 명확하게:\n${convSummary}` }],
+      '대화 요약 전문가. 3줄 이내 핵심만. 텍스트만 응답.'
+    );
+    const card = document.createElement('div');
+    card.style.cssText = 'background:linear-gradient(135deg,#fff8f3,#fff3e8);border:1.5px solid var(--accent);border-radius:12px;padding:12px 16px;margin:8px 0;font-size:12px;line-height:1.7;color:var(--text)';
+    card.innerHTML = `<div style="font-weight:700;color:var(--accent);margin-bottom:6px;font-size:11px">🗂 지금까지 나온 생각</div><div style="white-space:pre-wrap">${raw}</div>`;
+    msgs.appendChild(card);
+    msgs.scrollTop = msgs.scrollHeight;
+  } catch(e) {}
+}
+
+// ── 2. 핵심 질문 도출 카드 ──
+async function showKeyQuestionCard() {
+  if (_dumpHistory.length < 6) return;
+  const msgs = document.getElementById('dumpMessages');
+  try {
+    const convText = _dumpHistory.map(m =>
+      `${m.role === 'user' ? 'JAY' : 'AI'}: ${typeof m.content === 'string' ? m.content.slice(0,200) : ''}`
+    ).join('\n');
+    const raw = await callClaude(
+      [{ role: 'user', content: `다음 대화를 보고, JAY가 진짜 물어야 할 핵심 질문 1개를 찾아줘. "결국 JAY가 물어야 할 질문: ___?" 형식으로. 짧게:\n${convText}` }],
+      '생각 정리 전문가. 핵심 질문 1개만. 텍스트만 응답.'
+    );
+    const card = document.createElement('div');
+    card.style.cssText = 'background:linear-gradient(135deg,#f3f0ff,#ede8ff);border:1.5px solid #7755cc;border-radius:12px;padding:12px 16px;margin:8px 0;font-size:13px;line-height:1.6;color:var(--text)';
+    card.innerHTML = `<div style="font-weight:700;color:#7755cc;margin-bottom:6px;font-size:11px">🎯 핵심 질문</div><div style="font-weight:600">${raw}</div>
+      <button onclick="this.closest('div[style]').remove();document.getElementById('dumpInput').value=${JSON.stringify(raw.replace(/^.*?:\s*/,'').replace(/\?$/,'') + '?')};document.getElementById('dumpInput').focus()" 
+        style="margin-top:8px;padding:4px 12px;border-radius:6px;border:1.5px solid #7755cc;background:transparent;color:#7755cc;font-size:11px;font-weight:700;cursor:pointer">이 질문으로 대화하기</button>`;
+    msgs.appendChild(card);
+    msgs.scrollTop = msgs.scrollHeight;
+  } catch(e) {}
+}
+
+// ── 3. 세션 마무리 요약 ──
+async function showSessionWrapup() {
+  const msgs = document.getElementById('dumpMessages');
+  const convText = _dumpHistory.map(m =>
+    `${m.role === 'user' ? 'JAY' : 'AI'}: ${typeof m.content === 'string' ? m.content.slice(0,300) : ''}`
+  ).join('\n');
+
+  const typingCard = document.createElement('div');
+  typingCard.style.cssText = 'background:linear-gradient(135deg,#f0fff4,#e8fdf0);border:1.5px solid #00aa66;border-radius:12px;padding:12px 16px;margin:8px 0;font-size:12px;color:var(--text2)';
+  typingCard.textContent = '세션 마무리 정리 중...';
+  msgs.appendChild(typingCard);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const raw = await callClaude(
+      [{ role: 'user', content: `다음 브레인덤프 세션을 마무리 정리해줘. 아래 형식으로:\n\n💡 핵심 생각 (3개 이내)\n• ...\n\n🎯 올바른 질문\n• ...\n\n⚡ 다음 액션 (1개)\n• ...\n\n대화:\n${convText.slice(0,3000)}` }],
+      '브레인덤프 세션 정리 전문가. 위 형식 정확히 따라. 짧고 명확하게. 텍스트만.'
+    );
+    typingCard.style.cssText = 'background:linear-gradient(135deg,#f0fff4,#e8fdf0);border:1.5px solid #00aa66;border-radius:12px;padding:14px 16px;margin:8px 0;font-size:12px;line-height:1.8;color:var(--text)';
+    typingCard.innerHTML = `<div style="font-weight:700;color:#00aa66;margin-bottom:8px;font-size:11px">✅ 세션 마무리</div><div style="white-space:pre-wrap">${raw}</div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+    await new Promise(r => setTimeout(r, 1500));
+  } catch(e) {
+    typingCard.remove();
+  }
 }
 
 // ── 사진/음성 ──
