@@ -1121,6 +1121,41 @@ let _sending = false;
 let _attachedPhotos = [];
 let _dumpHistory = []; // 대화 히스토리 유지
 
+// reply 텍스트에서 솔루션/액션 추출 (번호목록, 대시목록, 강조 등)
+function _extractSolutionsFromReply(reply) {
+  if (!reply || reply.length < 5) return [];
+  const results = [];
+  
+  // 1) 번호 목록: "1. xxx", "1) xxx", "① xxx"
+  const numPattern = /(?:^|\n)\s*(?:\d+[.)]\s*|[①②③④⑤⑥⑦⑧⑨⑩]\s*)(.+)/g;
+  let m;
+  while ((m = numPattern.exec(reply)) !== null) {
+    const item = m[1].replace(/[*_`]/g,'').trim();
+    if (item.length >= 2 && item.length <= 30) results.push(item.slice(0, 12));
+  }
+  if (results.length >= 2) return results.slice(0, 6);
+
+  // 2) 대시/불릿 목록: "- xxx", "• xxx"
+  const dashPattern = /(?:^|\n)\s*[-•·]\s+(.+)/g;
+  while ((m = dashPattern.exec(reply)) !== null) {
+    const item = m[1].replace(/[*_`]/g,'').trim();
+    if (item.length >= 2 && item.length <= 30) results.push(item.slice(0, 12));
+  }
+  if (results.length >= 2) return results.slice(0, 6);
+
+  // 3) 문장 분리 후 핵심 키워드 추출 (최후의 수단)
+  const sentences = reply.split(/[.!?\n]+/).map(s=>s.trim()).filter(s=>s.length>=4 && s.length<=40);
+  sentences.slice(0, 4).forEach(s => {
+    // 동사/조사 제거하고 핵심어 추출
+    const core = s.replace(/^(그래서|그러면|그리고|먼저|그런데|일단|우선)\s*/,'')
+                  .replace(/(해봐|하자|해야|하면|하는게|거야|거지|는데|잖아|니까|같아|좋겠|할게|해줘).*$/,'')
+                  .trim();
+    if (core.length >= 2 && core.length <= 12) results.push(core);
+    else if (core.length > 12) results.push(core.slice(0, 12));
+  });
+  return results.slice(0, 5);
+}
+
 async function sendDump() {
   const ta = document.getElementById('dumpInput');
   const input = ta.value.trim();
@@ -1161,7 +1196,7 @@ async function sendDump() {
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(6자이내)","children":[{"label":"개념A(5자이내)","children":[{"label":"세부a(5자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","children":[{"label":"개념A(8자이내)","children":[{"label":"세부a(8자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
 
 mindmap 구조 예시 (반드시 이 형식):
 {"root":"루틴문제","children":[
@@ -1174,7 +1209,7 @@ mindmap 구조 예시 (반드시 이 형식):
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
   ? `- 답변 모드: 구체적 액션/판단 직접 줘.
-- solutions: ["실행항목1","실행항목2",...] 5자 이내 배열. mindmap은 null.`
+- solutions: ["실행항목1","실행항목2",...] 8자 이내 배열(3~6개). mindmap은 null.`
   : `- 탐색 모드: 질문 1개로 끝내. solutions: [].
 - mindmap: 대화에서 나온 개념들을 인과/계층 트리로. root는 ${rootNode ? `"${rootNode.text}"` : '첫 대화의 핵심 주제'}.`}
 - 1-2문장 구어체, 이전 맥락 반영
@@ -1273,14 +1308,20 @@ ${isAnswerMode
 
     // 마인드맵 처리
     if (isAnswerMode) {
-      const solutions = parsed.solutions || [];
+      let solutions = parsed.solutions || [];
+      // solutions가 비었으면 reply 텍스트에서 추출 시도
+      if (solutions.length === 0 && parsed.reply) {
+        solutions = _extractSolutionsFromReply(parsed.reply);
+      }
       if (solutions.length > 0 && mmRootId) {
         mmSnapshot();
         const rootText = mmNodes.find(n => n.id === mmRootId)?.text || '';
-        buildMMFromStructure({
+        // 답변 모드 노드: "해결" 브랜치 아래에 솔루션 배치
+        const solutionBranch = {
           root: rootText,
-          children: solutions.map(s => ({ label: String(s).slice(0,5), children: [] }))
-        });
+          children: [{ label: '💡해결', children: solutions.map(s => ({ label: String(s).slice(0, 8), children: [] })) }]
+        };
+        buildMMFromStructure(solutionBranch);
       }
     } else if (parsed.mindmap && (parsed.mindmap.children?.length || parsed.mindmap.branches?.length)) {
       mmSnapshot();
@@ -1815,11 +1856,15 @@ function renderMMCanvas() {
     const fontSize = n._depth === 0 ? 13 : n._depth === 2 ? 10 : 11;
     ctx.font = `700 ${fontSize}px "Noto Sans KR", sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    // 긴 텍스트 2줄 처리
-    if (n.text.length > 7) {
+    // 긴 텍스트 줄바꿈 처리
+    const maxWidth = n.r * 1.6;
+    if (ctx.measureText(n.text).width > maxWidth && n.text.length > 4) {
+      // 자연스러운 중간 분할
       const mid = Math.ceil(n.text.length / 2);
-      ctx.fillText(n.text.slice(0, mid), n.x, n.y - 7);
-      ctx.fillText(n.text.slice(mid), n.x, n.y + 7);
+      const line1 = n.text.slice(0, mid);
+      const line2 = n.text.slice(mid);
+      ctx.fillText(line1, n.x, n.y - fontSize * 0.55);
+      ctx.fillText(line2, n.x, n.y + fontSize * 0.55);
     } else {
       ctx.fillText(n.text, n.x, n.y);
     }
@@ -1877,14 +1922,16 @@ function buildMMFromStructure(mm) {
   function _addTreeNodes(children, parentId, parentDepth) {
     if (!children || !children.length) return;
     children.forEach((child, ci) => {
-      const label = (child.label || child).toString().slice(0, 6);
+      const label = (child.label || child).toString().slice(0, 10);
       if (!label || label.length < 1) return;
 
       const isDup = mmNodes.some(n => {
         if (n.id === parentId) return false;
         const a = n.text.replace(/\s/g,''), b = label.replace(/\s/g,'');
-        return a === b || a.includes(b) || b.includes(a) ||
-          (a.length >= 2 && b.length >= 2 && a.slice(0,2) === b.slice(0,2));
+        // 완전 일치 또는 한쪽이 다른쪽을 포함 (3자 이상일 때만)
+        if (a === b) return true;
+        if (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a))) return true;
+        return false;
       });
       if (isDup) {
         if (Array.isArray(child.children) && child.children.length) {
@@ -1934,7 +1981,7 @@ function buildMMFromStructure(mm) {
     if (!kids.length) return;
 
     const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
-    const dist = depth === 0 ? 190 : depth === 1 ? 150 : 115;
+    const dist = depth === 0 ? 210 : depth === 1 ? 165 : 125;
     const totalAngle = angleEnd - angleStart;
 
     // 최소 각도: 자식 수에 따라 동적 계산 (겹침 방지)
@@ -1965,9 +2012,43 @@ function buildMMFromStructure(mm) {
 
   _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
 
+  // ── 노드 겹침 해소 (반발력 기반) ──
+  _resolveNodeOverlaps();
+
   document.getElementById('mmEmpty').style.display = 'none';
   recalcMMDepths();
   renderMMCanvas();
+}
+
+// 노드 겹침 해소: 반복적으로 겹치는 노드를 밀어냄
+function _resolveNodeOverlaps() {
+  const ITERATIONS = 12;
+  const PADDING = 18; // 노드 간 최소 여백 (px)
+  const nonRoot = mmNodes.filter(n => n.id !== mmRootId);
+  if (nonRoot.length < 2) return;
+
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    let moved = false;
+    for (let i = 0; i < nonRoot.length; i++) {
+      for (let j = i + 1; j < nonRoot.length; j++) {
+        const a = nonRoot[i], b = nonRoot[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const minDist = a.r + b.r + PADDING;
+        if (dist < minDist) {
+          const overlap = (minDist - dist) / 2;
+          const nx = dx / dist, ny = dy / dist;
+          // 루트에서 먼 노드를 더 많이 밀어냄
+          a.x -= nx * overlap * 0.5;
+          a.y -= ny * overlap * 0.5;
+          b.x += nx * overlap * 0.5;
+          b.y += ny * overlap * 0.5;
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 function getDescendants(nodeId) {
