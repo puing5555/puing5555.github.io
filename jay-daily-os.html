@@ -1580,7 +1580,7 @@ function renderMMCanvas() {
     ctx.shadowColor = 'rgba(0,0,0,0.10)'; ctx.shadowBlur = sel ? 14 : 5;
     // 원 — 내부 흰색, 테두리만 색상
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.fillStyle = sel ? n.color + '18' : '#ffffff';
+    ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.strokeStyle = n.color; ctx.lineWidth = sel ? 2.5 : 1.8;
     ctx.stroke();
