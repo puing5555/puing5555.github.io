@@ -139,13 +139,20 @@ body {
 #panel-dump.active { display: flex; }
 
 .dump-chat-col {
-  flex: 1; display: flex; flex-direction: column; min-width: 0;
-  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; min-width: 240px;
+  border-right: 1px solid var(--border); flex-shrink: 0;
 }
 .dump-map-col {
-  flex: 1; display: flex; flex-direction: column; flex-shrink: 0;
-  background: var(--surface2); min-width: 0;
+  flex: 1; display: flex; flex-direction: column;
+  background: var(--surface2); min-width: 200px; overflow: hidden;
 }
+/* 리사이즈 구분선 */
+.dump-resizer {
+  width: 5px; cursor: col-resize; background: transparent; flex-shrink: 0;
+  border-right: 1px solid var(--border); transition: background 0.15s;
+  z-index: 10;
+}
+.dump-resizer:hover, .dump-resizer.dragging { background: var(--accent); border-color: var(--accent); }
 .dump-col-hdr {
   padding: 10px 16px; border-bottom: 1px solid var(--border);
   font-size: 12px; font-weight: 700; color: var(--muted);
@@ -651,6 +658,7 @@ body {
           </div>
         </div>
       </div>
+      <div class="dump-resizer" id="dumpResizer"></div>
       <div class="dump-map-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <span>🗺 마인드맵</span>
@@ -666,12 +674,19 @@ body {
           <div class="mm-empty-text">대화하면 키워드가 자동으로 생겨<br><span style="color:var(--accent);font-weight:600">＋추가 모드로 직접 원 추가 가능</span></div>
         </div>
         <canvas id="mmCanvas" style="display:none;flex:1;width:100%;cursor:crosshair" touch-action="none"></canvas>
-        <div id="mmNodePanel" style="display:none;border-top:1px solid var(--border);padding:10px 14px;background:var(--surface);flex-shrink:0">
-          <div style="display:flex;align-items:center;gap:8px">
-            <input id="mmNodeTitle" style="flex:1;border:1.5px solid var(--border2);border-radius:8px;padding:5px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface2)" onchange="renameMMNode(this.value)" placeholder="노드 이름">
-            <button onclick="expandMMNode()" style="padding:5px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🤖 AI확장</button>
-            <button onclick="deleteMMNode()" style="padding:5px 10px;border-radius:8px;border:none;background:var(--red);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">삭제</button>
-            <button onclick="closeMM()" style="padding:5px 8px;border-radius:8px;border:none;background:var(--surface3);color:var(--text2);font-size:11px;cursor:pointer">✕</button>
+        <!-- 원 수정 패널 — 더블클릭 시 상단에 표시 -->
+        <div id="mmNodePanel" style="display:none;border-top:1px solid var(--border);padding:8px 14px;background:var(--surface);flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap">✏️ 원 수정</span>
+            <input id="mmNodeTitle" style="flex:1;min-width:80px;border:1.5px solid var(--border2);border-radius:8px;padding:4px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface2)" placeholder="텍스트 수정" oninput="renameMMNode(this.value)">
+            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+              <span style="font-size:10px;color:var(--muted)">크기</span>
+              <input type="range" id="mmNodeSize" min="20" max="80" value="36" oninput="resizeMMNode(parseInt(this.value))" style="width:80px;accent-color:var(--accent)">
+              <span id="mmNodeSizeVal" style="font-size:10px;color:var(--muted);font-family:monospace;width:22px">36</span>
+            </div>
+            <button onclick="expandMMNode()" style="padding:4px 9px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🤖 AI확장</button>
+            <button onclick="deleteMMNode()" style="padding:4px 9px;border-radius:7px;border:none;background:var(--red);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑</button>
+            <button onclick="closeMM()" style="padding:4px 7px;border-radius:7px;border:none;background:var(--surface3);color:var(--text2);font-size:11px;cursor:pointer">✕</button>
           </div>
         </div>
       </div>
@@ -754,9 +769,10 @@ body {
     </div>
   </div>
 
-  <!-- 목표 목록 (크게, 스크롤) -->
-  <div style="flex:1;overflow-y:auto;padding:12px 14px" id="rightGoalList">
-    <div class="empty"><div class="empty-icon">🎯</div><div class="empty-text">목표를 추가해봐<br>항상 여기서 볼 수 있어</div></div>
+  <!-- 브레인덤프 히스토리 (최신순) -->
+  <div style="flex:1;overflow-y:auto;padding:0" id="rightDumpList">
+    <div style="padding:10px 14px 4px;font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.5px;text-transform:uppercase">최근 항목</div>
+    <div class="empty"><div class="empty-icon" style="font-size:20px">🧠</div><div class="empty-text" style="font-size:12px">브레인덤프를 써보면<br>여기에 쌓여</div></div>
   </div>
 
 </div>
@@ -1134,6 +1150,7 @@ async function sendDump() {
     }
     msgs.scrollTop = msgs.scrollHeight;
     updateStat();
+    renderRightDumps(); // 우측 패널 업데이트
 
     // 마인드맵 — 계층 구조로 생성
     if (parsed.mindmap && parsed.mindmap.root) {
@@ -1477,6 +1494,25 @@ function initMMCanvas() {
     }
   });
 
+  // 더블클릭 → 수정 패널 열기
+  canvas.addEventListener('dblclick', e => {
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left - mmTranslate.x;
+    const cy = e.clientY - rect.top - mmTranslate.y;
+    const hit = mmNodes.find(n => Math.hypot(n.x-cx, n.y-cy) <= n.r);
+    if (hit) {
+      mmSelected = hit.id;
+      const panel = document.getElementById('mmNodePanel');
+      document.getElementById('mmNodeTitle').value = hit.text;
+      const sizeInput = document.getElementById('mmNodeSize');
+      sizeInput.value = hit.r;
+      document.getElementById('mmNodeSizeVal').textContent = hit.r;
+      panel.style.display = 'block';
+      setTimeout(() => document.getElementById('mmNodeTitle').focus(), 50);
+      renderMMCanvas();
+    }
+  });
+
   canvas.addEventListener('pointerup', () => { _mmDragging = null; _mmPanning = null; });
 
   // Delete 키 → 선택된 선/원 삭제
@@ -1629,6 +1665,10 @@ function buildMMFromStructure(mm) {
 function renameMMNode(text) {
   const node = mmNodes.find(n => n.id === mmSelected);
   if (node) { node.text = text; renderMMCanvas(); }
+}
+function resizeMMNode(r) {
+  const node = mmNodes.find(n => n.id === mmSelected);
+  if (node) { node.r = r; document.getElementById('mmNodeSizeVal').textContent = r; renderMMCanvas(); }
 }
 function deleteMMNode() {
   if (!mmSelected) return;
@@ -1956,36 +1996,35 @@ function deleteGoal(i) {
   showToast('삭제됨');
 }
 
-// Feature 6: Fixed renderRightGoals using template literals
+// 우측 패널 — 브레인덤프 히스토리 최신순
 function renderRightGoals() {
-  const el = document.getElementById('rightGoalList');
-  document.getElementById('statGoals').textContent = goals.length;
-  if (!goals.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">🎯</div><div class="empty-text">목표를 추가해봐<br>항상 여기서 볼 수 있어</div></div>';
+  // statGoals는 목표 수 표시 유지
+  const statEl = document.getElementById('statGoals');
+  if (statEl) statEl.textContent = goals.length;
+  renderRightDumps();
+}
+function renderRightDumps() {
+  const el = document.getElementById('rightDumpList');
+  if (!el) return;
+  // 모든 날짜의 덤프를 날짜 역순으로 모아서 최신 50개
+  const items = [];
+  Object.entries(allData).sort((a,b)=>b[0].localeCompare(a[0])).forEach(([dateKey, dayData]) => {
+    const dateStr = `${dateKey.slice(0,4)}.${dateKey.slice(4,6)}.${dateKey.slice(6,8)}`;
+    const isToday = dateKey === TODAY_KEY;
+    (dayData.dumps || []).slice().reverse().forEach(d => {
+      items.push({ date: isToday ? '오늘' : dateStr, time: d.time, text: d.text });
+    });
+  });
+  const label = '<div style="padding:10px 14px 4px;font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.5px;text-transform:uppercase">최근 항목</div>';
+  if (!items.length) {
+    el.innerHTML = label + '<div class="empty"><div class="empty-icon" style="font-size:20px">🧠</div><div class="empty-text" style="font-size:12px">브레인덤프를 써보면<br>여기에 쌓여</div></div>';
     return;
   }
-  const typeLabel = {life:'🌟 인생', long:'📅 장기', mid:'📆 중기', short:'⚡ 단기'};
-  el.innerHTML = goals.map((g, i) => {
-    const color = GOAL_COLORS[g.type||'mid'] || 'var(--accent)';
-    const prog = g._progress || 0;
-    const sel = selectedGoalIdx === i;
-    const borderColor = sel ? color : 'var(--border)';
-    const bgColor = sel ? color + '11' : 'var(--surface)';
-    return `<div style="padding:14px;border-radius:14px;border:1.5px solid ${borderColor};margin-bottom:10px;cursor:pointer;background:${bgColor}" onclick="switchPanel('goals',null);selectGoal(${i})">
-      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px">
-        <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;margin-top:3px"></div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.4;flex:1">${g.text}</div>
-        <span style="font-size:11px;font-weight:800;color:${color};flex-shrink:0">${prog}%</span>
-      </div>
-      ${g.why ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;padding-left:18px;line-height:1.5">💬 ${g.why.slice(0,45)}${g.why.length>45?'...':''}</div>` : ''}
-      <div style="padding-left:18px">
-        <div style="height:5px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-bottom:5px">
-          <div style="height:100%;width:${prog}%;background:${color};border-radius:3px"></div>
-        </div>
-        <div style="font-size:10px;color:var(--muted);font-family:monospace">${g.deadline ? '⏰ ' + g.deadline + ' · ' : ''}${typeLabel[g.type]||''}</div>
-      </div>
-    </div>`;
-  }).join('');
+  el.innerHTML = label + items.slice(0, 50).map(item => `
+    <div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:default" title="${item.text}">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:3px">${item.date}${item.time ? ' · ' + item.time : ''}</div>
+      <div style="font-size:12px;color:var(--text);line-height:1.5;word-break:break-all">${item.text.slice(0,60)}${item.text.length>60?'…':''}</div>
+    </div>`).join('');
 }
 
 // ── 메모 ──
@@ -2213,17 +2252,37 @@ function init() {
   renderTasks();
   renderRightGoals();
   renderMiniCal();
-  // API 키 이미 있으면 아이콘 표시
-  if (_apiKey) {
-    const st = document.getElementById('apiKeyStatus');
-    if (st) st.textContent = '✅';
-  }
-  // 프로필 복원
+  if (_apiKey) { const st = document.getElementById('apiKeyStatus'); if (st) st.textContent = '✅'; }
   if (userProfile.name) {
     document.getElementById('profileName').textContent = userProfile.name;
     document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
     document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
   }
+  // 리사이저 초기 너비 설정
+  const chatCol = document.querySelector('.dump-chat-col');
+  const savedW = localStorage.getItem('jay_chatColW');
+  if (savedW) chatCol.style.width = savedW + 'px';
+  else chatCol.style.width = '420px';
+
+  // 드래그 리사이저
+  const resizer = document.getElementById('dumpResizer');
+  let _rDragging = false, _rStartX = 0, _rStartW = 0;
+  resizer.addEventListener('pointerdown', e => {
+    _rDragging = true; _rStartX = e.clientX; _rStartW = chatCol.offsetWidth;
+    resizer.classList.add('dragging');
+    resizer.setPointerCapture(e.pointerId);
+  });
+  resizer.addEventListener('pointermove', e => {
+    if (!_rDragging) return;
+    const newW = Math.max(240, Math.min(window.innerWidth - 400, _rStartW + (e.clientX - _rStartX)));
+    chatCol.style.width = newW + 'px';
+  });
+  resizer.addEventListener('pointerup', e => {
+    if (!_rDragging) return;
+    _rDragging = false;
+    resizer.classList.remove('dragging');
+    localStorage.setItem('jay_chatColW', chatCol.offsetWidth);
+  });
 }
 
 window.onload = init;
