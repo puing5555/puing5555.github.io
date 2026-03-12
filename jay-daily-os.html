@@ -686,14 +686,15 @@ body {
       </div>
       <div class="dump-resizer" id="dumpResizer"></div>
       <div class="dump-map-col">
-        <div class="dump-col-hdr" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span>🗺 마인드맵</span>
+        <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:15px;font-weight:900;color:var(--text);letter-spacing:-0.5px">브레인 스토밍</span>
           <div style="margin-left:auto;display:flex;gap:4px">
-            <button id="mmModeNormal" onclick="setMMMode('normal')" title="선택/이동" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
-            <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">＋ 추가</button>
-            <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 후 다른 원 클릭 → 연결" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🔗 연결</button>
-            <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✂ 삭제</button>
+            <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
+            <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원추가</button>
+            <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 후 다른 원 클릭 → 선 연결" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">➕ 선추가</button>
+            <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 삭제</button>
           </div>
+        </div>
         </div>
         <div id="mmEmpty" class="mm-empty">
           <div class="mm-empty-icon">🗺</div>
