@@ -1870,7 +1870,6 @@ function buildMMFromStructure(mm) {
       const label = (child.label || child).toString().slice(0, 6);
       if (!label || label.length < 1) return;
 
-      // 중복 체크
       const isDup = mmNodes.some(n => {
         if (n.id === parentId) return false;
         const a = n.text.replace(/\s/g,''), b = label.replace(/\s/g,'');
@@ -1878,7 +1877,6 @@ function buildMMFromStructure(mm) {
           (a.length >= 2 && b.length >= 2 && a.slice(0,2) === b.slice(0,2));
       });
       if (isDup) {
-        // 이미 있는 노드면 그 노드의 children 추가
         if (Array.isArray(child.children) && child.children.length) {
           const existing = mmNodes.find(n => {
             const a = n.text.replace(/\s/g,''), b = label.replace(/\s/g,'');
@@ -1893,7 +1891,7 @@ function buildMMFromStructure(mm) {
       const color = depth === 1
         ? MM_COLORS[_mmColorIdx++ % MM_COLORS.length]
         : (mmNodes.find(n => n.id === parentId)?.color || MM_COLORS[0]);
-      const r = depth === 1 ? 38 : depth === 2 ? 28 : 22;
+      const r = depth === 1 ? 40 : depth === 2 ? 30 : 24;
 
       const node = { id: 'n_' + Date.now() + '_' + depth + '_' + ci + '_' + Math.random().toString(36).slice(2,5),
         text: label, x: 0, y: 0, color, r, _depth: depth };
@@ -1910,30 +1908,43 @@ function buildMMFromStructure(mm) {
   const topChildren = mm.children || mm.branches || [];
   _addTreeNodes(topChildren, mmRootId, 0);
 
-  // ── 전체 트리 레이아웃 재계산 (매번 겹침 방지) ──
-  function _layoutTree(nodeId, cx, cy, fromAngle, angleSpan, depth) {
-    const children = mmEdges
+  // ── 서브트리 크기 계산 (잎노드 수) ──
+  function _subtreeSize(nodeId) {
+    const kids = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
+    if (!kids.length) return 1;
+    return kids.reduce((s, kid) => s + _subtreeSize(kid), 0);
+  }
+
+  // ── 서브트리 크기 비례 방사형 레이아웃 ──
+  function _layoutTree(nodeId, cx, cy, angleStart, angleEnd, depth) {
+    const kids = mmEdges
       .filter(e => e.from === nodeId)
       .map(e => mmNodes.find(n => n.id === e.to))
       .filter(Boolean);
-    if (!children.length) return;
+    if (!kids.length) return;
 
-    const dist = depth === 0 ? 175 : depth === 1 ? 135 : 105;
-    // 자식이 1개면 부모 방향 그대로, 여러 개면 균등 분할
-    children.forEach((child, i) => {
-      const angle = children.length === 1
-        ? fromAngle
-        : fromAngle - angleSpan/2 + angleSpan * (i / (children.length - 1));
-      child.x = cx + Math.cos(angle) * dist;
-      child.y = cy + Math.sin(angle) * dist;
-      // 자식의 각도 범위: 자식이 많을수록 좁아짐
-      const childSpan = Math.max(angleSpan / Math.max(children.length, 1), Math.PI * 0.4);
-      _layoutTree(child.id, child.x, child.y, angle, childSpan, depth + 1);
+    const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
+    const dist = depth === 0 ? 185 : depth === 1 ? 145 : 110;
+    const totalAngle = angleEnd - angleStart;
+    let cursor = angleStart;
+
+    kids.forEach(child => {
+      const size = _subtreeSize(child.id);
+      const span = totalAngle * (size / totalSize);
+      // 최소 각도 보장 (너무 좁으면 겹침)
+      const minSpan = Math.PI * 0.25;
+      const actualSpan = Math.max(span, minSpan);
+      const midAngle = cursor + actualSpan / 2;
+
+      child.x = cx + Math.cos(midAngle) * dist;
+      child.y = cy + Math.sin(midAngle) * dist;
+
+      _layoutTree(child.id, child.x, child.y, midAngle - actualSpan/2, midAngle + actualSpan/2, depth + 1);
+      cursor += actualSpan;
     });
   }
 
-  // 루트 기준 전체 재배치
-  _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI / 2, Math.PI * 2, 0);
+  _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
 
   document.getElementById('mmEmpty').style.display = 'none';
   recalcMMDepths();
