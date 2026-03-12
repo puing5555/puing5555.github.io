@@ -1191,8 +1191,8 @@ async function sendDump() {
 
   const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
   const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|해결|방향|뭘 해야|추천|선택|골라|뭐냐|뭐지|알려줘|뭐야|뭔데|줘봐|줘봐|알려|방법/.test(input);
-  // 3턴 미만이어도 해결/답변 키워드 있으면 답변 모드
-  const isAnswerMode = isAskingForAnswer || turnCount >= 5;
+  // 첫 턴(루트 없음)은 무조건 탐색 모드 — 마인드맵 루트 생성 필수
+  const isAnswerMode = mmRootId && (isAskingForAnswer || turnCount >= 5);
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
@@ -2002,11 +2002,45 @@ function buildMMFromStructure(mm) {
 
   // 새로 추가된 노드 ID 수집
   const beforeIds = new Set(mmNodes.map(n => n.id));
+  const isFirstBuild = beforeIds.size <= 1; // 루트만 있었음 = 첫 빌드
   _addTreeNodes(topChildren, mmRootId, 0);
   const newNodeIds = new Set(mmNodes.filter(n => !beforeIds.has(n.id)).map(n => n.id));
 
-  // ── 새 노드만 부모 근처에 배치 (기존 노드 위치 보존) ──
-  if (newNodeIds.size > 0) {
+  // ── 첫 빌드: 전체 방사형 레이아웃 ──
+  if (isFirstBuild && newNodeIds.size > 0) {
+    function _subtreeSize(nodeId) {
+      const kids = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
+      if (!kids.length) return 1;
+      return kids.reduce((s, kid) => s + _subtreeSize(kid), 0);
+    }
+    function _layoutTree(nodeId, cx, cy, angleStart, angleEnd, depth) {
+      const kids = mmEdges
+        .filter(e => e.from === nodeId)
+        .map(e => mmNodes.find(n => n.id === e.to))
+        .filter(Boolean);
+      if (!kids.length) return;
+      const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
+      const dist = depth === 0 ? 210 : depth === 1 ? 165 : 125;
+      const totalAngle = angleEnd - angleStart;
+      const minSpanPerKid = Math.min(Math.PI * 0.3, totalAngle / kids.length);
+      const totalMin = minSpanPerKid * kids.length;
+      const useEqual = totalMin >= totalAngle;
+      let cursor = angleStart;
+      kids.forEach((child, i) => {
+        let actualSpan = useEqual ? totalAngle / kids.length
+          : Math.max(totalAngle * (_subtreeSize(child.id) / totalSize), minSpanPerKid);
+        const midAngle = cursor + actualSpan / 2;
+        child.x = cx + Math.cos(midAngle) * dist;
+        child.y = cy + Math.sin(midAngle) * dist;
+        _layoutTree(child.id, child.x, child.y, midAngle - actualSpan/2, midAngle + actualSpan/2, depth + 1);
+        cursor += actualSpan;
+      });
+    }
+    _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
+    _resolveNodeOverlaps();
+  }
+  // ── 증분 추가: 새 노드만 부모 근처에 배치 (기존 노드 위치 보존) ──
+  else if (newNodeIds.size > 0) {
     newNodeIds.forEach(nid => {
       const node = mmNodes.find(n => n.id === nid);
       if (!node) return;
@@ -2046,40 +2080,6 @@ function buildMMFromStructure(mm) {
 
     // 새 노드끼리만 겹침 해소
     _resolveNewNodeOverlaps(newNodeIds);
-  }
-  // 첫 대화 (루트만 있었을 때)는 전체 레이아웃 한 번 실행
-  else if (mmNodes.length <= 1) {
-    // ── 서브트리 크기 계산 (잎노드 수) ──
-    function _subtreeSize(nodeId) {
-      const kids = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
-      if (!kids.length) return 1;
-      return kids.reduce((s, kid) => s + _subtreeSize(kid), 0);
-    }
-    function _layoutTree(nodeId, cx, cy, angleStart, angleEnd, depth) {
-      const kids = mmEdges
-        .filter(e => e.from === nodeId)
-        .map(e => mmNodes.find(n => n.id === e.to))
-        .filter(Boolean);
-      if (!kids.length) return;
-      const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
-      const dist = depth === 0 ? 210 : depth === 1 ? 165 : 125;
-      const totalAngle = angleEnd - angleStart;
-      const minSpanPerKid = Math.min(Math.PI * 0.3, totalAngle / kids.length);
-      const totalMin = minSpanPerKid * kids.length;
-      const useEqual = totalMin >= totalAngle;
-      let cursor = angleStart;
-      kids.forEach((child, i) => {
-        let actualSpan = useEqual ? totalAngle / kids.length
-          : Math.max(totalAngle * (_subtreeSize(child.id) / totalSize), minSpanPerKid);
-        const midAngle = cursor + actualSpan / 2;
-        child.x = cx + Math.cos(midAngle) * dist;
-        child.y = cy + Math.sin(midAngle) * dist;
-        _layoutTree(child.id, child.x, child.y, midAngle - actualSpan/2, midAngle + actualSpan/2, depth + 1);
-        cursor += actualSpan;
-      });
-    }
-    _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
-    _resolveNodeOverlaps();
   }
 
   document.getElementById('mmEmpty').style.display = 'none';
