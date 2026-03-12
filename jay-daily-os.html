@@ -1832,14 +1832,17 @@ function buildMMFromStructure(mm) {
       : mmNodes.find(n => n.id === mmRootId);
     if (!parentNode) return;
 
-    // 이미 같은 텍스트 노드가 해당 부모 아래 있으면 skip
+    // 전체 노드에서 유사 텍스트 중복 체크 (부분 포함도 체크)
+    const isDuplicate = mmNodes.some(n => {
+      if (n.id === parentNode.id) return false;
+      const a = n.text.replace(/\s/g,''), b = branchLabel.replace(/\s/g,'');
+      return a === b || a.includes(b) || b.includes(a) ||
+        (b.length >= 3 && a.length >= 3 && (a.startsWith(b.slice(0,3)) || b.startsWith(a.slice(0,3))));
+    });
+    if (isDuplicate) return;
+
     const parentDepth = parentNode._depth ?? 0;
     const childDepth = parentDepth + 1;
-    const alreadyExists = mmEdges
-      .filter(e => e.from === parentNode.id)
-      .map(e => mmNodes.find(n => n.id === e.to))
-      .some(n => n?.text === branchLabel);
-    if (alreadyExists) return;
 
     const bColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
 
