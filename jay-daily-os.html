@@ -1068,8 +1068,8 @@ function switchPanel(name, el) {
     panel.classList.add('active');
     if (name === 'dump') {
       const savedW = localStorage.getItem('jay_chatColW') || '420';
-      panel.style.display = 'grid';
-      panel.style.gridTemplateColumns = `${savedW}px 12px 1fr`;
+      const chatCol = document.querySelector('.dump-chat-col');
+      if (chatCol) chatCol.style.flexBasis = savedW + 'px';
     }
   }
   currentPanel = name;
