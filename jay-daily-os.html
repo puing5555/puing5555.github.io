@@ -135,18 +135,17 @@ body {
 /* ── 덤프 패널 (중앙) ── */
 #panel-dump {
   flex: 1; overflow: hidden;
-  display: none;
-  grid-template-columns: 420px 12px 1fr;
-  grid-template-rows: 1fr;
+  display: none; flex-direction: row;
   min-height: 0;
 }
-#panel-dump.active { display: grid; }
+#panel-dump.active { display: flex; }
 .dump-chat-col {
+  width: 420px; flex-shrink: 0;
   display: flex; flex-direction: column;
   min-width: 0; min-height: 0; overflow: hidden;
 }
 .dump-map-col {
-  display: flex; flex-direction: column;
+  flex: 1; display: flex; flex-direction: column;
   min-width: 0; min-height: 0;
   background: var(--surface2); overflow: hidden;
 }
@@ -661,7 +660,7 @@ body {
     <div class="main-header-sub" id="mainSub"></div>
   </div>
 
-  <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0;height:0">
+  <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0">
 
     <!-- 덤프 패널 -->
     <div id="panel-dump" class="active">
@@ -2485,45 +2484,35 @@ function init() {
     document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
     document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
   }
-  // 리사이저 — grid column 방식
-  const dumpPanel = document.getElementById('panel-dump');
+  // 리사이저 — flex width 방식
+  const chatCol = document.querySelector('.dump-chat-col');
   const savedW = localStorage.getItem('jay_chatColW');
-  if (savedW) dumpPanel.style.gridTemplateColumns = `${savedW}px 12px 1fr`;
+  if (savedW) chatCol.style.width = savedW + 'px';
 
   const resizer = document.getElementById('dumpResizer');
   let _rDragging = false, _rStartX = 0, _rStartW = 0;
 
   resizer.addEventListener('mousedown', e => {
     e.preventDefault();
-    e.stopPropagation();
     _rDragging = true;
     _rStartX = e.clientX;
-    // 인라인 스타일 먼저, 없으면 420 기본값
-    const inlineGrid = dumpPanel.style.gridTemplateColumns;
-    _rStartW = inlineGrid ? parseFloat(inlineGrid.split(' ')[0]) : 420;
+    _rStartW = chatCol.offsetWidth;
     resizer.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-    const canvas = document.getElementById('mmCanvas');
-    if (canvas) canvas.style.pointerEvents = 'none';
   });
-
-  document.addEventListener('mousemove', e => {
+  window.addEventListener('mousemove', e => {
     if (!_rDragging) return;
     const newW = Math.max(180, Math.min(window.innerWidth - 250, _rStartW + (e.clientX - _rStartX)));
-    dumpPanel.style.gridTemplateColumns = `${newW}px 12px 1fr`;
+    chatCol.style.width = newW + 'px';
   });
-
-  document.addEventListener('mouseup', () => {
+  window.addEventListener('mouseup', () => {
     if (!_rDragging) return;
     _rDragging = false;
     resizer.classList.remove('dragging');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    const canvas = document.getElementById('mmCanvas');
-    if (canvas) canvas.style.pointerEvents = '';
-    const cols = getComputedStyle(dumpPanel).gridTemplateColumns.split(' ');
-    localStorage.setItem('jay_chatColW', parseFloat(cols[0]));
+    localStorage.setItem('jay_chatColW', chatCol.offsetWidth);
   });
 }
 
