@@ -148,11 +148,11 @@ body {
 }
 /* 리사이즈 구분선 */
 .dump-resizer {
-  width: 5px; cursor: col-resize; background: transparent; flex-shrink: 0;
+  width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0;
   border-right: 1px solid var(--border); transition: background 0.15s;
   z-index: 10;
 }
-.dump-resizer:hover, .dump-resizer.dragging { background: var(--accent); border-color: var(--accent); }
+.dump-resizer:hover, .dump-resizer.dragging { background: var(--border2); border-color: var(--border2); }
 .dump-col-hdr {
   padding: 10px 16px; border-bottom: 1px solid var(--border);
   font-size: 12px; font-weight: 700; color: var(--muted);
@@ -576,12 +576,12 @@ body {
 <div id="sidebar">
   <div class="sidebar-logo">
     <div class="sidebar-logo-title">🧠 JAY Daily OS</div>
-    <div class="sidebar-logo-sub" id="sidebarDate">loading...</div>
+    <div class="sidebar-logo-sub" id="sidebarDate">2026.03.12</div>
   </div>
 
   <div class="sidebar-date">
-    <div class="sidebar-date-day" id="sidebarDay">--</div>
-    <div class="sidebar-date-str" id="sidebarDayStr">--</div>
+    <div class="sidebar-date-day" id="sidebarDay">12</div>
+    <div class="sidebar-date-str" id="sidebarDayStr">목요일 · Mar 2026</div>
   </div>
 
   <div class="sidebar-nav">
