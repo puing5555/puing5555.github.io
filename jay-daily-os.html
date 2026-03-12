@@ -1141,22 +1141,22 @@ async function sendDump() {
 
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","branches":[{"label":"가지텍스트(6자이내)","parentLabel":null}]},"focus":"오늘 딱 하나만"}
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","branches":[{"label":"가지텍스트(6자이내)","parentLabel":null}]},"solutions":[],"focus":"오늘 딱 하나만"}
 
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
-  ? `- 답변 모드: JAY가 결론/방향을 원함. 구체적 액션이나 판단을 줘. "이렇게 해봐", "A보다 B가 낫겠어" 식으로 직접적으로`
-  : `- 탐색 모드: 질문으로 생각을 더 꺼내게 도와줘. 답 주지 말고 "왜?", "그럼 어떻게 될 것 같아?", "가장 걱정되는 게 뭐야?" 같은 질문 1개로 끝내`}
-- 단, 답 주고 나서도 JAY가 다시 막히면 탐색 모드로 자연스럽게 전환
+  ? `- 답변 모드: JAY가 결론/방향을 원함. 구체적 액션이나 판단을 줘. "이렇게 해봐" 식으로 직접적으로.
+- solutions 필드에 핵심 실행 항목을 배열로. 예) ["기상시간고정","물한잔","10분운동"] — 각 항목 6자 이내, 완전히 새로운 해결책/액션만.
+- mindmap은 null로.`
+  : `- 탐색 모드: 질문으로 생각을 더 꺼내게 도와줘. 답 주지 말고 질문 1개로 끝내.
+- solutions는 빈 배열 [].`}
 - 1-2문장 구어체, 이전 맥락 반영
 
-마인드맵 규칙:
+마인드맵 규칙 (탐색 모드만):
 - ${currentRoot}
 - 기존 노드 전체: [${existingNodes || '없음'}]
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
-${isAnswerMode
-  ? `- 답변 모드: mindmap은 반드시 null로 반환. 마인드맵은 코드가 알아서 처리함`
-  : `- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 기존 노드 목록과 비슷하면 추가 금지`}
+- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 기존 노드 목록과 비슷하면 추가 금지
 - 노드 텍스트는 반드시 6자 이내로
 
 할일 규칙: "해야해", "할거야" 같은 명확한 액션만. 상태/사실은 tasks금지.`;
@@ -1242,32 +1242,17 @@ ${isAnswerMode
     renderRightDumps(); // 우측 패널 업데이트
 
     // 마인드맵 처리
+    // 마인드맵 처리
     if (isAnswerMode) {
-      // 답변 모드: reply 텍스트에서 직접 해결책 노드 추출 (AI 마인드맵 무시)
-      const reply = parsed.reply || '';
-      const existingTexts = mmNodes.map(n => n.text.replace(/\s/g,''));
-      const items = [];
-      const patterns = [
-        /\d+[).]\s*([^0-9\n.]{2,10})/g,
-        /[→•\-]\s*([^\n→•\-]{2,10})/g,
-      ];
-      for (const pat of patterns) {
-        let m;
-        while ((m = pat.exec(reply)) !== null) {
-          const txt = m[1].replace(/[:.!?→].*$/, '').trim().slice(0, 6);
-          if (txt.length < 2) continue;
-          const t = txt.replace(/\s/g,'');
-          // 기존 노드와 첫 글자만 같아도 제외 (문제 키워드 재등장 방지)
-          const isSimilar = existingTexts.some(e =>
-            e === t || e.includes(t) || t.includes(e) || e[0] === t[0]
-          );
-          if (!isSimilar) items.push(txt);
-        }
-        if (items.length >= 2) break;
-      }
-      if (items.length >= 2 && mmRootId) {
+      // 답변 모드: AI가 반환한 solutions 배열을 직접 노드로
+      const solutions = parsed.solutions || [];
+      if (solutions.length > 0 && mmRootId) {
         mmSnapshot();
-        const fakeMap = { root: mmNodes.find(n=>n.id===mmRootId)?.text, branches: items.map(label => ({ label, parentLabel: mmNodes.find(n=>n.id===mmRootId)?.text })) };
+        const rootText = mmNodes.find(n => n.id === mmRootId)?.text || '';
+        const fakeMap = {
+          root: rootText,
+          branches: solutions.map(label => ({ label: String(label).slice(0,6), parentLabel: rootText }))
+        };
         buildMMFromStructure(fakeMap);
       }
     } else if (parsed.mindmap && parsed.mindmap.root) {
