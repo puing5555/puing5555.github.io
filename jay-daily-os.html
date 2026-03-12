@@ -1876,9 +1876,8 @@ function renderMMCanvas() {
   // 디바운스 세션 저장 (1초 후 자동 저장 — 렌더링마다가 아닌 변경 멈춘 후)
   clearTimeout(_mmSaveTimer);
   _mmSaveTimer = setTimeout(() => {
-    if (_currentSessionMsgs.length > 0) upsertLiveSession();
-    // beforeunload용 상태도 업데이트
-    if (mmNodes.length > 0) {
+    if (_currentSessionMsgs.length > 0) {
+      upsertLiveSession();
       localStorage.setItem('jay_mmState', JSON.stringify({
         nodes: mmNodes, edges: mmEdges, rootId: mmRootId
       }));
@@ -3547,16 +3546,16 @@ window.onload = () => {
   init();
   renderRightDumps();
 
-  // F5 새로고침 시 마인드맵 복원
+  // F5 새로고침 시 마인드맵 복원 (진행중 대화가 있을 때만)
   const savedMM = localStorage.getItem('jay_mmState');
-  if (savedMM) {
+  localStorage.removeItem('jay_mmState'); // 항상 1회용 삭제
+  if (savedMM && _currentSessionMsgs.length > 0) {
     try {
       const mm = JSON.parse(savedMM);
       if (mm.nodes && mm.nodes.length) {
         mmNodes = mm.nodes;
         mmEdges = mm.edges || [];
         mmRootId = mm.rootId;
-        // 브레인덤프 패널 활성화 시 캔버스에 렌더링
         const canvas = document.getElementById('mmCanvas');
         if (canvas) {
           document.getElementById('mmEmpty').style.display = 'none';
@@ -3566,7 +3565,6 @@ window.onload = () => {
         }
       }
     } catch(e) { console.warn('mmState restore failed', e); }
-    localStorage.removeItem('jay_mmState'); // 1회용: 복원 후 삭제
   }
 
   // 진행중 세션이 있으면 대화 메시지도 복원
@@ -3595,11 +3593,13 @@ window.onload = () => {
 
 // 새로고침/탭 닫기 시 현재 세션 자동 저장
 window.addEventListener('beforeunload', () => {
-  // 마인드맵 상태 저장 (F5 복원용)
-  if (mmNodes.length > 0) {
+  // 마인드맵 상태 저장 (F5 복원용 — 진행중 대화 있을 때만)
+  if (mmNodes.length > 0 && _currentSessionMsgs.length > 0) {
     localStorage.setItem('jay_mmState', JSON.stringify({
       nodes: mmNodes, edges: mmEdges, rootId: mmRootId
     }));
+  } else {
+    localStorage.removeItem('jay_mmState');
   }
   if (_currentSessionMsgs.length >= 2) {
     saveCurrentSession();
