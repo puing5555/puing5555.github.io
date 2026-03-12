@@ -2462,6 +2462,7 @@ function _doClearDump() {
   _currentSessionMsgs = [];
   _liveSessionId = 'live_' + Date.now();
   localStorage.removeItem('jay_currentSession');
+  localStorage.removeItem('jay_mmState');
   mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0; mmRootId = null;
   mmTranslate = {x:0, y:0};
   const canvas = document.getElementById('mmCanvas');
