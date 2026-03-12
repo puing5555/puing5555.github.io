@@ -1183,6 +1183,10 @@ ${turnCount < 3 || !isAskingForAnswer
     (parsed.tasks||[]).forEach(t => { day.tasks.push({...t, when:'today', done:false}); });
     (parsed.memo||[]).forEach(m => { if(m.text) memoData.push({...m, id:'m_'+Date.now()+'_'+Math.random(), date:new Date().toISOString()}); });
     save();
+    // 사이드바 뱃지 실시간 업데이트
+    const undone = (getDay().tasks||[]).filter(t=>!t.done).length;
+    const badge = document.getElementById('taskBadge');
+    if (badge) { badge.textContent = undone; badge.style.display = undone ? 'inline' : 'none'; }
 
     const taskLen = (parsed.tasks||[]).length, memoLen = (parsed.memo||[]).length;
     if (taskLen || memoLen) {
