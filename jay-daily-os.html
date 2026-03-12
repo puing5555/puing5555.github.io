@@ -1152,11 +1152,11 @@ ${isAnswerMode
 
 마인드맵 규칙:
 - ${currentRoot}
-- 기존 노드 전체: [${existingNodes || '없음'}] ← 이 목록과 앞 두 글자라도 겹치면 절대 추가 금지
+- 기존 노드 전체: [${existingNodes || '없음'}]
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
 ${isAnswerMode
-  ? `- 지금은 해결책/답변 요청: 반드시 mindmap 생성. 위 기존 노드는 절대 재사용 금지. 완전히 새로운 해결책/액션만. 예) "기상고정", "물한잔", "10분운동", "주간계획". parentLabel은 "${rootNode ? rootNode.text : '루트'}". mindmap:null 금지`
-  : `- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 기존 노드와 비슷하면 추가하지 마`}
+  ? `- 답변 모드: mindmap은 반드시 null로 반환. 마인드맵은 코드가 알아서 처리함`
+  : `- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 기존 노드 목록과 비슷하면 추가 금지`}
 - 노드 텍스트는 반드시 6자 이내로
 
 할일 규칙: "해야해", "할거야" 같은 명확한 액션만. 상태/사실은 tasks금지.`;
@@ -1241,8 +1241,31 @@ ${isAnswerMode
     updateStat();
     renderRightDumps(); // 우측 패널 업데이트
 
-    // 마인드맵 — 계층 구조로 생성
-    if (parsed.mindmap && parsed.mindmap.root) {
+    // 마인드맵 처리
+    if (isAnswerMode) {
+      // 답변 모드: reply 텍스트에서 직접 해결책 노드 추출 (AI 마인드맵 무시)
+      const reply = parsed.reply || '';
+      // 번호 목록 패턴: 1) 2) 3) 또는 1. 2. 3. 또는 → 항목
+      const items = [];
+      const patterns = [
+        /\d+[).]\s*([^0-9\n.]{2,12})/g,
+        /[→•\-]\s*([^\n→•\-]{2,12})/g,
+      ];
+      for (const pat of patterns) {
+        let m;
+        while ((m = pat.exec(reply)) !== null) {
+          const txt = m[1].replace(/[:.!?].*$/, '').trim().slice(0, 6);
+          if (txt.length >= 2) items.push(txt);
+        }
+        if (items.length >= 2) break;
+      }
+      if (items.length >= 2 && mmRootId) {
+        mmSnapshot();
+        const fakeMap = { root: mmNodes.find(n=>n.id===mmRootId)?.text, branches: items.map(label => ({ label, parentLabel: mmNodes.find(n=>n.id===mmRootId)?.text })) };
+        buildMMFromStructure(fakeMap);
+      }
+    } else if (parsed.mindmap && parsed.mindmap.root) {
+      // 탐색 모드: AI가 생성한 마인드맵 사용
       mmSnapshot();
       buildMMFromStructure(parsed.mindmap);
     }
