@@ -685,7 +685,7 @@ body {
           </div>
         </div>
       </div>
-      <div class="dump-resizer" id="dumpResizer"></div>
+      <div class="dump-resizer" id="dumpResizer" onmousedown="resizerDown(event)"></div>
       <div class="dump-map-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span>🗺 브레인 스토밍</span>
@@ -2482,36 +2482,37 @@ function init() {
     document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
     document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
   }
-  // 리사이저 — flex width 방식
+  // 리사이저 초기 너비 복원
+  const _chatCol = document.querySelector('.dump-chat-col');
+  const _savedW = localStorage.getItem('jay_chatColW');
+  if (_savedW && _chatCol) _chatCol.style.flexBasis = _savedW + 'px';
+}
+
+// ── 리사이저 ──
+let _rDragging = false, _rStartX = 0, _rStartW = 0;
+function resizerDown(e) {
+  e.preventDefault();
   const chatCol = document.querySelector('.dump-chat-col');
-  const savedW = localStorage.getItem('jay_chatColW');
-  if (savedW) chatCol.style.flexBasis = savedW + 'px';
-
-  const resizer = document.getElementById('dumpResizer');
-  let _rDragging = false, _rStartX = 0, _rStartW = 0;
-
-  resizer.addEventListener('mousedown', e => {
-    e.preventDefault();
-    _rDragging = true;
-    _rStartX = e.clientX;
-    _rStartW = chatCol.getBoundingClientRect().width;
-    resizer.classList.add('dragging');
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  });
-  window.addEventListener('mousemove', e => {
+  _rDragging = true;
+  _rStartX = e.clientX;
+  _rStartW = chatCol.getBoundingClientRect().width;
+  document.getElementById('dumpResizer').classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  document.onmousemove = function(ev) {
     if (!_rDragging) return;
-    const newW = Math.max(180, Math.min(window.innerWidth - 250, _rStartW + (e.clientX - _rStartX)));
+    const newW = Math.max(180, Math.min(window.innerWidth - 250, _rStartW + (ev.clientX - _rStartX)));
     chatCol.style.flexBasis = newW + 'px';
-  });
-  window.addEventListener('mouseup', () => {
-    if (!_rDragging) return;
+  };
+  document.onmouseup = function() {
     _rDragging = false;
-    resizer.classList.remove('dragging');
+    document.getElementById('dumpResizer').classList.remove('dragging');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    localStorage.setItem('jay_chatColW', Math.round(chatCol.getBoundingClientRect().width));
-  });
+    localStorage.setItem('jay_chatColW', Math.round(document.querySelector('.dump-chat-col').getBoundingClientRect().width));
+    document.onmousemove = null;
+    document.onmouseup = null;
+  };
 }
 
 window.onload = () => {
