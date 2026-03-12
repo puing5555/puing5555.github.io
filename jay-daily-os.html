@@ -3352,83 +3352,18 @@ function deleteMemoView() {
   showToast('삭제됨');
 }
 
-// ── 대화 저장 → 문서 ──
-async function saveChatAsDoc() {
-  // 진행중 세션 또는 히스토리에서 대화 가져오기
-  const hist = _dumpHistory.length >= 2 ? _dumpHistory : 
-    _currentSessionMsgs.length >= 2 ? _currentSessionMsgs.map(m => ({role: m.role === 'ai' ? 'assistant' : m.role, content: m.text})) : null;
-  if (!hist) { showToast('대화 내용이 없어요'); return; }
-
-  const convText = hist.map(m => `${m.role === 'user' ? 'JAY' : 'AI'}: ${m.content}`).join('\n\n');
-
-  if (!docsData) docsData = [];
-  const apiKey = getApiKey();
-
-  if (apiKey) {
-    showToast('AI가 정리 중...');
-    try {
-      const summary = await callClaude(
-        [{ role: 'user', content: `다음 대화를 문서로 정리해줘. 핵심 인사이트, 결론, 다음 액션 중심으로. 마크다운:\n\n${convText}` }],
-        '문서 정리 전문가. 대화를 깔끔한 한국어 문서로 정리.'
-      );
-      const title = summary.split('\n')[0].replace(/^#+\s*/, '').slice(0, 40) || '대화 정리';
-      docsData.push({ id: 'd_' + Date.now(), title, text: summary, section: '아이디어', date: new Date().toISOString() });
-      save();
-      showToast('✅ 문서에 저장됨');
-      return;
-    } catch(e) { console.error('saveChatAsDoc AI error:', e); }
-  }
-
-  // API 없거나 실패 시 원본 대화 그대로 저장
-  const firstMsg = hist.find(m => m.role === 'user')?.content || '대화';
-  docsData.push({ id: 'd_' + Date.now(), title: firstMsg.slice(0, 30), text: convText, section: '아이디어', date: new Date().toISOString() });
-  save();
-  showToast('✅ 대화 원본 저장됨');
+// ── 대화 저장 → 세션 히스토리 ──
+function saveChatAsDoc() {
+  if (_currentSessionMsgs.length < 1 && _dumpHistory.length < 1) { showToast('대화 내용이 없어요'); return; }
+  upsertLiveSession();
+  showToast('✅ 최근항목에 저장됨');
 }
 
-// ── 마인드맵 저장 → 문서 ──
-async function saveMMAsDoc() {
+// ── 마인드맵 저장 → 세션 히스토리 ──
+function saveMMAsDoc() {
   if (mmNodes.length < 2) { showToast('마인드맵이 비어있어요'); return; }
-
-  const rootNode = mmNodes.find(n => n.id === mmRootId);
-  function buildTreeText(nodeId, indent) {
-    const node = mmNodes.find(n => n.id === nodeId);
-    if (!node) return '';
-    let text = indent + '• ' + node.text + '\n';
-    mmEdges.filter(e => e.from === nodeId).forEach(e => { text += buildTreeText(e.to, indent + '  '); });
-    return text;
-  }
-  const treeText = buildTreeText(mmRootId, '');
-  const connectedIds = new Set();
-  function collectIds(nid) { connectedIds.add(nid); mmEdges.filter(e => e.from === nid).forEach(e => collectIds(e.to)); }
-  if (mmRootId) collectIds(mmRootId);
-  const orphans = mmNodes.filter(n => !connectedIds.has(n.id));
-  const orphanText = orphans.length ? '\n(미연결 노드)\n' + orphans.map(n => '• ' + n.text).join('\n') : '';
-  const fullText = treeText + orphanText;
-
-  if (!docsData) docsData = [];
-  const apiKey = getApiKey();
-
-  if (apiKey) {
-    showToast('AI가 정리 중...');
-    try {
-      const raw = await callClaude(
-        [{ role: 'user', content: `다음 마인드맵 구조를 기반으로 핵심 인사이트와 액션 아이템을 정리해줘. 마크다운:\n\n${fullText}` }],
-        '브레인스토밍 정리 전문가. 마인드맵을 실용적 문서로 변환.'
-      );
-      const title = (rootNode?.text || '브레인스토밍') + ' 정리';
-      docsData.push({ id: 'd_' + Date.now(), title, text: raw, section: '아이디어', date: new Date().toISOString() });
-      save();
-      showToast('✅ 문서에 저장됨');
-      return;
-    } catch(e) { console.error('saveMMAsDoc AI error:', e); }
-  }
-
-  // API 없거나 실패 시 트리 구조 원본 저장
-  const title = (rootNode?.text || '브레인스토밍') + ' 구조';
-  docsData.push({ id: 'd_' + Date.now(), title, text: fullText, section: '아이디어', date: new Date().toISOString() });
-  save();
-  showToast('✅ 마인드맵 구조 저장됨');
+  upsertLiveSession();
+  showToast('✅ 최근항목에 저장됨');
 }
 
 // ── 데일리 리포트 ──
