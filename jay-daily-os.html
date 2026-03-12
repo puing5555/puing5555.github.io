@@ -1589,6 +1589,22 @@ function initMMCanvas() {
 
     // normal 모드
     if (hit) {
+      // 이미 선택된 노드가 있고, 다른 노드를 클릭 → 자동 연결 (선 없는 경우만)
+      if (mmSelected && mmSelected !== hit.id) {
+        const exists = mmEdges.find(e =>
+          (e.from === mmSelected && e.to === hit.id) ||
+          (e.from === hit.id && e.to === mmSelected)
+        );
+        if (!exists) {
+          mmSnapshot();
+          mmEdges.push({ from: mmSelected, to: hit.id });
+          renderMMCanvas();
+          showToast('연결됨');
+          mmSelected = null;
+          document.getElementById('mmNodePanel').style.display = 'none';
+          return;
+        }
+      }
       mmSelected = hit.id;
       mmSelectedEdge = null;
       _mmDragging = { id: hit.id, ox: cx - hit.x, oy: cy - hit.y };
