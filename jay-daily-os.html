@@ -134,22 +134,23 @@ body {
 
 /* ── 덤프 패널 (중앙) ── */
 #panel-dump {
-  display: none; flex-direction: row; gap: 0; height: 100%; overflow: hidden;
+  height: 100%; overflow: hidden;
+  display: none;
+  grid-template-columns: 420px 12px 1fr;
 }
-#panel-dump.active { display: flex; }
+#panel-dump.active { display: grid; }
 
 .dump-chat-col {
-  width: 420px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 200px;
+  display: flex; flex-direction: column; min-width: 0; overflow: hidden;
   border-right: none;
 }
 .dump-map-col {
-  flex: 1; display: flex; flex-direction: column;
-  background: var(--surface2); min-width: 200px; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--surface2); min-width: 0; overflow: hidden;
 }
 /* 리사이즈 구분선 */
 .dump-resizer {
-  width: 12px; cursor: col-resize; flex-shrink: 0;
-  background: var(--border); position: relative; z-index: 10;
+  cursor: col-resize; background: var(--border);
   transition: background 0.15s;
 }
 .dump-resizer:hover, .dump-resizer.dragging { background: var(--accent); }
@@ -2402,10 +2403,10 @@ function init() {
     document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
     document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
   }
-  // 리사이저
-  const chatCol = document.querySelector('.dump-chat-col');
+  // 리사이저 — grid column 방식
+  const dumpPanel = document.getElementById('panel-dump');
   const savedW = localStorage.getItem('jay_chatColW');
-  if (savedW) chatCol.style.width = savedW + 'px';
+  if (savedW) dumpPanel.style.gridTemplateColumns = `${savedW}px 12px 1fr`;
 
   const resizer = document.getElementById('dumpResizer');
   let _rDragging = false, _rStartX = 0, _rStartW = 0;
@@ -2414,7 +2415,8 @@ function init() {
     e.preventDefault();
     _rDragging = true;
     _rStartX = e.clientX;
-    _rStartW = chatCol.offsetWidth;
+    const cols = getComputedStyle(dumpPanel).gridTemplateColumns.split(' ');
+    _rStartW = parseFloat(cols[0]);
     resizer.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
@@ -2423,7 +2425,7 @@ function init() {
   document.addEventListener('mousemove', e => {
     if (!_rDragging) return;
     const newW = Math.max(180, Math.min(window.innerWidth - 250, _rStartW + (e.clientX - _rStartX)));
-    chatCol.style.width = newW + 'px';
+    dumpPanel.style.gridTemplateColumns = `${newW}px 12px 1fr`;
   });
 
   document.addEventListener('mouseup', () => {
@@ -2432,7 +2434,8 @@ function init() {
     resizer.classList.remove('dragging');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    localStorage.setItem('jay_chatColW', chatCol.offsetWidth);
+    const cols = getComputedStyle(dumpPanel).gridTemplateColumns.split(' ');
+    localStorage.setItem('jay_chatColW', parseFloat(cols[0]));
   });
 }
 
