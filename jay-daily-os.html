@@ -1245,17 +1245,23 @@ ${isAnswerMode
     if (isAnswerMode) {
       // 답변 모드: reply 텍스트에서 직접 해결책 노드 추출 (AI 마인드맵 무시)
       const reply = parsed.reply || '';
-      // 번호 목록 패턴: 1) 2) 3) 또는 1. 2. 3. 또는 → 항목
+      const existingTexts = mmNodes.map(n => n.text.replace(/\s/g,''));
       const items = [];
       const patterns = [
-        /\d+[).]\s*([^0-9\n.]{2,12})/g,
-        /[→•\-]\s*([^\n→•\-]{2,12})/g,
+        /\d+[).]\s*([^0-9\n.]{2,10})/g,
+        /[→•\-]\s*([^\n→•\-]{2,10})/g,
       ];
       for (const pat of patterns) {
         let m;
         while ((m = pat.exec(reply)) !== null) {
-          const txt = m[1].replace(/[:.!?].*$/, '').trim().slice(0, 6);
-          if (txt.length >= 2) items.push(txt);
+          const txt = m[1].replace(/[:.!?→].*$/, '').trim().slice(0, 6);
+          if (txt.length < 2) continue;
+          const t = txt.replace(/\s/g,'');
+          // 기존 노드와 첫 글자만 같아도 제외 (문제 키워드 재등장 방지)
+          const isSimilar = existingTexts.some(e =>
+            e === t || e.includes(t) || t.includes(e) || e[0] === t[0]
+          );
+          if (!isSimilar) items.push(txt);
         }
         if (items.length >= 2) break;
       }
