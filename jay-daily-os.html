@@ -1532,6 +1532,8 @@ let mmEdges = [];   // {from, to}  (id 기반)
 let mmMode = 'normal'; // normal | add | delete
 let mmSelected = null; // node id
 let mmConnectFrom = null; // connect 모드에서 첫번째 선택 node id
+let _mmMergeTarget = null; // 드래그 중 병합 대상 노드
+let _mmConnectTarget = null; // 드래그 중 연결 대상 노드
 let _mmDragging = null; // {id, ox, oy}
 let _mmPanning = null;  // {sx, sy, tx, ty}
 let mmTranslate = {x:0, y:0};
@@ -1671,8 +1673,7 @@ function initMMCanvas() {
     }
   });
 
-  let _mmMergeTarget = null; // 드래그 중 병합 대상 노드
-  let _mmConnectTarget = null; // 드래그 중 연결 대상 노드
+  // 드래그 중 병합/연결 대상 (전역에서 renderMMCanvas가 접근)
 
   canvas.addEventListener('pointermove', e => {
     if (_mmDragging) {
