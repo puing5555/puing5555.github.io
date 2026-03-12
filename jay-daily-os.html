@@ -1442,6 +1442,7 @@ function mmEdgeNear(x, y) {
 
 function initMMCanvas() {
   const canvas = document.getElementById('mmCanvas');
+  canvas._mmInited = true;
   document.getElementById('mmEmpty').style.display = 'none';
   canvas.style.display = 'block';
 
@@ -2337,7 +2338,24 @@ function loadSession(id) {
     document.getElementById('mmEmpty').style.display = 'none';
     const canvas = document.getElementById('mmCanvas');
     canvas.style.display = 'block';
-    initMMCanvas();
+    // canvas가 이미 초기화된 경우 resize+render만, 아닌 경우 initMMCanvas
+    if (canvas._mmInited) {
+      requestAnimationFrame(() => {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const hdr = canvas.parentElement.querySelector('.dump-col-hdr');
+        const hdrH = hdr ? hdr.getBoundingClientRect().height : 44;
+        canvas.width = rect.width;
+        canvas.height = rect.height - hdrH;
+        renderMMCanvas();
+      });
+    } else {
+      initMMCanvas();
+    }
+  } else {
+    // mmNodes 없으면 빈 상태로 초기화
+    mmNodes = []; mmEdges = []; mmRootId = null;
+    document.getElementById('mmEmpty').style.display = 'flex';
+    document.getElementById('mmCanvas').style.display = 'none';
   }
 
   // 읽기전용 표시
