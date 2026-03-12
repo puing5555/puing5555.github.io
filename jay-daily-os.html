@@ -708,10 +708,10 @@ body {
             <input id="mmNodeTitle" style="flex:1;min-width:80px;border:1.5px solid var(--border2);border-radius:8px;padding:4px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface2)" placeholder="텍스트 수정" oninput="renameMMNode(this.value)">
             <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
               <span style="font-size:10px;color:var(--muted)">크기</span>
-              <input type="range" id="mmNodeSize" min="20" max="80" value="36" oninput="resizeMMNode(parseInt(this.value))" style="width:80px;accent-color:var(--accent)">
+              <input type="range" id="mmNodeSize" min="20" max="80" value="36" oninput="previewMMNodeSize(parseInt(this.value))" style="width:80px;accent-color:var(--accent)">
               <span id="mmNodeSizeVal" style="font-size:10px;color:var(--muted);font-family:monospace;width:22px">36</span>
             </div>
-            <button onclick="expandMMNode()" style="padding:4px 9px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🤖 AI확장</button>
+            <button onclick="confirmMMNode()" style="padding:4px 12px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✓ OK</button>
             <button onclick="deleteMMNode()" style="padding:4px 9px;border-radius:7px;border:none;background:var(--red);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑</button>
             <button onclick="closeMM()" style="padding:4px 7px;border-radius:7px;border:none;background:var(--surface3);color:var(--text2);font-size:11px;cursor:pointer">✕</button>
           </div>
@@ -1828,6 +1828,19 @@ function getDescendants(nodeId) {
 function renameMMNode(text) {
   const node = mmNodes.find(n => n.id === mmSelected);
   if (node) { node.text = text; renderMMCanvas(); }
+}
+function previewMMNodeSize(r) {
+  // 슬라이더 숫자만 업데이트 (실제 크기는 OK 눌러야 반영)
+  document.getElementById('mmNodeSizeVal').textContent = r;
+}
+function confirmMMNode() {
+  const node = mmNodes.find(n => n.id === mmSelected);
+  if (!node) return;
+  const r = parseInt(document.getElementById('mmNodeSize').value);
+  node.r = r;
+  document.getElementById('mmNodePanel').style.display = 'none';
+  mmSelected = null;
+  renderMMCanvas();
 }
 function resizeMMNode(r) {
   const node = mmNodes.find(n => n.id === mmSelected);
