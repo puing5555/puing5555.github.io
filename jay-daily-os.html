@@ -2215,6 +2215,30 @@ async function analyzeUnprocessedSessions() {
   }
 }
 
+function loadSession(id) {
+  const s = sessionHistory.find(s => s.id === id);
+  if (!s || !s.messages) return;
+
+  // 브레인덤프 패널로 이동
+  switchPanel('dump', document.querySelector('.nav-btn'));
+
+  // 대화 메시지 복원
+  const msgs = document.getElementById('dumpMessages');
+  msgs.innerHTML = s.messages.map(m => m.role === 'user'
+    ? `<div class="msg-user">${m.text}</div>`
+    : `<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>${m.text}</div>`
+  ).join('');
+
+  // 읽기전용 표시 (live 세션이 아닌 경우)
+  if (!s.live) {
+    msgs.innerHTML += `<div class="msg-meta" style="align-self:center;font-size:11px;color:var(--muted);background:var(--surface2);padding:6px 14px;border-radius:100px;margin-top:8px">📖 ${s.date} ${s.time} 세션 — 읽기 전용 · New 버튼으로 새 대화 시작</div>`;
+    // _dumpHistory는 건드리지 않음 (현재 대화 유지)
+  }
+
+  msgs.scrollTop = msgs.scrollHeight;
+  showToast(`📖 ${s.date} ${s.time} 세션 불러옴`);
+}
+
 function deleteSession(id) {
   sessionHistory = sessionHistory.filter(s => s.id !== id);
   localStorage.setItem('jay_sessions', JSON.stringify(sessionHistory));
@@ -2239,14 +2263,14 @@ function renderRightDumps() {
     return;
   }
   el.innerHTML = sessionHistory.map(s => `
-    <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start${s.live ? ';background:var(--accent-dim)' : ''}">
+    <div onclick="loadSession('${s.id}')" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start;cursor:pointer;transition:background 0.15s${s.live ? ';background:var(--accent-dim)' : ''}" onmouseover="if(!this.dataset.live)this.style.background='var(--surface2)'" onmouseout="if(!this.dataset.live)this.style.background=''" data-live="${s.live||false}">
       <div style="flex:1;min-width:0">
         <div style="font-size:10px;color:var(--muted);margin-bottom:3px">
           ${s.live ? '<span style="color:var(--accent);font-weight:700">● 진행중</span> · ' : ''}${s.date} · ${s.time} · ${s.msgCount}턴
         </div>
         <div style="font-size:12px;color:var(--text);line-height:1.5;word-break:break-all;font-weight:600">${s.summary}</div>
       </div>
-      <button onclick="deleteSession('${s.id}')" title="삭제" style="flex-shrink:0;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
+      <button onclick="event.stopPropagation();deleteSession('${s.id}')" title="삭제" style="flex-shrink:0;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
     </div>`).join('');
 }
 
