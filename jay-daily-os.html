@@ -1717,6 +1717,7 @@ function getDescendants(nodeId) {
   }
   return result;
 }
+function renameMMNode(text) {
   const node = mmNodes.find(n => n.id === mmSelected);
   if (node) { node.text = text; renderMMCanvas(); }
 }
