@@ -1130,9 +1130,19 @@ async function sendDump() {
   const currentRoot = rootNode ? `현재 마인드맵 루트: "${rootNode.text}"` : '마인드맵 없음(첫 대화)';
   const existingBranches = mmNodes.filter(n => n._depth === 1).map(n => n.text).join(', ');
 
+  const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
+  const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|답|해결|방향|어떻게 해|뭘 해야|추천|선택|골라/.test(input);
+
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
-{"reply":"친구처럼 한마디(구어체 1-2문장, 이전 대화 맥락 반영)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","children":[{"label":"세부(8자이내)","children":["더세부1","더세부2"]}]}]},"focus":"오늘 딱 하나만"}
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","children":[{"label":"세부(8자이내)","children":["더세부1","더세부2"]}]}]},"focus":"오늘 딱 하나만"}
+
+대화 모드 (지금 ${turnCount}턴):
+${turnCount < 3 || !isAskingForAnswer
+  ? `- 탐색 모드: 질문으로 생각을 더 꺼내게 도와줘. 답 주지 말고 "왜?", "그럼 어떻게 될 것 같아?", "가장 걱정되는 게 뭐야?" 같은 질문 1개로 끝내`
+  : `- 답변 모드: JAY가 결론/방향을 원함. 구체적 액션이나 판단을 줘. "이렇게 해봐", "A보다 B가 낫겠어" 식으로 직접적으로`}
+- 단, 답 주고 나서도 JAY가 다시 막히면 탐색 모드로 자연스럽게 전환
+- 1-2문장 구어체, 이전 맥락 반영
 
 마인드맵 규칙:
 - ${currentRoot}
