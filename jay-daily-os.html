@@ -1497,6 +1497,7 @@ function initMMCanvas() {
           const exists = mmEdges.find(e => (e.from===mmConnectFrom&&e.to===hit.id)||(e.from===hit.id&&e.to===mmConnectFrom));
           if (!exists) mmEdges.push({ from: mmConnectFrom, to: hit.id });
           mmConnectFrom = null;
+          setMMMode('normal');
           renderMMCanvas();
         }
       }
