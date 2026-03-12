@@ -1103,10 +1103,11 @@ async function sendDump() {
 - ${currentRoot}
 - 기존 가지: [${existingBranches || '없음'}]
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
-- branches: 이번 대화에서 새로 추가할 가지만 (기존 가지 중복 금지)
+- branches: 이번 대화에서 새로 추가할 가지만 (기존 가지 중복 금지), 최대 2개
+- 각 가지의 children 최대 2개, children의 children은 생략
 - 인과관계/논리 흐름으로 구조화 (why→what→how 순서)
 - 대화 내용 없으면 mindmap:null
-- children은 2단계까지만, 각 가지 최대 3개
+- 노드 텍스트는 반드시 6자 이내로
 
 할일 규칙: "해야해", "할거야" 같은 명확한 액션만. 상태/사실은 tasks금지.`;
 
@@ -1482,7 +1483,17 @@ function initMMCanvas() {
       const cx = e.clientX - rect.left - mmTranslate.x;
       const cy = e.clientY - rect.top - mmTranslate.y;
       const node = mmNodes.find(n => n.id === _mmDragging.id);
-      if (node) { node.x = cx - _mmDragging.ox; node.y = cy - _mmDragging.oy; }
+      if (node) {
+        const dx = (cx - _mmDragging.ox) - node.x;
+        const dy = (cy - _mmDragging.oy) - node.y;
+        // 이 노드와 모든 자손 노드 함께 이동
+        const descendants = getDescendants(node.id);
+        descendants.forEach(id => {
+          const nd = mmNodes.find(n => n.id === id);
+          if (nd) { nd.x += dx; nd.y += dy; }
+        });
+        node.x += dx; node.y += dy;
+      }
       renderMMCanvas();
     } else if (_mmPanning) {
       mmTranslate.x = _mmPanning.tx + (e.clientX - _mmPanning.sx);
@@ -1566,27 +1577,24 @@ function renderMMCanvas() {
   // 노드
   mmNodes.forEach(n => {
     const sel = n.id === mmSelected;
-    // 그림자
-    ctx.shadowColor = 'rgba(0,0,0,0.12)'; ctx.shadowBlur = sel ? 12 : 6;
-    // 원
+    ctx.shadowColor = 'rgba(0,0,0,0.10)'; ctx.shadowBlur = sel ? 14 : 5;
+    // 원 — 내부 흰색, 테두리만 색상
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.fillStyle = sel ? n.color : n.color + '22';
+    ctx.fillStyle = sel ? n.color + '18' : '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = n.color; ctx.lineWidth = sel ? 2.5 : 1.5;
+    ctx.strokeStyle = n.color; ctx.lineWidth = sel ? 2.5 : 1.8;
     ctx.stroke();
     ctx.shadowBlur = 0;
-    // 텍스트
-    ctx.fillStyle = sel ? '#fff' : n.color;
-    ctx.font = `600 11px "Noto Sans KR", sans-serif`;
+    // 텍스트 — 항상 해당 색상
+    ctx.fillStyle = n.color;
+    const fontSize = n._depth === 0 ? 13 : n._depth === 2 ? 10 : 11;
+    ctx.font = `700 ${fontSize}px "Noto Sans KR", sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     // 긴 텍스트 2줄 처리
-    const words = n.text.split(' ');
-    if (words.length > 2 || n.text.length > 8) {
-      const mid = Math.ceil(words.length / 2);
-      const l1 = words.slice(0, mid).join(' ');
-      const l2 = words.slice(mid).join(' ');
-      ctx.fillText(l1, n.x, n.y - 7);
-      ctx.fillText(l2, n.x, n.y + 7);
+    if (n.text.length > 7) {
+      const mid = Math.ceil(n.text.length / 2);
+      ctx.fillText(n.text.slice(0, mid), n.x, n.y - 7);
+      ctx.fillText(n.text.slice(mid), n.x, n.y + 7);
     } else {
       ctx.fillText(n.text, n.x, n.y);
     }
@@ -1644,7 +1652,7 @@ function buildMMFromStructure(mm) {
   const branches = mm.branches || mm.children || [];
   const existingBranchCount = mmNodes.filter(n => n._depth === 1).length;
 
-  branches.forEach((branch, bi) => {
+  branches.slice(0, 2).forEach((branch, bi) => {  // 최대 2 가지
     const branchLabel = branch.label || branch;
     // 이미 같은 텍스트 가지가 있으면 skip
     if (mmNodes.find(n => n.text === branchLabel && n._depth === 1)) return;
@@ -1669,41 +1677,22 @@ function buildMMFromStructure(mm) {
     mmNodes.push(branchNode);
     mmEdges.push({ from: mmRootId, to: branchNode.id });
 
-    // 세부 노드
-    const subs = Array.isArray(branch.children) ? branch.children : (branch.subs || []);
+    const subs = (Array.isArray(branch.children) ? branch.children : (branch.subs || [])).slice(0, 2);
     subs.forEach((sub, si) => {
       const subLabel = typeof sub === 'string' ? sub : sub.label;
       if (!subLabel) return;
       const spread = subs.length === 1 ? 0 : (si - (subs.length - 1) / 2) * 0.55;
       const sAngle = bAngle + spread;
-      const sDist = 140;
+      const sDist = 130;
       const sx = bx + Math.cos(sAngle) * sDist;
       const sy = by + Math.sin(sAngle) * sDist;
       const subNode = {
         id: 'n_' + Date.now() + '_' + bi + '_' + si,
         text: subLabel, x: sx, y: sy,
-        color: bColor, r: 30, _depth: 2
+        color: bColor, r: 28, _depth: 2
       };
       mmNodes.push(subNode);
       mmEdges.push({ from: branchNode.id, to: subNode.id });
-
-      // 3단계 세부
-      const details = Array.isArray(sub.children) ? sub.children : [];
-      details.forEach((det, di) => {
-        const detLabel = typeof det === 'string' ? det : det.label;
-        if (!detLabel) return;
-        const dSpread = details.length === 1 ? 0 : (di - (details.length-1)/2) * 0.4;
-        const dAngle = sAngle + dSpread;
-        const dx = sx + Math.cos(dAngle) * 110;
-        const dy = sy + Math.sin(dAngle) * 110;
-        const detNode = {
-          id: 'n_' + Date.now() + '_d' + di,
-          text: detLabel, x: dx, y: dy,
-          color: bColor + 'cc', r: 24, _depth: 3
-        };
-        mmNodes.push(detNode);
-        mmEdges.push({ from: subNode.id, to: detNode.id });
-      });
     });
   });
 
@@ -1711,7 +1700,16 @@ function buildMMFromStructure(mm) {
   renderMMCanvas();
 }
 
-function renameMMNode(text) {
+function getDescendants(nodeId) {
+  const result = [];
+  const queue = [nodeId];
+  while (queue.length) {
+    const curr = queue.shift();
+    const children = mmEdges.filter(e => e.from === curr).map(e => e.to);
+    children.forEach(id => { result.push(id); queue.push(id); });
+  }
+  return result;
+}
   const node = mmNodes.find(n => n.id === mmSelected);
   if (node) { node.text = text; renderMMCanvas(); }
 }
