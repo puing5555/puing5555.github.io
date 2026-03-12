@@ -1863,12 +1863,12 @@ function buildMMFromStructure(mm) {
     mmRootId = rootNode.id;
   }
 
-  // ── 재귀 트리 빌더 ──
-  function _addTreeNode(children, parentId, parentDepth, parentX, parentY, startAngle, angleSpan) {
+  // ── 재귀 트리 빌더: 노드만 추가 ──
+  function _addTreeNodes(children, parentId, parentDepth) {
     if (!children || !children.length) return;
     children.forEach((child, ci) => {
       const label = (child.label || child).toString().slice(0, 6);
-      if (!label) return;
+      if (!label || label.length < 1) return;
 
       // 중복 체크
       const isDup = mmNodes.some(n => {
@@ -1877,43 +1877,63 @@ function buildMMFromStructure(mm) {
         return a === b || a.includes(b) || b.includes(a) ||
           (a.length >= 2 && b.length >= 2 && a.slice(0,2) === b.slice(0,2));
       });
-      if (isDup) return;
+      if (isDup) {
+        // 이미 있는 노드면 그 노드의 children 추가
+        if (Array.isArray(child.children) && child.children.length) {
+          const existing = mmNodes.find(n => {
+            const a = n.text.replace(/\s/g,''), b = label.replace(/\s/g,'');
+            return a === b || a.includes(b) || b.includes(a);
+          });
+          if (existing) _addTreeNodes(child.children, existing.id, existing._depth ?? parentDepth + 1);
+        }
+        return;
+      }
 
       const depth = parentDepth + 1;
-      const r = depth === 1 ? 38 : depth === 2 ? 28 : 22;
-      const dist = depth === 1 ? 170 : depth === 2 ? 130 : 100;
       const color = depth === 1
         ? MM_COLORS[_mmColorIdx++ % MM_COLORS.length]
         : (mmNodes.find(n => n.id === parentId)?.color || MM_COLORS[0]);
+      const r = depth === 1 ? 38 : depth === 2 ? 28 : 22;
 
-      // 각도: 부모 기준으로 자식들을 균등 배치
-      const total = children.length;
-      const angle = startAngle + angleSpan * (ci / Math.max(total - 1, 1) - 0.5);
-      const nx = parentX + Math.cos(angle) * dist;
-      const ny = parentY + Math.sin(angle) * dist;
-
-      const node = { id: 'n_' + Date.now() + '_' + depth + '_' + ci, text: label, x: nx, y: ny, color, r, _depth: depth };
+      const node = { id: 'n_' + Date.now() + '_' + depth + '_' + ci + '_' + Math.random().toString(36).slice(2,5),
+        text: label, x: 0, y: 0, color, r, _depth: depth };
       mmNodes.push(node);
       mmEdges.push({ from: parentId, to: node.id });
 
-      // 자식의 자식 — 각도 범위를 좁혀서 재귀
       if (Array.isArray(child.children) && child.children.length) {
-        _addTreeNode(child.children, node.id, depth, nx, ny, angle, Math.min(angleSpan * 0.7, Math.PI * 0.8));
+        _addTreeNodes(child.children, node.id, depth);
       }
     });
   }
 
   const rootNodeObj = mmNodes.find(n => n.id === mmRootId);
   const topChildren = mm.children || mm.branches || [];
+  _addTreeNodes(topChildren, mmRootId, 0);
 
-  // 기존 depth-1 자식 수 기반으로 시작 각도 오프셋
-  const existingChildren = mmEdges.filter(e => e.from === mmRootId).length;
-  const totalTop = existingChildren + topChildren.length;
-  const baseAngle = existingChildren > 0
-    ? (existingChildren / totalTop) * Math.PI * 2 - Math.PI / 2
-    : -Math.PI / 2;
+  // ── 전체 트리 레이아웃 재계산 (매번 겹침 방지) ──
+  function _layoutTree(nodeId, cx, cy, fromAngle, angleSpan, depth) {
+    const children = mmEdges
+      .filter(e => e.from === nodeId)
+      .map(e => mmNodes.find(n => n.id === e.to))
+      .filter(Boolean);
+    if (!children.length) return;
 
-  _addTreeNode(topChildren, mmRootId, 0, rootNodeObj.x, rootNodeObj.y, baseAngle, Math.PI * 2);
+    const dist = depth === 0 ? 175 : depth === 1 ? 135 : 105;
+    // 자식이 1개면 부모 방향 그대로, 여러 개면 균등 분할
+    children.forEach((child, i) => {
+      const angle = children.length === 1
+        ? fromAngle
+        : fromAngle - angleSpan/2 + angleSpan * (i / (children.length - 1));
+      child.x = cx + Math.cos(angle) * dist;
+      child.y = cy + Math.sin(angle) * dist;
+      // 자식의 각도 범위: 자식이 많을수록 좁아짐
+      const childSpan = Math.max(angleSpan / Math.max(children.length, 1), Math.PI * 0.4);
+      _layoutTree(child.id, child.x, child.y, angle, childSpan, depth + 1);
+    });
+  }
+
+  // 루트 기준 전체 재배치
+  _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI / 2, Math.PI * 2, 0);
 
   document.getElementById('mmEmpty').style.display = 'none';
   recalcMMDepths();
