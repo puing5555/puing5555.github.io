@@ -1152,12 +1152,11 @@ ${isAnswerMode
 
 마인드맵 규칙:
 - ${currentRoot}
-- 기존 노드 전체: [${existingNodes || '없음'}] ← 이 목록에 있는 텍스트와 동일하거나 비슷한 건 절대 추가하지 마
+- 기존 노드 전체: [${existingNodes || '없음'}] ← 이 목록과 앞 두 글자라도 겹치면 절대 추가 금지
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
 ${isAnswerMode
-  ? `- 지금은 해결책/답변 요청: 반드시 mindmap 생성. "기상시간고정", "물한잔", "10분운동" 같은 구체적 실행 항목을 각각 별도 가지로. parentLabel은 "${rootNode ? rootNode.text : '루트'}". mindmap:null 금지`
-  : `- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 절대 묶거나 생략하지 마`}
-- ${isAnswerMode ? '해결책 항목은 기존 노드와 겹쳐도 생성' : '기존 노드와 동일/유사한 텍스트면 mindmap:null 반환'}
+  ? `- 지금은 해결책/답변 요청: 반드시 mindmap 생성. 위 기존 노드는 절대 재사용 금지. 완전히 새로운 해결책/액션만. 예) "기상고정", "물한잔", "10분운동", "주간계획". parentLabel은 "${rootNode ? rootNode.text : '루트'}". mindmap:null 금지`
+  : `- 입력에서 언급된 모든 구별되는 개념/문제를 빠짐없이 각각 별도 가지로. 기존 노드와 비슷하면 추가하지 마`}
 - 노드 텍스트는 반드시 6자 이내로
 
 할일 규칙: "해야해", "할거야" 같은 명확한 액션만. 상태/사실은 tasks금지.`;
@@ -1832,12 +1831,14 @@ function buildMMFromStructure(mm) {
       : mmNodes.find(n => n.id === mmRootId);
     if (!parentNode) return;
 
-    // 전체 노드에서 유사 텍스트 중복 체크 (부분 포함도 체크)
+    // 전체 노드에서 유사 텍스트 중복 체크
     const isDuplicate = mmNodes.some(n => {
       if (n.id === parentNode.id) return false;
       const a = n.text.replace(/\s/g,''), b = branchLabel.replace(/\s/g,'');
-      return a === b || a.includes(b) || b.includes(a) ||
-        (b.length >= 3 && a.length >= 3 && (a.startsWith(b.slice(0,3)) || b.startsWith(a.slice(0,3))));
+      if (a === b || a.includes(b) || b.includes(a)) return true;
+      // 앞 2글자 일치하면 같은 개념으로 판단
+      if (a.length >= 2 && b.length >= 2 && a.slice(0,2) === b.slice(0,2)) return true;
+      return false;
     });
     if (isDuplicate) return;
 
