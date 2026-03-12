@@ -1639,23 +1639,6 @@ function initMMCanvas() {
 
     // normal 모드
     if (hit) {
-      // 고아 노드(선이 하나도 없는 노드) 클릭 시 → 가장 가까운 노드에 자동 연결
-      const hasEdge = mmEdges.some(e => e.from === hit.id || e.to === hit.id);
-      if (!hasEdge && mmNodes.length > 1) {
-        let nearest = null, minDist = Infinity;
-        mmNodes.forEach(n => {
-          if (n.id === hit.id) return;
-          const dx = n.x - hit.x, dy = n.y - hit.y;
-          const d = Math.sqrt(dx*dx + dy*dy);
-          if (d < minDist) { minDist = d; nearest = n; }
-        });
-        if (nearest) {
-          mmSnapshot();
-          mmEdges.push({ from: nearest.id, to: hit.id });
-          renderMMCanvas();
-          showToast('자동 연결됨');
-        }
-      }
       mmSelected = hit.id;
       mmSelectedEdge = null;
       _mmDragging = { id: hit.id, ox: cx - hit.x, oy: cy - hit.y };
@@ -1681,6 +1664,7 @@ function initMMCanvas() {
   });
 
   let _mmMergeTarget = null; // 드래그 중 병합 대상 노드
+  let _mmConnectTarget = null; // 드래그 중 연결 대상 노드
 
   canvas.addEventListener('pointermove', e => {
     if (_mmDragging) {
@@ -1699,15 +1683,25 @@ function initMMCanvas() {
         });
         node.x += dx; node.y += dy;
 
-        // 병합 대상 감지: 드래그 중인 노드와 겹치는 다른 노드
+        // 드롭 대상 감지: 병합(깊은 겹침) 또는 연결(근접)
         _mmMergeTarget = null;
+        _mmConnectTarget = null;
         for (const other of mmNodes) {
-          if (other.id === node.id || other.id === mmRootId && node.id !== mmRootId) continue;
-          if (node.id === mmRootId) continue; // 루트는 병합 안 함
+          if (other.id === node.id) continue;
+          if (node.id === mmRootId) continue; // 루트는 대상 아님
           const d = Math.hypot(other.x - node.x, other.y - node.y);
-          if (d < (node.r + other.r) * 0.6) {
+          // 깊은 겹침 → 병합 (루트 위에 놓는 건 연결만)
+          if (d < (node.r + other.r) * 0.5 && other.id !== mmRootId) {
             _mmMergeTarget = other.id;
             break;
+          }
+          // 근접 → 선 연결 (기존에 선 없을 때만)
+          if (d < (node.r + other.r) * 1.2) {
+            const alreadyLinked = mmEdges.some(e =>
+              (e.from === node.id && e.to === other.id) || (e.from === other.id && e.to === node.id));
+            if (!alreadyLinked) {
+              _mmConnectTarget = other.id;
+            }
           }
         }
       }
@@ -1739,19 +1733,31 @@ function initMMCanvas() {
   });
 
   canvas.addEventListener('pointerup', () => {
-    // 드래그 종료 시 병합 대상이 있으면 병합 실행
-    if (_mmDragging && _mmMergeTarget) {
+    if (_mmDragging) {
       const dragId = _mmDragging.id;
-      const targetId = _mmMergeTarget;
-      _mmMergeTarget = null;
-      _mmDragging = null;
-      _mmPanning = null;
-      mergeMMNodes(dragId, targetId);
-      return;
+      // 병합 (깊은 겹침)
+      if (_mmMergeTarget) {
+        const targetId = _mmMergeTarget;
+        _mmMergeTarget = null; _mmConnectTarget = null;
+        _mmDragging = null; _mmPanning = null;
+        mergeMMNodes(dragId, targetId);
+        return;
+      }
+      // 선 연결 (근접)
+      if (_mmConnectTarget) {
+        const targetId = _mmConnectTarget;
+        _mmConnectTarget = null; _mmMergeTarget = null;
+        _mmDragging = null; _mmPanning = null;
+        mmSnapshot();
+        mmEdges.push({ from: dragId, to: targetId });
+        showToast('연결됨');
+        renderMMCanvas();
+        upsertLiveSession();
+        return;
+      }
     }
-    _mmMergeTarget = null;
-    _mmDragging = null;
-    _mmPanning = null;
+    _mmMergeTarget = null; _mmConnectTarget = null;
+    _mmDragging = null; _mmPanning = null;
   });
 
   // 스크롤 줌
@@ -1858,17 +1864,19 @@ function renderMMCanvas() {
   mmNodes.forEach(n => {
     const sel = n.id === mmSelected;
     const isMergeTarget = _mmMergeTarget && n.id === _mmMergeTarget;
-    ctx.shadowColor = isMergeTarget ? 'rgba(34,119,221,0.5)' : 'rgba(0,0,0,0.10)';
-    ctx.shadowBlur = isMergeTarget ? 20 : sel ? 14 : 5;
+    const isConnectTarget = !isMergeTarget && _mmConnectTarget && n.id === _mmConnectTarget;
+    const highlighted = isMergeTarget || isConnectTarget;
+    ctx.shadowColor = isMergeTarget ? 'rgba(34,119,221,0.5)' : isConnectTarget ? 'rgba(0,170,102,0.5)' : 'rgba(0,0,0,0.10)';
+    ctx.shadowBlur = highlighted ? 20 : sel ? 14 : 5;
     // 원 — 내부 흰색, 테두리만 색상
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.fillStyle = isMergeTarget ? 'rgba(34,119,221,0.08)' : '#ffffff';
+    ctx.fillStyle = isMergeTarget ? 'rgba(34,119,221,0.08)' : isConnectTarget ? 'rgba(0,170,102,0.08)' : '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = isMergeTarget ? '#2277dd' : n.color;
-    ctx.lineWidth = isMergeTarget ? 3 : sel ? 2.5 : 1.8;
-    if (isMergeTarget) ctx.setLineDash([6, 3]);
+    ctx.strokeStyle = isMergeTarget ? '#2277dd' : isConnectTarget ? '#00aa66' : n.color;
+    ctx.lineWidth = highlighted ? 3 : sel ? 2.5 : 1.8;
+    if (highlighted) ctx.setLineDash([6, 3]);
     ctx.stroke();
-    if (isMergeTarget) ctx.setLineDash([]);
+    if (highlighted) ctx.setLineDash([]);
     ctx.shadowBlur = 0;
     // 텍스트 — 항상 해당 색상
     ctx.fillStyle = n.color;
