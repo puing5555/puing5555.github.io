@@ -690,6 +690,7 @@ body {
         <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span>🗺 브레인 스토밍</span>
           <div style="margin-left:auto;display:flex;gap:4px">
+            <button onclick="organizeMMWithAI()" title="AI가 인과관계/속성별로 정리" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--purple);background:transparent;color:var(--purple);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🧹 정리</button>
             <button onclick="mmUndo()" title="실행 취소 (Ctrl+Z)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↩ 취소</button>
             <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
             <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
@@ -2249,6 +2250,131 @@ function deleteMMNode() {
   document.getElementById('mmNodePanel').style.display = 'none';
   renderMMCanvas();
 }
+async function organizeMMWithAI() {
+  if (mmNodes.length < 4) { showToast('노드가 너무 적어'); return; }
+  if (!_apiKey) { showToast('API 키 설정 필요'); return; }
+
+  // 현재 노드/엣지 정보 수집
+  const rootNode = mmNodes.find(n => n.id === mmRootId);
+  const nodeList = mmNodes.map(n => n.text);
+  const edgeList = mmEdges.map(e => {
+    const from = mmNodes.find(n => n.id === e.from)?.text || '?';
+    const to = mmNodes.find(n => n.id === e.to)?.text || '?';
+    return `${from}→${to}`;
+  });
+
+  showToast('AI가 정리 중...');
+
+  try {
+    const raw = await callClaude([{role:'user', content:
+      `마인드맵 정리 요청.
+루트: "${rootNode?.text}"
+현재 노드: [${nodeList.join(', ')}]
+현재 연결: [${edgeList.join(', ')}]
+
+위 노드들을 인과관계와 속성별로 그룹핑해서 트리 구조로 재정리해줘.
+규칙:
+- 기존 노드 텍스트는 그대로 유지 (이름 변경 금지)
+- 필요하면 그룹 노드(카테고리)를 2~5개 새로 만들어 (4자 이내)
+- 루트 바로 아래에 그룹 노드, 그 아래에 기존 노드 배치
+- 같은 속성/인과관계인 노드끼리 같은 그룹에
+- JSON만 반환: {"groups":[{"label":"그룹명","nodes":["기존노드1","기존노드2"]},...]}`
+    }], 'JSON만 반환하는 구조화 도우미. 마크다운 금지.');
+
+    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    if (!parsed.groups || !parsed.groups.length) { showToast('정리 실패'); return; }
+
+    mmSnapshot(); // undo 가능
+
+    // 기존 엣지 모두 제거
+    mmEdges = [];
+
+    // 기존 노드 ID 맵 (텍스트 → id)
+    const textToNode = {};
+    mmNodes.forEach(n => {
+      const key = n.text.replace(/\s/g,'');
+      textToNode[key] = n;
+    });
+
+    // 그룹 노드 생성 + 기존 노드 재연결
+    const canvas = document.getElementById('mmCanvas');
+    const W = canvas.width || 700, H = canvas.height || 500;
+    const cx = rootNode?.x || W/2, cy = rootNode?.y || H/2;
+    const groupCount = parsed.groups.length;
+
+    parsed.groups.forEach((group, gi) => {
+      const groupLabel = String(group.label || '기타').slice(0, 5);
+
+      // 기존에 같은 이름 노드가 있으면 재활용, 없으면 새로 생성
+      let groupNode = mmNodes.find(n => n.text.replace(/\s/g,'') === groupLabel.replace(/\s/g,'') && n.id !== mmRootId);
+      if (!groupNode) {
+        const angle = (gi / groupCount) * Math.PI * 2 - Math.PI / 2;
+        const dist = 200;
+        groupNode = {
+          id: 'grp_' + Date.now() + '_' + gi,
+          text: groupLabel,
+          x: cx + Math.cos(angle) * dist,
+          y: cy + Math.sin(angle) * dist,
+          color: MM_COLORS[gi % MM_COLORS.length],
+          r: 42, _depth: 1
+        };
+        mmNodes.push(groupNode);
+      }
+
+      // 루트 → 그룹 연결
+      mmEdges.push({ from: mmRootId, to: groupNode.id });
+
+      // 그룹 → 기존 노드 연결
+      (group.nodes || []).forEach((nodeName, ni) => {
+        const key = String(nodeName).replace(/\s/g,'');
+        // 텍스트 매칭 (부분 일치 포함)
+        let matched = textToNode[key];
+        if (!matched) {
+          matched = mmNodes.find(n => {
+            if (n.id === mmRootId || n.id === groupNode.id) return false;
+            const a = n.text.replace(/\s/g,''), b = key;
+            return a === b || (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a)));
+          });
+        }
+        if (matched) {
+          mmEdges.push({ from: groupNode.id, to: matched.id });
+          matched.color = groupNode.color;
+          // 그룹 노드 주변에 재배치
+          const subAngle = (ni / Math.max((group.nodes||[]).length, 1)) * Math.PI * 2;
+          const subDist = 130;
+          matched.x = groupNode.x + Math.cos(subAngle) * subDist;
+          matched.y = groupNode.y + Math.sin(subAngle) * subDist;
+        }
+      });
+    });
+
+    // 연결 안 된 고아 노드 → 루트에 직접 연결
+    mmNodes.forEach(n => {
+      if (n.id === mmRootId) return;
+      const hasEdge = mmEdges.some(e => e.from === n.id || e.to === n.id);
+      if (!hasEdge) mmEdges.push({ from: mmRootId, to: n.id });
+    });
+
+    // 중복 엣지 제거
+    const edgeSet = new Set();
+    mmEdges = mmEdges.filter(e => {
+      const key = [e.from, e.to].sort().join('|');
+      if (edgeSet.has(key)) return false;
+      edgeSet.add(key);
+      return true;
+    });
+
+    _resolveNodeOverlaps();
+    recalcMMDepths();
+    renderMMCanvas();
+    upsertLiveSession();
+    showToast('✅ 정리 완료! (Ctrl+Z로 되돌리기 가능)');
+  } catch(e) {
+    console.error('organize error:', e);
+    showToast('정리 실패: ' + (e.message || e));
+  }
+}
+
 async function expandMMNode() {
   const node = mmNodes.find(n => n.id === mmSelected);
   if (!node) return;
