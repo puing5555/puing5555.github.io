@@ -690,6 +690,8 @@ body {
         <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span>🗺 브레인 스토밍</span>
           <div style="margin-left:auto;display:flex;gap:4px">
+            <button onclick="mmUndo()" title="실행 취소 (Ctrl+Z)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↩ 취소</button>
+            <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
             <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
             <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원추가</button>
             <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 후 다른 원 클릭 → 선 연결" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">➕ 선추가</button>
@@ -1230,6 +1232,7 @@ ${turnCount < 3 || !isAskingForAnswer
 
     // 마인드맵 — 계층 구조로 생성
     if (parsed.mindmap && parsed.mindmap.root) {
+      mmSnapshot();
       buildMMFromStructure(parsed.mindmap);
     }
 
@@ -1437,6 +1440,29 @@ let mmScale = 1.0;
 const MM_COLORS = ['#ff6f0f','#7755cc','#2277dd','#e07b00','#e03030','#00aa66'];
 let _mmColorIdx = 0;
 
+let mmUndoStack = [];
+let mmRedoStack = [];
+
+function mmSnapshot() {
+  mmUndoStack.push({ nodes: JSON.parse(JSON.stringify(mmNodes)), edges: JSON.parse(JSON.stringify(mmEdges)), rootId: mmRootId });
+  if (mmUndoStack.length > 30) mmUndoStack.shift();
+  mmRedoStack = [];
+}
+function mmUndo() {
+  if (!mmUndoStack.length) return;
+  mmRedoStack.push({ nodes: JSON.parse(JSON.stringify(mmNodes)), edges: JSON.parse(JSON.stringify(mmEdges)), rootId: mmRootId });
+  const s = mmUndoStack.pop();
+  mmNodes = s.nodes; mmEdges = s.edges; mmRootId = s.rootId;
+  mmSelected = null; renderMMCanvas();
+}
+function mmRedo() {
+  if (!mmRedoStack.length) return;
+  mmUndoStack.push({ nodes: JSON.parse(JSON.stringify(mmNodes)), edges: JSON.parse(JSON.stringify(mmEdges)), rootId: mmRootId });
+  const s = mmRedoStack.pop();
+  mmNodes = s.nodes; mmEdges = s.edges; mmRootId = s.rootId;
+  mmSelected = null; renderMMCanvas();
+}
+
 function setMMMode(mode) {
   mmMode = mode;
   mmConnectFrom = null;
@@ -1500,6 +1526,7 @@ function initMMCanvas() {
         const text = prompt('키워드 입력:');
         if (!text) return;
         const color = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
+        mmSnapshot();
         mmNodes.push({ id: 'n_'+Date.now(), text, x: cx, y: cy, color, r: 36 });
         renderMMCanvas();
       }
@@ -1526,7 +1553,7 @@ function initMMCanvas() {
           showToast('연결할 두 번째 원 클릭');
         } else if (mmConnectFrom !== hit.id) {
           const exists = mmEdges.find(e => (e.from===mmConnectFrom&&e.to===hit.id)||(e.from===hit.id&&e.to===mmConnectFrom));
-          if (!exists) mmEdges.push({ from: mmConnectFrom, to: hit.id });
+          if (!exists) { mmSnapshot(); mmEdges.push({ from: mmConnectFrom, to: hit.id }); }
           mmConnectFrom = null;
           setMMMode('normal');
           renderMMCanvas();
@@ -1624,6 +1651,8 @@ function initMMCanvas() {
 
   // Delete 키 → 선택된 선/원 삭제
   document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); mmUndo(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); mmRedo(); return; }
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
     if (mmSelectedEdge) {
@@ -1891,6 +1920,7 @@ function resizeMMNode(r) {
 }
 function deleteMMNode() {
   if (!mmSelected) return;
+  mmSnapshot();
   mmNodes = mmNodes.filter(n => n.id !== mmSelected);
   mmEdges = mmEdges.filter(e => e.from !== mmSelected && e.to !== mmSelected);
   mmSelected = null;
