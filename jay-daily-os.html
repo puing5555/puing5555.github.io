@@ -1850,6 +1850,7 @@ function renderTasks() {
       <div class="task-actions">
         ${canPrev?`<button onclick="moveTask(${ri},-1)" title="앞으로">←</button>`:'<span></span>'}
         ${canNext?`<button onclick="moveTask(${ri},1)" title="뒤로">→</button>`:'<span></span>'}
+        <button onclick="editTask(${ri})" title="수정" style="color:var(--blue)">✏️</button>
         <button onclick="scheduleTask(${ri})" title="타임라인에 시간 배정" style="color:var(--blue)">🕐</button>
         <button onclick="deleteTask(${ri})" title="삭제" style="color:var(--red)">✕</button>
       </div>
@@ -1862,6 +1863,15 @@ function renderTasks() {
   badge.textContent = undone;
   renderSchedule();
   updateStat();
+}
+function editTask(i) {
+  const day = getDay();
+  const t = day.tasks[i];
+  const newText = prompt('할일 수정', t.text);
+  if (newText && newText.trim()) {
+    day.tasks[i].text = newText.trim();
+    save(); renderTasks();
+  }
 }
 function toggleTask(i) { const day=getDay(); day.tasks[i].done=!day.tasks[i].done; save(); renderTasks(); }
 const _whenOrder = ['today','tomorrow','week','later'];
