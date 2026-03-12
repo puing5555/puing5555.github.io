@@ -1779,7 +1779,7 @@ function buildMMFromStructure(mm) {
   const branches = mm.branches || mm.children || [];
   const existingBranchCount = mmNodes.filter(n => n._depth === 1).length;
 
-  branches.slice(0, 2).forEach((branch, bi) => {  // 최대 2 가지
+  branches.forEach((branch, bi) => {  // 제한 없음
     const branchLabel = branch.label || branch;
     // 이미 같은 텍스트 가지가 있으면 skip
     if (mmNodes.find(n => n.text === branchLabel && n._depth === 1)) return;
