@@ -140,7 +140,7 @@ body {
 }
 #panel-dump.active { display: flex; }
 .dump-chat-col {
-  width: 420px; flex-shrink: 0;
+  flex: 0 0 420px;
   display: flex; flex-direction: column;
   min-width: 0; min-height: 0; overflow: hidden;
 }
@@ -665,7 +665,7 @@ body {
       <div class="dump-chat-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;justify-content:space-between">
           <span>💬 대화</span>
-          <button onclick="clearDump()" title="대화 + 마인드맵 초기화" style="padding:3px 10px;border-radius:8px;border:2px solid var(--red);background:transparent;color:var(--red);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px">🗑 청소</button>
+          <button onclick="clearDump()" style="padding:3px 10px;border-radius:8px;border:2px solid var(--red);background:transparent;color:var(--red);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px">🗑 New</button>
         </div>
         <div class="dump-messages" id="dumpMessages">
           <div class="msg-ai">
@@ -687,7 +687,7 @@ body {
       <div class="dump-resizer" id="dumpResizer"></div>
       <div class="dump-map-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:15px;font-weight:900;color:var(--text);letter-spacing:-0.5px">브레인 스토밍</span>
+          <span>🗺 브레인 스토밍</span>
           <div style="margin-left:auto;display:flex;gap:4px">
             <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
             <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원추가</button>
@@ -2484,7 +2484,7 @@ function init() {
   // 리사이저 — flex width 방식
   const chatCol = document.querySelector('.dump-chat-col');
   const savedW = localStorage.getItem('jay_chatColW');
-  if (savedW) chatCol.style.width = savedW + 'px';
+  if (savedW) chatCol.style.flexBasis = savedW + 'px';
 
   const resizer = document.getElementById('dumpResizer');
   let _rDragging = false, _rStartX = 0, _rStartW = 0;
@@ -2493,7 +2493,7 @@ function init() {
     e.preventDefault();
     _rDragging = true;
     _rStartX = e.clientX;
-    _rStartW = chatCol.offsetWidth;
+    _rStartW = chatCol.getBoundingClientRect().width;
     resizer.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
@@ -2501,7 +2501,7 @@ function init() {
   window.addEventListener('mousemove', e => {
     if (!_rDragging) return;
     const newW = Math.max(180, Math.min(window.innerWidth - 250, _rStartW + (e.clientX - _rStartX)));
-    chatCol.style.width = newW + 'px';
+    chatCol.style.flexBasis = newW + 'px';
   });
   window.addEventListener('mouseup', () => {
     if (!_rDragging) return;
@@ -2509,7 +2509,7 @@ function init() {
     resizer.classList.remove('dragging');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    localStorage.setItem('jay_chatColW', chatCol.offsetWidth);
+    localStorage.setItem('jay_chatColW', Math.round(chatCol.getBoundingClientRect().width));
   });
 }
 
