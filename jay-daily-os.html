@@ -1008,15 +1008,18 @@ body {
 </div>
 
 <!-- 메모 AI 대화 모달 -->
-<div class="modal-overlay" id="memoChatModal" onclick="if(event.target===this)closeModal('memoChatModal')" style="z-index:1100">
-  <div class="modal-box" style="width:560px;max-width:95vw;height:70vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
-    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+<div class="modal-overlay" id="memoChatModal" onclick="if(event.target===this)saveMemoChat();closeModal('memoChatModal')" style="z-index:1100">
+  <div class="modal-box" style="width:580px;max-width:95vw;height:72vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+    <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
       <div style="font-weight:700;font-size:15px">💬 AI 대화</div>
-      <button onclick="closeModal('memoChatModal')" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2)">✕</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="saveMemoChatAsDoc()" style="padding:4px 12px;border-radius:7px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📄 문서로 저장</button>
+        <button onclick="saveMemoChat();closeModal('memoChatModal')" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2)">✕</button>
+      </div>
     </div>
     <div id="memoChatMessages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px"></div>
     <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0">
-      <textarea id="memoChatInput" placeholder="질문하거나 이어서 생각해봐..." rows="2"
+      <textarea id="memoChatInput" placeholder="생각을 더 풀어보거나 해결책을 물어봐..." rows="2"
         style="flex:1;resize:none;border:1.5px solid var(--border2);border-radius:10px;padding:8px 12px;font-family:inherit;font-size:13px;outline:none"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMemoChat()}"></textarea>
       <button onclick="sendMemoChat()" style="padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px;align-self:flex-end">전송</button>
@@ -2608,33 +2611,71 @@ function saveEditMemo() {
 }
 let _memoChatHistory = [];
 let _memoChatSending = false;
+let _memoChatMemoId = null; // 현재 대화 중인 메모 id
+
+function _memoChatStorageKey(memoId) { return 'jay_memochat_' + memoId; }
+
+function saveMemoChat() {
+  if (!_memoChatMemoId || _memoChatHistory.length < 2) return;
+  localStorage.setItem(_memoChatStorageKey(_memoChatMemoId), JSON.stringify(_memoChatHistory));
+}
 
 function chatMemo(i) {
   const memo = memoData[i];
-  _memoChatHistory = [];
+  _memoChatMemoId = memo.id;
   _memoChatSending = false;
+
   const msgs = document.getElementById('memoChatMessages');
   msgs.innerHTML = '';
-  // 메모 내용 컨텍스트로 첫 메시지
-  const ctx = `[메모]\n카테고리: ${memo.category}\n내용: ${memo.text}\n태그: ${(memo.tags||[]).join(', ')}`;
-  _memoChatHistory.push({ role: 'user', content: ctx });
-  // 시스템 초기화 메시지 표시
-  const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface2);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--text2);line-height:1.5';
-  card.textContent = memo.text;
-  msgs.appendChild(card);
+
+  // 저장된 대화 복원
+  const saved = localStorage.getItem(_memoChatStorageKey(memo.id));
+  if (saved) {
+    try {
+      _memoChatHistory = JSON.parse(saved);
+      // 메모 컨텍스트 카드
+      const card = document.createElement('div');
+      card.style.cssText = 'background:var(--surface2);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--text2);line-height:1.5;border-left:3px solid var(--accent)';
+      card.textContent = memo.text;
+      msgs.appendChild(card);
+      // 이전 대화 렌더
+      _memoChatHistory.forEach(m => {
+        if (m.role === 'user' && m.content.startsWith('[메모]')) return; // 컨텍스트 메시지는 skip
+        _memoChatAddMsg(m.role === 'assistant' ? 'ai' : m.role, m.content);
+      });
+      const resumeNote = document.createElement('div');
+      resumeNote.style.cssText = 'text-align:center;font-size:11px;color:var(--muted);padding:4px';
+      resumeNote.textContent = '— 이전 대화 이어서 —';
+      msgs.appendChild(resumeNote);
+    } catch(e) {
+      _memoChatHistory = [];
+    }
+  } else {
+    _memoChatHistory = [];
+    // 메모 컨텍스트 첫 메시지
+    const ctx = `[메모]\n카테고리: ${memo.category}\n내용: ${memo.text}\n태그: ${(memo.tags||[]).join(', ')}`;
+    _memoChatHistory.push({ role: 'user', content: ctx });
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--surface2);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--text2);line-height:1.5;border-left:3px solid var(--accent)';
+    card.textContent = memo.text;
+    msgs.appendChild(card);
+  }
+
   openModal('memoChatModal');
-  document.getElementById('memoChatInput').focus();
-  // AI 첫 응답 자동 시작
-  _sendMemoChatAI('이 메모에 대해 더 발전시킬 아이디어나 질문을 1-2문장으로 줘. 친구처럼 구어체로.');
+  setTimeout(() => document.getElementById('memoChatInput').focus(), 100);
+
+  // 신규 대화면 AI 첫 응답 자동 시작
+  if (!saved) {
+    _sendMemoChatAI('이 메모에 대해 생각을 확장하거나 해결책, 다음 액션을 찾도록 도와줘. 핵심 질문 1개 또는 인사이트 1개만. 친구처럼 구어체로.');
+  }
 }
 
 function _memoChatAddMsg(role, text) {
   const msgs = document.getElementById('memoChatMessages');
   const div = document.createElement('div');
   div.style.cssText = role === 'user'
-    ? 'align-self:flex-end;background:var(--accent);color:#fff;border-radius:14px 14px 2px 14px;padding:8px 14px;font-size:13px;max-width:85%;line-height:1.5'
-    : 'align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:14px 14px 14px 2px;padding:8px 14px;font-size:13px;max-width:85%;line-height:1.5';
+    ? 'align-self:flex-end;background:var(--accent);color:#fff;border-radius:14px 14px 2px 14px;padding:8px 14px;font-size:13px;max-width:85%;line-height:1.5;white-space:pre-wrap'
+    : 'align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:14px 14px 14px 2px;padding:8px 14px;font-size:13px;max-width:85%;line-height:1.5;white-space:pre-wrap';
   div.textContent = text;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
@@ -2653,10 +2694,16 @@ async function _sendMemoChatAI(overridePrompt) {
     const history = overridePrompt
       ? [..._memoChatHistory, { role: 'user', content: overridePrompt }]
       : _memoChatHistory;
-    const raw = await callClaude(history, '당신은 JAY의 AI 비서. 메모 내용을 바탕으로 생각을 발전시키거나 질문해줘. 친구처럼 1-2문장 구어체로. 텍스트만 응답.');
+    const system = `당신은 JAY의 AI 비서. 메모 내용을 바탕으로:
+- 생각 확장: 아직 안 떠올린 관점, 연결고리 제시
+- 해결책: 구체적 액션, 다음 단계 제안
+- 깊이 파기: "왜?", "어떻게?" 로 핵심 꺼내기
+1-2문장 구어체. 텍스트만 응답. 번갈아가며 질문/인사이트/해결책 제시.`;
+    const raw = await callClaude(history, system);
     typing.remove();
     _memoChatAddMsg('ai', raw);
     _memoChatHistory.push({ role: 'assistant', content: raw });
+    saveMemoChat(); // 자동 저장
   } catch(e) {
     typing.remove();
     _memoChatAddMsg('ai', '오류 났어. 다시 해봐 🙏');
@@ -2672,6 +2719,29 @@ async function sendMemoChat() {
   _memoChatAddMsg('user', input);
   _memoChatHistory.push({ role: 'user', content: input });
   await _sendMemoChatAI();
+}
+
+async function saveMemoChatAsDoc() {
+  if (_memoChatHistory.length < 2) { showToast('대화 내용이 없어요'); return; }
+  showToast('AI가 요약 중...');
+  try {
+    const convText = _memoChatHistory
+      .filter(m => !m.content.startsWith('[메모]'))
+      .map(m => `${m.role === 'user' ? 'JAY' : 'AI'}: ${m.content}`)
+      .join('\n\n');
+    const summary = await callClaude(
+      [{ role: 'user', content: `다음 대화를 문서로 정리해줘. 핵심 인사이트, 해결책, 다음 액션 중심으로. 마크다운 사용:\n\n${convText}` }],
+      '당신은 문서 정리 전문가. 대화 내용을 깔끔한 한국어 문서로 정리해줘.'
+    );
+    if (!docsData) window.docsData = [];
+    docsData.push({ id: 'd_' + Date.now(), title: summary.split('\n')[0].replace(/^#+\s*/, '').slice(0, 40), text: summary, date: new Date().toISOString() });
+    save();
+    showToast('문서로 저장됨 ✓');
+    closeModal('memoChatModal');
+    switchPanel('docs', document.querySelectorAll('.nav-btn')[4]);
+  } catch(e) {
+    showToast('저장 실패: ' + e.message);
+  }
 }
 function deleteMemoCard(i) {
   memoData.splice(i, 1);
