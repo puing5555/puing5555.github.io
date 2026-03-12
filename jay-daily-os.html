@@ -1133,6 +1133,9 @@ async function sendDump() {
   const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
   const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|답|해결|방향|어떻게 해|뭘 해야|추천|선택|골라/.test(input);
 
+  const inputItems = (input.match(/\d+\./g) || []).length; // 번호 목록 감지
+  const maxBranches = inputItems >= 4 ? inputItems : 3;
+
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","children":[{"label":"세부(8자이내)","children":["더세부1","더세부2"]}]}]},"focus":"오늘 딱 하나만"}
@@ -1148,9 +1151,10 @@ ${turnCount < 3 || !isAskingForAnswer
 - ${currentRoot}
 - 기존 가지: [${existingBranches || '없음'}]
 - root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
-- branches: 이번 대화에서 새로 추가할 가지만 (기존 가지 중복 금지), 최대 2개
-- 각 가지의 children 최대 2개, children의 children은 생략
-- 인과관계/논리 흐름으로 구조화 (why→what→how 순서)
+- branches: 이번 대화에서 새로 추가할 가지만 (기존 가지 중복 금지), 최대 ${maxBranches}개
+- 입력에 번호 목록(1. 2. 3. ...)이 있으면 각 항목을 별도 가지로 만들어줘
+- 각 가지의 children 최대 1개, children의 children은 생략
+- 인과관계/논리 흐름으로 구조화
 - 대화 내용 없으면 mindmap:null
 - 노드 텍스트는 반드시 6자 이내로
 
