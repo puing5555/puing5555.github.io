@@ -1105,15 +1105,26 @@ async function sendDump() {
   day.dumps.push({ time: new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text: input.slice(0,200) }); save();
 
   const profileCtx = userProfile.name ? `JAY 프로필: ${userProfile.name}, ${userProfile.job||''}, 집중: ${userProfile.focus||''}` : '';
-  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
-반드시 JSON만 응답 (이전 대화 맥락 유지해서 자연스럽게 이어가):
-{"reply":"친구처럼 한마디(구어체 1-2문장, 이전 대화 맥락 반영)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(10자이내)","children":[{"label":"가지1","children":["세부1","세부2"]},{"label":"가지2","children":["세부1"]}]},"focus":"오늘 딱 하나만"}
+  // 현재 마인드맵 루트 텍스트 (있으면 알려줌)
+  const rootNode = mmNodes.find(n => n.id === mmRootId);
+  const currentRoot = rootNode ? `현재 마인드맵 루트: "${rootNode.text}"` : '마인드맵 없음(첫 대화)';
+  const existingBranches = mmNodes.filter(n => n._depth === 1).map(n => n.text).join(', ');
 
-할일 추출 규칙:
-- tasks는 "해야 해", "할 거야", "해줘" 등 명확한 액션 동사가 있을 때만
-- "~하고 있어", "~했어" 같은 상태/과거는 절대 tasks에 넣지 말 것
-- 불확실하면 tasks:[]
-- mindmap은 대화 주제를 계층형으로 정리 (root→가지→세부). 대화 없으면 null`;
+  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
+반드시 JSON만 응답:
+{"reply":"친구처럼 한마디(구어체 1-2문장, 이전 대화 맥락 반영)","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내, 첫대화만)","branches":[{"label":"가지(6자이내)","children":[{"label":"세부(8자이내)","children":["더세부1","더세부2"]}]}]},"focus":"오늘 딱 하나만"}
+
+마인드맵 규칙:
+- ${currentRoot}
+- 기존 가지: [${existingBranches || '없음'}]
+- root: 첫 대화면 핵심 주제, 이후엔 기존 루트와 동일하게 유지
+- branches: 이번 대화에서 새로 추가할 가지만 (기존 가지 중복 금지)
+- 인과관계/논리 흐름으로 구조화 (why→what→how 순서)
+- 대화 내용 없으면 mindmap:null
+- children은 2단계까지만, 각 가지 최대 3개
+
+할일 규칙: "해야해", "할거야" 같은 명확한 액션만. 상태/사실은 tasks금지.`;
+
 
   try {
     let userContent = input;
@@ -1617,44 +1628,96 @@ function addMMNode(text, color) {
   return node;
 }
 
-// 계층형 구조로 마인드맵 생성
+// 계층형 마인드맵 — 루트 1개 유지, 대화마다 가지 추가
+let mmRootId = null; // 루트 노드 ID 고정
+
 function buildMMFromStructure(mm) {
   const canvas = document.getElementById('mmCanvas');
   if (canvas.style.display === 'none') initMMCanvas();
-  const W = canvas.width || 600, H = canvas.height || 400;
-  const cx = W/2 - mmTranslate.x, cy = H/2 - mmTranslate.y;
-  const rootColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
+  const W = canvas.width || 700, H = canvas.height || 500;
 
-  // 루트 노드
-  const rootNode = { id: 'n_'+Date.now(), text: mm.root, x: cx, y: cy, color: rootColor, r: 44 };
-  mmNodes.push(rootNode);
+  if (!mm) return;
 
-  const children = mm.children || [];
-  const branchAngles = children.length === 1
-    ? [0]
-    : children.map((_, i) => (i / children.length) * Math.PI * 2 - Math.PI/2);
+  // ── 첫 대화: 루트 생성 ──
+  if (!mmRootId || mmNodes.length === 0) {
+    mmNodes = []; mmEdges = []; _mmColorIdx = 0;
+    const cx = W / 2 - mmTranslate.x;
+    const cy = H / 2 - mmTranslate.y;
+    const rootNode = {
+      id: 'root_' + Date.now(),
+      text: mm.root || '주제',
+      x: cx, y: cy,
+      color: MM_COLORS[_mmColorIdx++ % MM_COLORS.length],
+      r: 52
+    };
+    mmNodes.push(rootNode);
+    mmRootId = rootNode.id;
+  }
 
-  children.forEach((branch, bi) => {
+  // ── 매 대화: 기존 트리에 가지 추가 ──
+  const branches = mm.branches || mm.children || [];
+  const existingBranchCount = mmNodes.filter(n => n._depth === 1).length;
+
+  branches.forEach((branch, bi) => {
+    const branchLabel = branch.label || branch;
+    // 이미 같은 텍스트 가지가 있으면 skip
+    if (mmNodes.find(n => n.text === branchLabel && n._depth === 1)) return;
+
     const bColor = MM_COLORS[_mmColorIdx++ % MM_COLORS.length];
-    const bAngle = branchAngles[bi];
-    const bDist = 160;
-    const bx = cx + Math.cos(bAngle) * bDist;
-    const by = cy + Math.sin(bAngle) * bDist;
-    const branchNode = { id: 'n_'+Date.now()+'_'+bi, text: branch.label||branch, x: bx, y: by, color: bColor, r: 36 };
+    const root = mmNodes.find(n => n.id === mmRootId);
+    if (!root) return;
+
+    // 가지 각도 — 기존 가지 수 기반으로 균등 배치
+    const totalBranches = existingBranchCount + branches.length;
+    const bIdx = existingBranchCount + bi;
+    const bAngle = (bIdx / Math.max(totalBranches, 1)) * Math.PI * 2 - Math.PI / 2;
+    const bDist = 170;
+    const bx = root.x + Math.cos(bAngle) * bDist;
+    const by = root.y + Math.sin(bAngle) * bDist;
+
+    const branchNode = {
+      id: 'b_' + Date.now() + '_' + bi,
+      text: branchLabel, x: bx, y: by,
+      color: bColor, r: 38, _depth: 1, _angle: bAngle
+    };
     mmNodes.push(branchNode);
-    mmEdges.push({ from: rootNode.id, to: branchNode.id });
+    mmEdges.push({ from: mmRootId, to: branchNode.id });
 
     // 세부 노드
-    const subs = Array.isArray(branch.children) ? branch.children : [];
+    const subs = Array.isArray(branch.children) ? branch.children : (branch.subs || []);
     subs.forEach((sub, si) => {
-      const spread = subs.length === 1 ? 0 : (si - (subs.length-1)/2) * 0.45;
+      const subLabel = typeof sub === 'string' ? sub : sub.label;
+      if (!subLabel) return;
+      const spread = subs.length === 1 ? 0 : (si - (subs.length - 1) / 2) * 0.55;
       const sAngle = bAngle + spread;
-      const sDist = 130;
+      const sDist = 140;
       const sx = bx + Math.cos(sAngle) * sDist;
       const sy = by + Math.sin(sAngle) * sDist;
-      const subNode = { id: 'n_'+Date.now()+'_'+bi+'_'+si, text: sub, x: sx, y: sy, color: bColor, r: 28 };
+      const subNode = {
+        id: 'n_' + Date.now() + '_' + bi + '_' + si,
+        text: subLabel, x: sx, y: sy,
+        color: bColor, r: 30, _depth: 2
+      };
       mmNodes.push(subNode);
       mmEdges.push({ from: branchNode.id, to: subNode.id });
+
+      // 3단계 세부
+      const details = Array.isArray(sub.children) ? sub.children : [];
+      details.forEach((det, di) => {
+        const detLabel = typeof det === 'string' ? det : det.label;
+        if (!detLabel) return;
+        const dSpread = details.length === 1 ? 0 : (di - (details.length-1)/2) * 0.4;
+        const dAngle = sAngle + dSpread;
+        const dx = sx + Math.cos(dAngle) * 110;
+        const dy = sy + Math.sin(dAngle) * 110;
+        const detNode = {
+          id: 'n_' + Date.now() + '_d' + di,
+          text: detLabel, x: dx, y: dy,
+          color: bColor + 'cc', r: 24, _depth: 3
+        };
+        mmNodes.push(detNode);
+        mmEdges.push({ from: subNode.id, to: detNode.id });
+      });
     });
   });
 
@@ -1706,7 +1769,7 @@ function clearDump() {
   msgs.innerHTML = '<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>지금 머릿속에 있는 거 다 쏟아내봐 🧠<br>할 일, 걱정, 아이디어, 뭐든</div>';
   getDay().dumps = []; save();
   _dumpHistory = []; // 대화 히스토리 초기화
-  mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0;
+  mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0; mmRootId = null;
   mmTranslate = {x:0, y:0};
   const canvas = document.getElementById('mmCanvas');
   canvas.style.display = 'none';
