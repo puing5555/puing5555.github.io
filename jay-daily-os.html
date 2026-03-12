@@ -1791,6 +1791,8 @@ function clearDump() {
   getDay().dumps = []; save();
   _dumpHistory = [];
   _currentSessionMsgs = [];
+  _liveSessionId = 'live_' + Date.now();
+  localStorage.removeItem('jay_currentSession');
   mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0; mmRootId = null;
   mmTranslate = {x:0, y:0};
   const canvas = document.getElementById('mmCanvas');
@@ -2098,10 +2100,36 @@ function deleteGoal(i) {
 let sessionHistory = JSON.parse(localStorage.getItem('jay_sessions') || '[]');
 let _currentSessionMsgs = JSON.parse(localStorage.getItem('jay_currentSession') || '[]'); // 진행중 세션 복원
 
+let _liveSessionId = 'live_' + Date.now(); // 현재 진행중 세션 ID
+
 function recordSessionMsg(role, text) {
   _currentSessionMsgs.push({ role, text: text.slice(0, 300) });
-  // 실시간 백업 — 새로고침해도 유실 안 됨
   localStorage.setItem('jay_currentSession', JSON.stringify(_currentSessionMsgs));
+  // 실시간으로 sessionHistory 맨 앞에 upsert
+  upsertLiveSession();
+}
+
+function upsertLiveSession() {
+  if (_currentSessionMsgs.length < 1) return;
+  const firstUser = _currentSessionMsgs.find(m => m.role === 'user');
+  const summary = firstUser ? firstUser.text.slice(0, 40) + (firstUser.text.length > 40 ? '…' : '') : '대화 중...';
+  const msgCount = _currentSessionMsgs.filter(m => m.role === 'user').length;
+  const now = new Date();
+  const existing = sessionHistory.findIndex(s => s.id === _liveSessionId);
+  const session = {
+    id: _liveSessionId,
+    date: now.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }),
+    time: now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+    summary, msgCount,
+    messages: _currentSessionMsgs.slice(),
+    analyzed: false,
+    live: true
+  };
+  if (existing !== -1) sessionHistory[existing] = session;
+  else sessionHistory.unshift(session);
+  if (sessionHistory.length > 100) sessionHistory = sessionHistory.slice(0, 100);
+  localStorage.setItem('jay_sessions', JSON.stringify(sessionHistory));
+  renderRightDumps();
 }
 
 // 세션 저장 — 동기 (히스토리만, AI 분석 없음)
@@ -2117,13 +2145,17 @@ function saveCurrentSession() {
     summary,
     msgCount,
     messages: _currentSessionMsgs.slice(),
-    analyzed: false  // AI 분석 여부
+    analyzed: false,
+    live: false  // 청소 시 live 플래그 해제
   };
-  sessionHistory.unshift(session);
+  // 기존 live 세션 업데이트 or 새로 추가
+  const existing = sessionHistory.findIndex(s => s.id === _liveSessionId);
+  if (existing !== -1) sessionHistory[existing] = session;
+  else sessionHistory.unshift(session);
   if (sessionHistory.length > 100) sessionHistory = sessionHistory.slice(0, 100);
   localStorage.setItem('jay_sessions', JSON.stringify(sessionHistory));
   _currentSessionMsgs = [];
-  localStorage.removeItem('jay_currentSession'); // 백업 클리어
+  localStorage.removeItem('jay_currentSession');
   return session;
 }
 
@@ -2203,13 +2235,15 @@ function renderRightDumps() {
   const el = document.getElementById('rightDumpList');
   if (!el) return;
   if (!sessionHistory.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon" style="font-size:20px">🧠</div><div class="empty-text" style="font-size:12px">브레인덤프 대화 후<br>청소하면 여기 저장돼</div></div>';
+    el.innerHTML = '<div class="empty"><div class="empty-icon" style="font-size:20px">🧠</div><div class="empty-text" style="font-size:12px">대화하면 실시간으로<br>여기 저장돼</div></div>';
     return;
   }
   el.innerHTML = sessionHistory.map(s => `
-    <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start">
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start${s.live ? ';background:var(--accent-dim)' : ''}">
       <div style="flex:1;min-width:0">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">${s.date} · ${s.time} · ${s.msgCount}턴</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">
+          ${s.live ? '<span style="color:var(--accent);font-weight:700">● 진행중</span> · ' : ''}${s.date} · ${s.time} · ${s.msgCount}턴
+        </div>
         <div style="font-size:12px;color:var(--text);line-height:1.5;word-break:break-all;font-weight:600">${s.summary}</div>
       </div>
       <button onclick="deleteSession('${s.id}')" title="삭제" style="flex-shrink:0;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
