@@ -1784,11 +1784,28 @@ function buildMMFromStructure(mm) {
 
 function getDescendants(nodeId) {
   const result = [];
+  const startNode = mmNodes.find(n => n.id === nodeId);
+  if (!startNode) return result;
+  const startDepth = startNode._depth ?? 0;
   const queue = [nodeId];
+  const visited = new Set([nodeId]);
   while (queue.length) {
     const curr = queue.shift();
-    const children = mmEdges.filter(e => e.from === curr).map(e => e.to);
-    children.forEach(id => { result.push(id); queue.push(id); });
+    const currDepth = (mmNodes.find(n => n.id === curr)?._depth) ?? 0;
+    mmEdges.forEach(e => {
+      let childId = null;
+      if (e.from === curr && !visited.has(e.to)) childId = e.to;
+      else if (e.to === curr && !visited.has(e.from)) childId = e.from;
+      if (!childId) return;
+      const childNode = mmNodes.find(n => n.id === childId);
+      const childDepth = childNode?._depth ?? 0;
+      // 자신보다 depth가 큰 노드만 자손으로 인식
+      if (childDepth > currDepth) {
+        visited.add(childId);
+        result.push(childId);
+        queue.push(childId);
+      }
+    });
   }
   return result;
 }
