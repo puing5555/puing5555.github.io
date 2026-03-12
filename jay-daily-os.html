@@ -1404,6 +1404,7 @@ let mmConnectFrom = null; // connect 모드에서 첫번째 선택 node id
 let _mmDragging = null; // {id, ox, oy}
 let _mmPanning = null;  // {sx, sy, tx, ty}
 let mmTranslate = {x:0, y:0};
+let mmScale = 1.0;
 const MM_COLORS = ['#ff6f0f','#7755cc','#2277dd','#e07b00','#e03030','#00aa66'];
 let _mmColorIdx = 0;
 
@@ -1460,8 +1461,8 @@ function initMMCanvas() {
   // 포인터 이벤트
   canvas.addEventListener('pointerdown', e => {
     const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left - mmTranslate.x;
-    const cy = e.clientY - rect.top - mmTranslate.y;
+    const cx = (e.clientX - rect.left - mmTranslate.x) / mmScale;
+    const cy = (e.clientY - rect.top - mmTranslate.y) / mmScale;
     const hit = mmNodeAt(cx, cy);
 
     if (mmMode === 'add') {
@@ -1533,13 +1534,13 @@ function initMMCanvas() {
   canvas.addEventListener('pointermove', e => {
     if (_mmDragging) {
       const rect = canvas.getBoundingClientRect();
-      const cx = e.clientX - rect.left - mmTranslate.x;
-      const cy = e.clientY - rect.top - mmTranslate.y;
+      const cx = (e.clientX - rect.left - mmTranslate.x) / mmScale;
+      const cy = (e.clientY - rect.top - mmTranslate.y) / mmScale;
       const node = mmNodes.find(n => n.id === _mmDragging.id);
       if (node) {
         const dx = (cx - _mmDragging.ox) - node.x;
         const dy = (cy - _mmDragging.oy) - node.y;
-        // 이 노드와 모든 자손 노드 함께 이동
+        recalcMMDepths();
         const descendants = getDescendants(node.id);
         descendants.forEach(id => {
           const nd = mmNodes.find(n => n.id === id);
@@ -1558,8 +1559,8 @@ function initMMCanvas() {
   // 더블클릭 → 수정 패널 열기
   canvas.addEventListener('dblclick', e => {
     const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left - mmTranslate.x;
-    const cy = e.clientY - rect.top - mmTranslate.y;
+    const cx = (e.clientX - rect.left - mmTranslate.x) / mmScale;
+    const cy = (e.clientY - rect.top - mmTranslate.y) / mmScale;
     const hit = mmNodes.find(n => Math.hypot(n.x-cx, n.y-cy) <= n.r);
     if (hit) {
       mmSelected = hit.id;
@@ -1575,6 +1576,21 @@ function initMMCanvas() {
   });
 
   canvas.addEventListener('pointerup', () => { _mmDragging = null; _mmPanning = null; });
+
+  // 스크롤 줌
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(0.3, Math.min(3.0, mmScale * delta));
+    // 마우스 위치 기준으로 줌
+    mmTranslate.x = mx - (mx - mmTranslate.x) * (newScale / mmScale);
+    mmTranslate.y = my - (my - mmTranslate.y) * (newScale / mmScale);
+    mmScale = newScale;
+    renderMMCanvas();
+  }, { passive: false });
 
   // Delete 키 → 선택된 선/원 삭제
   document.addEventListener('keydown', e => {
@@ -1627,6 +1643,7 @@ function renderMMCanvas() {
 
   ctx.save();
   ctx.translate(mmTranslate.x, mmTranslate.y);
+  ctx.scale(mmScale, mmScale);
 
   // 연결선
   mmEdges.forEach(e => {
