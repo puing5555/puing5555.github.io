@@ -694,7 +694,6 @@ body {
             <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
             <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
             <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원추가</button>
-            <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 후 다른 원 클릭 → 선 연결" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">➕ 선추가</button>
             <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 삭제</button>
           </div>
         </div>
@@ -1522,7 +1521,7 @@ async function ytProcess(videoId, mode) {
 // ── 마인드맵 (자유 캔버스) ──
 let mmNodes = [];   // {id, text, x, y, color, r}
 let mmEdges = [];   // {from, to}  (id 기반)
-let mmMode = 'normal'; // normal | add | connect | delete
+let mmMode = 'normal'; // normal | add | delete
 let mmSelected = null; // node id
 let mmConnectFrom = null; // connect 모드에서 첫번째 선택 node id
 let _mmDragging = null; // {id, ox, oy}
@@ -1559,7 +1558,7 @@ function setMMMode(mode) {
   mmMode = mode;
   mmConnectFrom = null;
   mmSelected = null;
-  const btns = {normal:'mmModeNormal', add:'mmModeAdd', connect:'mmModeConnect', delete:'mmModeDelete'};
+  const btns = {normal:'mmModeNormal', add:'mmModeAdd', delete:'mmModeDelete'};
   Object.entries(btns).forEach(([m, id]) => {
     const b = document.getElementById(id);
     if (!b) return;
@@ -1567,7 +1566,7 @@ function setMMMode(mode) {
     else { b.style.background = 'transparent'; b.style.color = 'var(--text2)'; b.style.borderColor = 'var(--border2)'; }
   });
   const canvas = document.getElementById('mmCanvas');
-  canvas.style.cursor = mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : mode === 'connect' ? 'cell' : 'grab';
+  canvas.style.cursor = mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'grab';
   renderMMCanvas();
 }
 
@@ -1638,38 +1637,23 @@ function initMMCanvas() {
       return;
     }
 
-    if (mmMode === 'connect') {
-      if (hit) {
-        if (!mmConnectFrom) {
-          mmConnectFrom = hit.id;
-          showToast('연결할 두 번째 원 클릭');
-        } else if (mmConnectFrom !== hit.id) {
-          const exists = mmEdges.find(e => (e.from===mmConnectFrom&&e.to===hit.id)||(e.from===hit.id&&e.to===mmConnectFrom));
-          if (!exists) { mmSnapshot(); mmEdges.push({ from: mmConnectFrom, to: hit.id }); }
-          mmConnectFrom = null;
-          setMMMode('normal');
-          renderMMCanvas();
-        }
-      }
-      return;
-    }
-
     // normal 모드
     if (hit) {
-      // 이미 선택된 노드가 있고, 다른 노드를 클릭 → 자동 연결 (선 없는 경우만)
-      if (mmSelected && mmSelected !== hit.id) {
-        const exists = mmEdges.find(e =>
-          (e.from === mmSelected && e.to === hit.id) ||
-          (e.from === hit.id && e.to === mmSelected)
-        );
-        if (!exists) {
+      // 고아 노드(선이 하나도 없는 노드) 클릭 시 → 가장 가까운 노드에 자동 연결
+      const hasEdge = mmEdges.some(e => e.from === hit.id || e.to === hit.id);
+      if (!hasEdge && mmNodes.length > 1) {
+        let nearest = null, minDist = Infinity;
+        mmNodes.forEach(n => {
+          if (n.id === hit.id) return;
+          const dx = n.x - hit.x, dy = n.y - hit.y;
+          const d = Math.sqrt(dx*dx + dy*dy);
+          if (d < minDist) { minDist = d; nearest = n; }
+        });
+        if (nearest) {
           mmSnapshot();
-          mmEdges.push({ from: mmSelected, to: hit.id });
+          mmEdges.push({ from: nearest.id, to: hit.id });
           renderMMCanvas();
-          showToast('연결됨');
-          mmSelected = null;
-          document.getElementById('mmNodePanel').style.display = 'none';
-          return;
+          showToast('자동 연결됨');
         }
       }
       mmSelected = hit.id;
@@ -1831,14 +1815,16 @@ function renderMMCanvas() {
     }
   });
 
-  // connect 모드 첫 선택 하이라이트
-  if (mmConnectFrom) {
-    const n = mmNodes.find(n => n.id === mmConnectFrom);
-    if (n) {
-      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI*2);
-      ctx.strokeStyle = '#2277dd'; ctx.lineWidth = 2.5; ctx.stroke();
+  // 고아 노드(선 없는 노드) 점선 표시
+  mmNodes.forEach(n => {
+    const hasEdge = mmEdges.some(e => e.from === n.id || e.to === n.id);
+    if (!hasEdge && mmNodes.length > 1) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 5, 0, Math.PI*2);
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = 'rgba(224,48,48,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.setLineDash([]);
     }
-  }
+  });
 
   // 노드
   mmNodes.forEach(n => {
