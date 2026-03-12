@@ -2370,11 +2370,14 @@ function init() {
 }
 
 window.onload = () => {
-  // 이전 탭에서 미저장된 세션이 있으면 저장 (페이지 새로고침 케이스)
-  // _currentSessionMsgs는 메모리이므로 새 로드 시 비어있음 — 별도 처리 불필요
   init();
   renderRightDumps();
 };
+
+// 새로고침/탭 닫기 시 현재 세션 자동 저장
+window.addEventListener('beforeunload', () => {
+  saveCurrentSession();
+});
 </script>
 </body>
 </html>
