@@ -1934,16 +1934,25 @@ function buildMMFromStructure(mm) {
     if (!kids.length) return;
 
     const totalSize = kids.reduce((s, k) => s + _subtreeSize(k.id), 0);
-    const dist = depth === 0 ? 185 : depth === 1 ? 145 : 110;
+    const dist = depth === 0 ? 190 : depth === 1 ? 150 : 115;
     const totalAngle = angleEnd - angleStart;
-    let cursor = angleStart;
 
-    kids.forEach(child => {
-      const size = _subtreeSize(child.id);
-      const span = totalAngle * (size / totalSize);
-      // 최소 각도 보장 (너무 좁으면 겹침)
-      const minSpan = Math.PI * 0.25;
-      const actualSpan = Math.max(span, minSpan);
+    // 최소 각도: 자식 수에 따라 동적 계산 (겹침 방지)
+    const minSpanPerKid = Math.min(Math.PI * 0.3, totalAngle / kids.length);
+    // 총 minSpan이 totalAngle 초과하면 균등 분할
+    const totalMin = minSpanPerKid * kids.length;
+    const useEqual = totalMin >= totalAngle;
+
+    let cursor = angleStart;
+    kids.forEach((child, i) => {
+      let actualSpan;
+      if (useEqual) {
+        actualSpan = totalAngle / kids.length;
+      } else {
+        const size = _subtreeSize(child.id);
+        const propSpan = totalAngle * (size / totalSize);
+        actualSpan = Math.max(propSpan, minSpanPerKid);
+      }
       const midAngle = cursor + actualSpan / 2;
 
       child.x = cx + Math.cos(midAngle) * dist;
