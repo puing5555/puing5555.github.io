@@ -636,7 +636,7 @@ body {
   <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
 
     <!-- 덤프 패널 -->
-    <div id="panel-dump" class="active" style="flex:1;overflow:hidden">
+    <div id="panel-dump" class="active" style="flex:1;overflow:hidden;display:grid;grid-template-columns:420px 12px 1fr;height:100%">
       <div class="dump-chat-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;justify-content:space-between">
           <span>💬 대화</span>
@@ -1037,7 +1037,14 @@ function switchPanel(name, el) {
   if (el) el.classList.add('on');
   document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.remove('active'));
   const panel = document.getElementById('panel-' + name);
-  if (panel) panel.classList.add('active');
+  if (panel) {
+    panel.classList.add('active');
+    if (name === 'dump') {
+      const savedW = localStorage.getItem('jay_chatColW') || '420';
+      panel.style.display = 'grid';
+      panel.style.gridTemplateColumns = `${savedW}px 12px 1fr`;
+    }
+  }
   currentPanel = name;
   const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', goals:'🎯 목표', memo:'🗂️ 메모', docs:'📄 문서' };
   document.getElementById('mainTitle').textContent = titles[name] || name;
@@ -2413,6 +2420,7 @@ function init() {
 
   resizer.addEventListener('mousedown', e => {
     e.preventDefault();
+    e.stopPropagation();
     _rDragging = true;
     _rStartX = e.clientX;
     const cols = getComputedStyle(dumpPanel).gridTemplateColumns.split(' ');
@@ -2420,6 +2428,9 @@ function init() {
     resizer.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
+    // 캔버스 이벤트 차단
+    const canvas = document.getElementById('mmCanvas');
+    if (canvas) canvas.style.pointerEvents = 'none';
   });
 
   document.addEventListener('mousemove', e => {
@@ -2434,6 +2445,8 @@ function init() {
     resizer.classList.remove('dragging');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
+    const canvas = document.getElementById('mmCanvas');
+    if (canvas) canvas.style.pointerEvents = '';
     const cols = getComputedStyle(dumpPanel).gridTemplateColumns.split(' ');
     localStorage.setItem('jay_chatColW', parseFloat(cols[0]));
   });
