@@ -666,7 +666,10 @@ body {
       <div class="dump-chat-col">
         <div class="dump-col-hdr" style="display:flex;align-items:center;justify-content:space-between">
           <span>💬 대화</span>
-          <button onclick="clearDump()" style="padding:3px 10px;border-radius:8px;border:2px solid var(--red);background:transparent;color:var(--red);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px">🗑 New</button>
+          <div style="display:flex;gap:4px">
+            <button onclick="saveChatAsDoc()" title="대화를 문서로 저장" style="padding:3px 10px;border-radius:8px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">💾 저장</button>
+            <button onclick="clearDump()" style="padding:3px 10px;border-radius:8px;border:2px solid var(--red);background:transparent;color:var(--red);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px">🗑 New</button>
+          </div>
         </div>
         <div class="dump-messages" id="dumpMessages">
           <div class="msg-ai">
@@ -690,6 +693,7 @@ body {
         <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span>🗺 브레인 스토밍</span>
           <div style="margin-left:auto;display:flex;gap:4px">
+            <button onclick="saveMMAsDoc()" title="마인드맵을 문서로 저장" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">💾 저장</button>
             <button onclick="organizeMMWithAI()" title="AI가 인과관계/속성별로 정리" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--purple);background:transparent;color:var(--purple);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🧹 정리</button>
             <button onclick="mmUndo()" title="실행 취소 (Ctrl+Z)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↩ 취소</button>
             <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
@@ -3330,6 +3334,71 @@ function deleteMemoView() {
   closeModal('memoViewModal');
   renderMemo();
   showToast('삭제됨');
+}
+
+// ── 대화 저장 → 문서 ──
+async function saveChatAsDoc() {
+  if (_dumpHistory.length < 2) { showToast('대화 내용이 없어요'); return; }
+  showToast('AI가 정리 중...');
+  try {
+    const convText = _dumpHistory
+      .map(m => `${m.role === 'user' ? 'JAY' : 'AI'}: ${m.content}`)
+      .join('\n\n');
+    const summary = await callClaude(
+      [{ role: 'user', content: `다음 대화를 문서로 정리해줘. 핵심 인사이트, 결론, 다음 액션 중심으로. 마크다운:\n\n${convText}` }],
+      '문서 정리 전문가. 대화를 깔끔한 한국어 문서로 정리.'
+    );
+    if (!docsData) window.docsData = [];
+    const title = summary.split('\n')[0].replace(/^#+\s*/, '').slice(0, 40) || '대화 정리';
+    docsData.push({ id: 'd_' + Date.now(), title, text: summary, section: '아이디어', date: new Date().toISOString() });
+    save();
+    showToast('✅ 문서에 저장됨');
+  } catch(e) {
+    showToast('저장 실패: ' + e.message);
+  }
+}
+
+// ── 마인드맵 저장 → 문서 ──
+async function saveMMAsDoc() {
+  if (mmNodes.length < 2) { showToast('마인드맵이 비어있어요'); return; }
+
+  // 1. 노드 구조를 텍스트로 변환
+  const rootNode = mmNodes.find(n => n.id === mmRootId);
+  function buildTreeText(nodeId, indent) {
+    const node = mmNodes.find(n => n.id === nodeId);
+    if (!node) return '';
+    let text = indent + '• ' + node.text + '\n';
+    const children = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
+    children.forEach(childId => { text += buildTreeText(childId, indent + '  '); });
+    return text;
+  }
+  const treeText = buildTreeText(mmRootId, '');
+
+  // 고아 노드도 포함
+  const connectedIds = new Set();
+  function collectIds(nodeId) {
+    connectedIds.add(nodeId);
+    mmEdges.filter(e => e.from === nodeId).forEach(e => collectIds(e.to));
+  }
+  if (mmRootId) collectIds(mmRootId);
+  const orphans = mmNodes.filter(n => !connectedIds.has(n.id));
+  const orphanText = orphans.length ? '\n(연결 안 된 노드)\n' + orphans.map(n => '• ' + n.text).join('\n') : '';
+
+  // 2. AI 요약
+  showToast('AI가 정리 중...');
+  try {
+    const raw = await callClaude(
+      [{ role: 'user', content: `다음 마인드맵 구조를 기반으로 핵심 인사이트와 액션 아이템을 정리해줘. 마크다운:\n\n${treeText}${orphanText}` }],
+      '브레인스토밍 정리 전문가. 마인드맵을 실용적 문서로 변환.'
+    );
+    if (!docsData) window.docsData = [];
+    const title = (rootNode?.text || '브레인스토밍') + ' 정리';
+    docsData.push({ id: 'd_' + Date.now(), title, text: raw, section: '아이디어', date: new Date().toISOString() });
+    save();
+    showToast('✅ 문서에 저장됨');
+  } catch(e) {
+    showToast('저장 실패: ' + e.message);
+  }
 }
 
 // ── 데일리 리포트 ──
