@@ -3107,10 +3107,14 @@ function filterMemo(cat, el) {
 
 function renderMemoGrid(cat) {
   const el = document.getElementById('memoGrid');
-  const filtered = cat==='전체' ? memoData : memoData.filter(m=>m.category===cat);
+  let filtered = cat==='전체' ? memoData.slice() : memoData.filter(m=>m.category===cat);
+  // 최신순 정렬
+  filtered.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
   if (!filtered.length) { el.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🗂️</div><div class="empty-text">메모가 없어</div></div>'; return; }
   el.innerHTML = filtered.map((m) => {
     const ri = memoData.indexOf(m);
+    const dt = m.date ? new Date(m.date) : null;
+    const dateStr = dt ? `${dt.getMonth()+1}.${dt.getDate()} ${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}` : '';
     return `<div class="memo-card">
       <div class="memo-card-actions">
         <button class="memo-card-btn" onclick="event.stopPropagation();editMemo(${ri})" title="수정">✏️</button>
@@ -3120,6 +3124,7 @@ function renderMemoGrid(cat) {
       <div class="memo-cat">${m.category}</div>
       <div class="memo-text">${m.text.slice(0,120)}${m.text.length>120?'...':''}</div>
       <div class="memo-tags">${(m.tags||[]).map(t=>`<span class="memo-tag">${t}</span>`).join('')}</div>
+      ${dateStr ? `<div style="font-size:9px;color:var(--muted);margin-top:6px;opacity:0.6">${dateStr}</div>` : ''}
     </div>`;
   }).join('');
 }
