@@ -636,11 +636,10 @@ body {
       <span class="nav-icon">📄</span> 문서
     </button>
 
-    <!-- 스크래치패드 — 사이드바 빈 공간 활용 -->
-    <div style="margin-top:8px;flex:1;display:flex;flex-direction:column;min-height:0;padding:0 10px 6px">
-      <div style="padding:0 2px 3px;display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:10px;font-weight:600;color:var(--muted)">📝 메모장</span>
-        <span style="font-size:8px;color:var(--muted);opacity:0.3">자동저장</span>
+    <!-- 스크래치패드 -->
+    <div style="margin-top:8px;flex:1;display:flex;flex-direction:column;min-height:0;padding:0 10px 0">
+      <div style="padding:0 2px 3px;display:flex;align-items:center;justify-content:flex-end">
+        <button onclick="saveScratchAndNew()" title="현재 내용 메모에 저장 + 새 메모" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--muted);padding:0 2px;line-height:1">+</button>
       </div>
       <textarea id="scratchPad" placeholder="메모"
         style="flex:1;border:1px solid var(--border);background:#ffffff;border-radius:10px;padding:10px 12px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.8;min-height:0"
@@ -3480,6 +3479,24 @@ function saveProfile() {
 
 // ── 토스트 ──
 let _toastTimer = null;
+// ── 스크래치패드 저장 + 새 메모 ──
+function saveScratchAndNew() {
+  const sp = document.getElementById('scratchPad');
+  const text = sp.value.trim();
+  if (!text) return;
+  memoData.push({
+    id: 'm_' + Date.now(),
+    category: '💡 아이디어',
+    text,
+    tags: [],
+    date: new Date().toISOString()
+  });
+  save();
+  sp.value = '';
+  localStorage.setItem('jay_scratchpad', '');
+  showToast('📝 메모 저장됨');
+}
+
 // ── 프로필 메뉴 ──
 function toggleProfileMenu() {
   const menu = document.getElementById('profileMenu');
