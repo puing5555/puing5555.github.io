@@ -1717,6 +1717,8 @@ function initMMCanvas() {
       mmSelectedEdge = null;
       _mmDragging = { id: hit.id, ox: cx - hit.x, oy: cy - hit.y };
       document.getElementById('mmNodeTitle').value = hit.text;
+      document.getElementById('mmNodeSize').value = hit.r;
+      document.getElementById('mmNodeSizeVal').textContent = hit.r;
       document.getElementById('mmNodePanel').style.display = 'block';
       renderMMCanvas();
     } else {
@@ -2270,14 +2272,17 @@ function renameMMNode(text) {
   if (node) { node.text = text; renderMMCanvas(); }
 }
 function previewMMNodeSize(r) {
-  // 슬라이더 숫자만 업데이트 (실제 크기는 OK 눌러야 반영)
+  // 슬라이더 실시간 미리보기
+  const node = mmNodes.find(n => n.id === mmSelected);
+  if (node) { node.r = r; renderMMCanvas(); }
   document.getElementById('mmNodeSizeVal').textContent = r;
 }
 function confirmMMNode() {
   const node = mmNodes.find(n => n.id === mmSelected);
   if (!node) return;
-  const r = parseInt(document.getElementById('mmNodeSize').value);
-  node.r = r;
+  mmSnapshot();
+  node.r = parseInt(document.getElementById('mmNodeSize').value);
+  node.text = document.getElementById('mmNodeTitle').value.trim() || node.text;
   document.getElementById('mmNodePanel').style.display = 'none';
   mmSelected = null;
   renderMMCanvas();
