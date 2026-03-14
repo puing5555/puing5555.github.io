@@ -700,6 +700,7 @@ body {
             <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
             <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
             <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원추가</button>
+            <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 → 원 클릭 → 선 연결" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🔗 선</button>
             <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 삭제</button>
           </div>
         </div>
@@ -1534,7 +1535,7 @@ async function ytProcess(videoId, mode) {
 // ── 마인드맵 (자유 캔버스) ──
 let mmNodes = [];   // {id, text, x, y, color, r}
 let mmEdges = [];   // {from, to}  (id 기반)
-let mmMode = 'normal'; // normal | add | delete
+let mmMode = 'normal'; // normal | add | connect | delete
 let mmSelected = null; // node id
 let mmConnectFrom = null; // connect 모드에서 첫번째 선택 node id
 let _mmMergeTarget = null; // 드래그 중 병합 대상 노드
@@ -1574,7 +1575,8 @@ function setMMMode(mode) {
   mmMode = mode;
   mmConnectFrom = null;
   mmSelected = null;
-  const btns = {normal:'mmModeNormal', add:'mmModeAdd', delete:'mmModeDelete'};
+  _pendingConnect = null;
+  const btns = {normal:'mmModeNormal', add:'mmModeAdd', connect:'mmModeConnect', delete:'mmModeDelete'};
   Object.entries(btns).forEach(([m, id]) => {
     const b = document.getElementById(id);
     if (!b) return;
@@ -1582,7 +1584,7 @@ function setMMMode(mode) {
     else { b.style.background = 'transparent'; b.style.color = 'var(--text2)'; b.style.borderColor = 'var(--border2)'; }
   });
   const canvas = document.getElementById('mmCanvas');
-  canvas.style.cursor = mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'grab';
+  canvas.style.cursor = mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : mode === 'connect' ? 'cell' : 'grab';
   renderMMCanvas();
 }
 
@@ -1649,6 +1651,32 @@ function initMMCanvas() {
       } else {
         const edge = mmEdgeNear(cx, cy);
         if (edge) { mmEdges = mmEdges.filter(e => e !== edge); renderMMCanvas(); }
+      }
+      return;
+    }
+
+    // connect 모드: 원 클릭 → 원 클릭 → 선 연결
+    if (mmMode === 'connect') {
+      if (hit) {
+        if (!mmConnectFrom) {
+          mmConnectFrom = hit.id;
+          mmSelected = hit.id;
+          renderMMCanvas();
+          showToast('연결할 두 번째 원 클릭');
+        } else if (mmConnectFrom !== hit.id) {
+          const exists = mmEdges.some(e =>
+            (e.from === mmConnectFrom && e.to === hit.id) || (e.from === hit.id && e.to === mmConnectFrom));
+          if (!exists) {
+            mmSnapshot();
+            mmEdges.push({ from: mmConnectFrom, to: hit.id });
+            showToast('연결됨');
+          } else {
+            showToast('이미 연결돼 있어');
+          }
+          mmConnectFrom = null;
+          mmSelected = null;
+          renderMMCanvas();
+        }
       }
       return;
     }
@@ -1912,11 +1940,15 @@ function renderMMCanvas() {
     }
   });
 
-  // 고아 노드(선 없는 노드) 점선 표시 + 연결 대기중 하이라이트
+  // 고아 노드 점선 + 연결 대기중 하이라이트 + connect 모드 첫 선택
   mmNodes.forEach(n => {
     const hasEdge = mmEdges.some(e => e.from === n.id || e.to === n.id);
-    if (_pendingConnect && n.id === _pendingConnect) {
-      // 연결 대기중: 초록 글로우
+    if (mmConnectFrom && n.id === mmConnectFrom) {
+      // connect 모드 첫 선택: 파란 글로우
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI*2);
+      ctx.strokeStyle = '#2277dd'; ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 3]); ctx.stroke(); ctx.setLineDash([]);
+    } else if (_pendingConnect && n.id === _pendingConnect) {
       ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI*2);
       ctx.strokeStyle = '#00aa66'; ctx.lineWidth = 2.5;
       ctx.setLineDash([6, 3]); ctx.stroke(); ctx.setLineDash([]);
