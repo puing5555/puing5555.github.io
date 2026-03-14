@@ -727,12 +727,12 @@ body {
           </div>
         </div>
         <!-- 스크래치패드 — 메모장 스타일 -->
-        <div style="flex-shrink:0;border-top:1px solid var(--border);background:#fffef5;display:flex;flex-direction:column;height:140px">
-          <div style="padding:4px 10px 2px;display:flex;align-items:center;justify-content:space-between">
+        <div style="flex:1;min-height:120px;max-height:50%;border-top:1px solid var(--border);background:#fffef5;display:flex;flex-direction:column">
+          <div style="padding:4px 10px 2px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
             <span style="font-size:10px;font-weight:700;color:var(--muted)">📝 스크래치패드</span>
             <span style="font-size:9px;color:var(--muted);opacity:0.5">자동 저장</span>
           </div>
-          <textarea id="scratchPad" placeholder="여기에 자유롭게 메모..."
+          <textarea id="scratchPad" placeholder="여기에 자유롭게 메모...&#10;수시로 생각나는 것 적어두기"
             style="flex:1;border:none;background:transparent;padding:4px 10px 8px;font-size:12px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.7"
             oninput="localStorage.setItem('jay_scratchpad',this.value)"></textarea>
         </div>
