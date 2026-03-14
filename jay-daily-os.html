@@ -725,6 +725,14 @@ body {
             <button onclick="closeMM()" style="padding:4px 7px;border-radius:7px;border:none;background:var(--surface3);color:var(--text2);font-size:11px;cursor:pointer">✕</button>
           </div>
         </div>
+        <!-- 퀵 메모 바 — 맵 하단 고정 -->
+        <div style="flex-shrink:0;border-top:1px solid var(--border);background:var(--surface);padding:6px 10px;display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;flex-shrink:0">📝</span>
+          <input id="quickMemoInput" type="text" placeholder="메모... (Enter 저장)"
+            style="flex:1;border:1.5px solid var(--border2);border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;outline:none;background:var(--surface2)"
+            onkeydown="if(event.key==='Enter'&&this.value.trim()){saveQuickMemo();event.preventDefault()}">
+          <button onclick="saveQuickMemo()" style="padding:4px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">저장</button>
+        </div>
       </div>
     </div>
 
@@ -780,14 +788,6 @@ body {
       <div id="docList" style="overflow-y:auto;flex:1"></div>
     </div>
 
-  </div>
-  <!-- 퀵 메모 바 — 항상 하단에 표시 -->
-  <div id="quickMemoBar" style="flex-shrink:0;border-top:1px solid var(--border);background:var(--surface);padding:6px 14px;display:flex;gap:8px;align-items:center">
-    <span style="font-size:12px;flex-shrink:0">📝</span>
-    <input id="quickMemoInput" type="text" placeholder="퀵 메모... (Enter로 저장)"
-      style="flex:1;border:1.5px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:12px;font-family:inherit;outline:none;background:var(--surface2)"
-      onkeydown="if(event.key==='Enter'&&this.value.trim()){saveQuickMemo();event.preventDefault()}">
-    <button onclick="saveQuickMemo()" style="padding:4px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0">저장</button>
   </div>
 </div>
 <div id="rightPanel">
