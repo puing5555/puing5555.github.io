@@ -648,15 +648,17 @@ body {
     </div>
   </div>
 
-  <div class="sidebar-profile" onclick="openProfileModal()" style="position:relative">
+  <div class="sidebar-profile" onclick="toggleProfileMenu()" style="position:relative">
     <div class="profile-avatar" id="profileAvatar">J</div>
     <div style="flex:1">
       <div class="profile-name" id="profileName">JAY</div>
       <div class="profile-job" id="profileJob">설정하기 →</div>
     </div>
-    <div style="display:flex;gap:2px">
-      <button onclick="event.stopPropagation();openDailyReport()" title="오늘 리포트" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px">📊</button>
-      <button onclick="event.stopPropagation();openModal('apiKeyModal')" title="API 키 설정" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px"><span id="apiKeyStatus">🔑</span></button>
+    <!-- 프로필 팝업 메뉴 -->
+    <div id="profileMenu" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--border2);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:4px;margin-bottom:4px;z-index:100">
+      <button onclick="event.stopPropagation();document.getElementById('profileMenu').style.display='none';openProfileModal()" style="width:100%;text-align:left;padding:8px 12px;border:none;background:transparent;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text);font-weight:500;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'">⚙️ 프로필 설정</button>
+      <button onclick="event.stopPropagation();document.getElementById('profileMenu').style.display='none';openDailyReport()" style="width:100%;text-align:left;padding:8px 12px;border:none;background:transparent;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text);font-weight:500;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'">📊 데일리 리포트</button>
+      <button onclick="event.stopPropagation();document.getElementById('profileMenu').style.display='none';openModal('apiKeyModal')" style="width:100%;text-align:left;padding:8px 12px;border:none;background:transparent;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text);font-weight:500;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'"><span id="apiKeyStatus">🔑</span> API 키 설정</button>
     </div>
   </div>
 </div>
@@ -3477,6 +3479,22 @@ function saveProfile() {
 
 // ── 토스트 ──
 let _toastTimer = null;
+// ── 프로필 메뉴 ──
+function toggleProfileMenu() {
+  const menu = document.getElementById('profileMenu');
+  const isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    // 바깥 클릭 시 닫기
+    setTimeout(() => {
+      const close = (e) => {
+        if (!menu.contains(e.target)) { menu.style.display = 'none'; document.removeEventListener('click', close); }
+      };
+      document.addEventListener('click', close);
+    }, 10);
+  }
+}
+
 // ── 퀵 메모 ──
 function saveQuickMemo() {
   const input = document.getElementById('quickMemoInput');
