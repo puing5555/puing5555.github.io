@@ -637,7 +637,7 @@ body {
     </button>
   </div>
 
-  <!-- 스크래치패드 — sidebar-nav 밖, flex:1로 남은 공간 채움 -->
+  <!-- 스크래치패드 -->
   <div style="flex:1;display:flex;flex-direction:column;min-height:0;border-top:1px solid var(--border)">
     <div style="padding:2px 10px 0;display:flex;align-items:center;justify-content:flex-end;flex-shrink:0">
       <button onclick="saveScratchAndNew()" title="메모에 저장 + 새 메모" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--muted);opacity:0.25;padding:0 2px;line-height:1">+</button>
@@ -653,7 +653,6 @@ body {
       <div class="profile-name" id="profileName">JAY</div>
       <div class="profile-job" id="profileJob">설정하기 →</div>
     </div>
-    <!-- 프로필 팝업 메뉴 -->
     <div id="profileMenu" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--border2);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:4px;margin-bottom:4px;z-index:100">
       <button onclick="event.stopPropagation();document.getElementById('profileMenu').style.display='none';openProfileModal()" style="width:100%;text-align:left;padding:8px 12px;border:none;background:transparent;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text);font-weight:500;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'">⚙️ 프로필 설정</button>
       <button onclick="event.stopPropagation();document.getElementById('profileMenu').style.display='none';openDailyReport()" style="width:100%;text-align:left;padding:8px 12px;border:none;background:transparent;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text);font-weight:500;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'">📊 데일리 리포트</button>
@@ -717,7 +716,6 @@ body {
           <div class="mm-empty-text">대화하면 키워드가 자동으로 생겨<br><span style="color:var(--accent);font-weight:600">＋추가 모드로 직접 원 추가 가능</span></div>
         </div>
         <canvas id="mmCanvas" style="display:none;flex:1;width:100%;cursor:crosshair" touch-action="none"></canvas>
-        <!-- 원 수정 패널 — 플로팅 팝업 -->
         <div id="mmNodePanel" style="display:none;position:absolute;bottom:50px;left:50%;transform:translateX(-50%);z-index:50;background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:8px 14px;box-shadow:0 4px 16px rgba(0,0,0,0.12)">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap">✏️ 수정</span>
@@ -796,7 +794,6 @@ body {
     <button onclick="clearAllSessions()" title="전체 삭제" style="padding:3px 8px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--muted);font-size:10px;cursor:pointer;font-family:inherit">전체삭제</button>
   </div>
 
-  <!-- 세션 히스토리 -->
   <div style="flex:1;overflow-y:auto;padding:0" id="rightDumpList">
     <div class="empty"><div class="empty-icon" style="font-size:20px">🧠</div><div class="empty-text" style="font-size:12px">브레인덤프 대화 후<br>청소하면 여기 저장돼</div></div>
   </div>
@@ -875,7 +872,7 @@ body {
   </div>
 </div>
 
-<!-- Feature 2a: reportModal -->
+<!-- reportModal -->
 <div class="modal-overlay" id="reportModal">
   <div class="modal-box" style="width:560px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -890,7 +887,7 @@ body {
   </div>
 </div>
 
-<!-- Feature 2b: memoViewModal -->
+<!-- memoViewModal -->
 <div class="modal-overlay" id="memoViewModal">
   <div class="modal-box" style="width:520px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -1086,18 +1083,13 @@ function initDate() {
   const now = new Date();
   const days = ['일','월','화','수','목','금','토'];
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const el1 = document.getElementById('sidebarDay');
-  const el2 = document.getElementById('sidebarDayStr');
   const el3 = document.getElementById('sidebarDate');
-  if (el1) el1.textContent = now.getDate();
-  if (el2) el2.textContent = `${days[now.getDay()]}요일 · ${months[now.getMonth()]} ${now.getFullYear()}`;
   if (el3) el3.textContent = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
 }
 
 // ── 패널 전환 ──
 let currentPanel = 'dump';
 function switchPanel(name, el) {
-  // 달력은 일단 오늘 패널로 매핑
   const panelName = name === 'cal' ? 'today' : name;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('on'));
   if (el) el.classList.add('on');
@@ -1136,14 +1128,11 @@ async function callClaude(messages, system) {
 // ── 덤프 ──
 let _sending = false;
 let _attachedPhotos = [];
-let _dumpHistory = []; // 대화 히스토리 유지
+let _dumpHistory = [];
 
-// reply 텍스트에서 솔루션/액션 추출 (번호목록, 대시목록, 강조 등)
 function _extractSolutionsFromReply(reply) {
   if (!reply || reply.length < 5) return [];
   const results = [];
-  
-  // 1) 번호 목록: "1. xxx", "1) xxx", "① xxx"
   const numPattern = /(?:^|\n)\s*(?:\d+[.)]\s*|[①②③④⑤⑥⑦⑧⑨⑩]\s*)(.+)/g;
   let m;
   while ((m = numPattern.exec(reply)) !== null) {
@@ -1151,19 +1140,14 @@ function _extractSolutionsFromReply(reply) {
     if (item.length >= 2 && item.length <= 30) results.push(item.slice(0, 12));
   }
   if (results.length >= 2) return results.slice(0, 6);
-
-  // 2) 대시/불릿 목록: "- xxx", "• xxx"
   const dashPattern = /(?:^|\n)\s*[-•·]\s+(.+)/g;
   while ((m = dashPattern.exec(reply)) !== null) {
     const item = m[1].replace(/[*_`]/g,'').trim();
     if (item.length >= 2 && item.length <= 30) results.push(item.slice(0, 12));
   }
   if (results.length >= 2) return results.slice(0, 6);
-
-  // 3) 문장 분리 후 핵심 키워드 추출 (최후의 수단)
   const sentences = reply.split(/[.!?\n]+/).map(s=>s.trim()).filter(s=>s.length>=4 && s.length<=40);
   sentences.slice(0, 4).forEach(s => {
-    // 동사/조사 제거하고 핵심어 추출
     const core = s.replace(/^(그래서|그러면|그리고|먼저|그런데|일단|우선)\s*/,'')
                   .replace(/(해봐|하자|해야|하면|하는게|거야|거지|는데|잖아|니까|같아|좋겠|할게|해줘).*$/,'')
                   .trim();
@@ -1177,40 +1161,31 @@ async function sendDump() {
   const ta = document.getElementById('dumpInput');
   const input = ta.value.trim();
   if (!input || _sending) return;
-
-  // 유튜브 URL 감지
   const ytMatch = input.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/);
   if (ytMatch && input.length < 120) {
     ta.value = ''; ta.style.height = 'auto';
     showYtOptions(input, ytMatch[1]);
     return;
   }
-
   _sending = true;
   const msgs = document.getElementById('dumpMessages');
   addMsg('user', input);
   recordSessionMsg('user', input);
   ta.value = ''; ta.style.height = 'auto';
-
   const typingEl = document.createElement('div');
   typingEl.className = 'msg-ai';
   typingEl.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>';
   msgs.appendChild(typingEl); msgs.scrollTop = msgs.scrollHeight;
-
   const day = getDay();
   day.dumps.push({ time: new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text: input.slice(0,200) }); save();
-
   const profileCtx = userProfile.name ? `JAY 프로필: ${userProfile.name}, ${userProfile.job||''}, 집중: ${userProfile.focus||''}` : '';
   const rootNode = mmNodes.find(n => n.id === mmRootId);
   const currentRoot = rootNode ? `현재 마인드맵 루트: "${rootNode.text}"` : '마인드맵 없음(첫 대화)';
   recalcMMDepths();
   const existingNodes = mmNodes.filter(n => n.id !== mmRootId).map(n => n.text).join(', ');
-
   const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
   const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|해결|방향|뭘 해야|추천|선택|골라|뭐냐|뭐지|알려줘|뭐야|뭔데|줘봐|줘봐|알려|방법/.test(input);
-  // 첫 턴(루트 없음)은 무조건 탐색 모드 — 마인드맵 루트 생성 필수
   const isAnswerMode = mmRootId && (isAskingForAnswer || turnCount >= 5);
-
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","children":[{"label":"개념A(8자이내)","children":[{"label":"세부a(8자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
@@ -1233,64 +1208,44 @@ ${isAnswerMode
 
 할일 규칙: 명확한 액션만. 상태/사실 금지.`;
 
-
   try {
     let userContent = input;
     if (_attachedPhotos.length) {
       userContent = [..._attachedPhotos.map(p => ({ type:'image', source:{type:'base64', media_type:p.mime, data:p.base64}})), {type:'text',text:input||'이 사진 정리해줘'}];
       _attachedPhotos = [];
     }
-
-    // 히스토리에 현재 메시지 추가
     _dumpHistory.push({ role: 'user', content: userContent });
-
-    // 히스토리 최대 20개 유지 (10턴)
     if (_dumpHistory.length > 20) _dumpHistory = _dumpHistory.slice(-20);
-
     const raw = await callClaude(_dumpHistory, system);
     typingEl.remove();
-
     let parsed;
     try {
       parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
     } catch(jsonErr) {
-      // JSON 파싱 실패 시 reply 텍스트만 추출 시도
       console.warn('JSON parse failed, raw:', raw);
       const replyMatch = raw.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
       parsed = { reply: replyMatch ? replyMatch[1].replace(/\\n/g,'\n') : raw.slice(0, 300) };
     }
-
-    // AI 응답도 히스토리에 추가
     _dumpHistory.push({ role: 'assistant', content: raw });
-
     addMsg('ai', parsed.reply || '정리했어!');
     recordSessionMsg('ai', parsed.reply || '');
-
-    // ── 1. 생각 구조화 요약 카드 (3턴마다 자동) ──
     if (turnCount > 0 && turnCount % 3 === 0) {
       setTimeout(() => showThoughtSummaryCard(), 400);
     }
-
-    // ── 2. 핵심 질문 도출 (5턴 이후 탐색 모드일 때 4턴마다) ──
     if (turnCount >= 5 && turnCount % 4 === 1 && !isAnswerMode) {
       setTimeout(() => showKeyQuestionCard(), 400);
     }
-
-    // 유사도 체크 함수 — 핵심 키워드 겹치면 중복으로 판단
     const isSimilar = (a, b) => {
       const norm = s => s.replace(/\s|하기|만들기|챙기기|정하기|공부|읽기/g,'').toLowerCase();
       const na = norm(a), nb = norm(b);
       if (na === nb) return true;
       if (na.length < 3 || nb.length < 3) return na === nb;
-      // 한쪽이 다른쪽을 포함하면 중복
       if (na.includes(nb) || nb.includes(na)) return true;
-      // 4자 이상 공통 부분이 있으면 중복
       for (let i = 0; i <= na.length - 4; i++) {
         if (nb.includes(na.slice(i, i+4))) return true;
       }
       return false;
     };
-
     const existingTasks = (day.tasks||[]).map(t => t.text);
     let addedTasks = 0, addedMemos = 0;
     (parsed.tasks||[]).forEach(t => {
@@ -1308,11 +1263,9 @@ ${isAnswerMode
       }
     });
     save();
-    // 사이드바 뱃지 실시간 업데이트
     const undone = (getDay().tasks||[]).filter(t=>!t.done).length;
     const badge = document.getElementById('taskBadge');
     if (badge) { badge.textContent = undone; badge.style.display = undone ? 'inline' : 'none'; }
-
     if (addedTasks || addedMemos) {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
@@ -1321,12 +1274,9 @@ ${isAnswerMode
     }
     msgs.scrollTop = msgs.scrollHeight;
     updateStat();
-    renderRightDumps(); // 우측 패널 업데이트
-
-    // 마인드맵 처리
+    renderRightDumps();
     if (isAnswerMode) {
       let solutions = parsed.solutions || [];
-      // solutions가 비었으면 reply 텍스트에서 추출 시도
       if (solutions.length === 0 && parsed.reply) {
         const extracted = _extractSolutionsFromReply(parsed.reply);
         if (extracted.length > 0) solutions = [{ group: '해결', items: extracted }];
@@ -1335,14 +1285,12 @@ ${isAnswerMode
         mmSnapshot();
         const rootText = mmNodes.find(n => n.id === mmRootId)?.text || '';
         let solutionChildren;
-        // 그룹 구조 지원: [{group, items}] 형식
         if (solutions[0] && solutions[0].group) {
           solutionChildren = solutions.map(g => ({
             label: '💡' + String(g.group || '해결').slice(0, 5),
             children: (g.items || []).map(item => ({ label: String(item).slice(0, 10), children: [] }))
           }));
         } else {
-          // flat 배열 호환 (레거시)
           solutionChildren = [{ label: '💡해결', children: solutions.map(s => ({ label: String(s).slice(0, 10), children: [] })) }];
         }
         buildMMFromStructure({ root: rootText, children: solutionChildren });
@@ -1351,7 +1299,6 @@ ${isAnswerMode
       mmSnapshot();
       buildMMFromStructure(parsed.mindmap);
     }
-
   } catch(e) {
     typingEl.remove();
     console.error('sendDump error:', e, e.stack);
@@ -1363,8 +1310,6 @@ ${isAnswerMode
 function addMsg(role, text) {
   const msgs = document.getElementById('dumpMessages');
   const div = document.createElement('div');
-
-  // 긴 텍스트 (500자 이상) → 문서 썸네일 카드
   if (role === 'user' && text.length >= 500) {
     const thumbId = 'thumb_' + Date.now();
     const charCount = text.length.toLocaleString();
@@ -1390,13 +1335,11 @@ function addMsg(role, text) {
         <button class="ltc-btn" style="background:var(--surface);color:var(--text2);border:1px solid var(--border2)" onclick="bulletText(window._docTexts['${thumbId}'])">🎯 bullet</button>
       </div>`;
     msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
-    // canvas에 텍스트 렌더링
     window._docTexts = window._docTexts || {};
     window._docTexts[thumbId] = text;
     requestAnimationFrame(() => renderDocCanvas(thumbId, text));
     return;
   }
-
   div.className = role === 'ai' ? 'msg-ai' : 'msg-user';
   if (role === 'ai') div.innerHTML = `<div class="msg-ai-name">JAY AI</div>${text.replace(/\n/g,'<br>')}`;
   else div.textContent = text;
@@ -1408,36 +1351,31 @@ function renderDocCanvas(id, text) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  // 배경
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
-  // 줄 긋기 (노트 스타일)
   ctx.strokeStyle = '#f0ebe5';
   ctx.lineWidth = 1;
   for (let y = 22; y < H; y += 18) {
     ctx.beginPath(); ctx.moveTo(12, y); ctx.lineTo(W-12, y); ctx.stroke();
   }
-  // 텍스트 렌더링
   ctx.fillStyle = '#212121';
   ctx.font = '11px "Noto Sans KR", sans-serif';
   const lines = text.replace(/\t/g, '  ').split('\n');
-  let y = 16, lineIdx = 0;
+  let y = 16;
   for (const line of lines) {
     if (y > H - 8) break;
-    // 줄바꿈 처리
     const words = line.split(' ');
     let cur = '';
     for (const word of words) {
       const test = cur ? cur + ' ' + word : word;
       if (ctx.measureText(test).width > W - 24) {
-        ctx.fillText(cur, 12, y); y += 18; lineIdx++;
+        ctx.fillText(cur, 12, y); y += 18;
         if (y > H - 8) break;
         cur = word;
       } else { cur = test; }
     }
     if (cur && y <= H - 8) { ctx.fillText(cur, 12, y); y += 18; }
   }
-  // 왼쪽 빨간 선 (노트 느낌)
   ctx.strokeStyle = '#ffcccc';
   ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(28, H); ctx.stroke();
@@ -1448,12 +1386,6 @@ function openDocView(thumbId) {
   if (!text) return;
   document.getElementById('docViewText').textContent = text;
   document.getElementById('docViewModal').classList.add('open');
-}
-
-function toggleLTC(id, btn) {
-  const body = document.getElementById(id);
-  body.classList.toggle('expanded');
-  btn.textContent = body.classList.contains('expanded') ? '접기' : '펼쳐보기';
 }
 
 async function analyzeText(text) {
@@ -1544,21 +1476,20 @@ async function ytProcess(videoId, mode) {
 }
 
 // ── 마인드맵 (자유 캔버스) ──
-let mmNodes = [];   // {id, text, x, y, color, r}
-let mmEdges = [];   // {from, to}  (id 기반)
-let mmMode = 'normal'; // normal | add | connect | delete
-let mmSelected = null; // node id
-let mmConnectFrom = null; // connect 모드에서 첫번째 선택 node id
-let _mmMergeTarget = null; // 드래그 중 병합 대상 노드
-let _mmConnectTarget = null; // 드래그 중 연결 대상 노드
-let _pendingConnect = null; // 고아 노드 2클릭 연결 대기중 노드 id
-let _mmDragging = null; // {id, ox, oy}
-let _mmPanning = null;  // {sx, sy, tx, ty}
+let mmNodes = [];
+let mmEdges = [];
+let mmMode = 'normal';
+let mmSelected = null;
+let mmConnectFrom = null;
+let _mmMergeTarget = null;
+let _mmConnectTarget = null;
+let _pendingConnect = null;
+let _mmDragging = null;
+let _mmPanning = null;
 let mmTranslate = {x:0, y:0};
 let mmScale = 1.0;
 const MM_COLORS = ['#ff6f0f','#7755cc','#2277dd','#e07b00','#e03030','#00aa66'];
 let _mmColorIdx = 0;
-
 let mmUndoStack = [];
 let mmRedoStack = [];
 
@@ -1602,7 +1533,7 @@ function setMMMode(mode) {
 function mmNodeAt(x, y) {
   return mmNodes.find(n => Math.hypot(n.x - x, n.y - y) <= n.r);
 }
-let mmSelectedEdge = null; // 선택된 엣지
+let mmSelectedEdge = null;
 
 function mmEdgeNear(x, y) {
   return mmEdges.find(e => {
@@ -1621,7 +1552,6 @@ function initMMCanvas() {
   canvas._mmInited = true;
   document.getElementById('mmEmpty').style.display = 'none';
   canvas.style.display = 'block';
-
   const resize = () => {
     const rect = canvas.parentElement.getBoundingClientRect();
     const hdr = canvas.parentElement.querySelector('.dump-col-hdr');
@@ -1633,14 +1563,11 @@ function initMMCanvas() {
   };
   new ResizeObserver(resize).observe(canvas.parentElement);
   resize();
-
-  // 포인터 이벤트
   canvas.addEventListener('pointerdown', e => {
     const rect = canvas.getBoundingClientRect();
     const cx = (e.clientX - rect.left - mmTranslate.x) / mmScale;
     const cy = (e.clientY - rect.top - mmTranslate.y) / mmScale;
     const hit = mmNodeAt(cx, cy);
-
     if (mmMode === 'add') {
       if (!hit) {
         const text = prompt('키워드 입력:');
@@ -1652,7 +1579,6 @@ function initMMCanvas() {
       }
       return;
     }
-
     if (mmMode === 'delete') {
       if (hit) {
         mmNodes = mmNodes.filter(n => n.id !== hit.id);
@@ -1665,8 +1591,6 @@ function initMMCanvas() {
       }
       return;
     }
-
-    // connect 모드: 원 클릭 → 원 클릭 → 선 연결
     if (mmMode === 'connect') {
       if (hit) {
         if (!mmConnectFrom) {
@@ -1691,17 +1615,14 @@ function initMMCanvas() {
       }
       return;
     }
-
     // normal 모드
     if (hit) {
-      // 고아 노드 2클릭 연결: 첫 클릭이 고아노드였고 이번 클릭이 다른 노드면 연결
       if (_pendingConnect && _pendingConnect !== hit.id) {
         const alreadyLinked = mmEdges.some(e =>
           (e.from === _pendingConnect && e.to === hit.id) || (e.from === hit.id && e.to === _pendingConnect));
         if (!alreadyLinked) {
           mmSnapshot();
           mmEdges.push({ from: hit.id, to: _pendingConnect });
-          // 연결된 고아 노드 → 부모 색상 상속
           const orphanNode = mmNodes.find(n => n.id === _pendingConnect);
           if (orphanNode) orphanNode.color = hit.color;
           showToast('연결됨');
@@ -1712,9 +1633,7 @@ function initMMCanvas() {
         renderMMCanvas();
         return;
       }
-      _pendingConnect = null; // 일반 노드 클릭 시 대기 해제
-
-      // 고아 노드 클릭 → 연결 대기 상태 진입
+      _pendingConnect = null;
       const hasEdge = mmEdges.some(e => e.from === hit.id || e.to === hit.id);
       if (!hasEdge && mmNodes.length > 1) {
         _pendingConnect = hit.id;
@@ -1723,7 +1642,6 @@ function initMMCanvas() {
         showToast('연결할 노드를 클릭하세요');
         return;
       }
-
       mmSelected = hit.id;
       _editingNodeId = hit.id;
       mmSelectedEdge = null;
@@ -1734,7 +1652,6 @@ function initMMCanvas() {
       document.getElementById('mmNodePanel').style.display = 'block';
       renderMMCanvas();
     } else {
-      // 선 클릭 확인
       const edgeHit = mmEdgeNear(cx, cy);
       if (edgeHit) {
         mmSelectedEdge = edgeHit;
@@ -1751,9 +1668,6 @@ function initMMCanvas() {
       }
     }
   });
-
-  // 드래그 중 병합/연결 대상 (전역에서 renderMMCanvas가 접근)
-
   canvas.addEventListener('pointermove', e => {
     if (_mmDragging) {
       const rect = canvas.getBoundingClientRect();
@@ -1770,20 +1684,16 @@ function initMMCanvas() {
           if (nd) { nd.x += dx; nd.y += dy; }
         });
         node.x += dx; node.y += dy;
-
-        // 드롭 대상 감지: 병합(깊은 겹침) 또는 연결(근접)
         _mmMergeTarget = null;
         _mmConnectTarget = null;
         for (const other of mmNodes) {
           if (other.id === node.id) continue;
-          if (node.id === mmRootId) continue; // 루트는 대상 아님
+          if (node.id === mmRootId) continue;
           const d = Math.hypot(other.x - node.x, other.y - node.y);
-          // 깊은 겹침 → 병합 (루트 위에 놓는 건 연결만)
           if (d < (node.r + other.r) * 0.5 && other.id !== mmRootId) {
             _mmMergeTarget = other.id;
             break;
           }
-          // 근접 → 선 연결 (기존에 선 없을 때만)
           if (d < (node.r + other.r) * 1.2) {
             const alreadyLinked = mmEdges.some(e =>
               (e.from === node.id && e.to === other.id) || (e.from === other.id && e.to === node.id));
@@ -1800,8 +1710,6 @@ function initMMCanvas() {
       renderMMCanvas();
     }
   });
-
-  // 더블클릭 → 수정 패널 열기
   canvas.addEventListener('dblclick', e => {
     const rect = canvas.getBoundingClientRect();
     const cx = (e.clientX - rect.left - mmTranslate.x) / mmScale;
@@ -1820,11 +1728,9 @@ function initMMCanvas() {
       renderMMCanvas();
     }
   });
-
   canvas.addEventListener('pointerup', () => {
     if (_mmDragging) {
       const dragId = _mmDragging.id;
-      // 병합 (깊은 겹침)
       if (_mmMergeTarget) {
         const targetId = _mmMergeTarget;
         _mmMergeTarget = null; _mmConnectTarget = null;
@@ -1832,14 +1738,12 @@ function initMMCanvas() {
         mergeMMNodes(dragId, targetId);
         return;
       }
-      // 선 연결 (근접)
       if (_mmConnectTarget) {
         const targetId = _mmConnectTarget;
         _mmConnectTarget = null; _mmMergeTarget = null;
         _mmDragging = null; _mmPanning = null;
         mmSnapshot();
         mmEdges.push({ from: dragId, to: targetId });
-        // 드래그한 노드 → 대상 노드 색상 상속
         const dragNode = mmNodes.find(n => n.id === dragId);
         const targetNode = mmNodes.find(n => n.id === targetId);
         if (dragNode && targetNode) dragNode.color = targetNode.color;
@@ -1852,8 +1756,6 @@ function initMMCanvas() {
     _mmMergeTarget = null; _mmConnectTarget = null;
     _mmDragging = null; _mmPanning = null;
   });
-
-  // 스크롤 줌
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
@@ -1861,14 +1763,11 @@ function initMMCanvas() {
     const my = e.clientY - rect.top;
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     const newScale = Math.max(0.3, Math.min(3.0, mmScale * delta));
-    // 마우스 위치 기준으로 줌
     mmTranslate.x = mx - (mx - mmTranslate.x) * (newScale / mmScale);
     mmTranslate.y = my - (my - mmTranslate.y) * (newScale / mmScale);
     mmScale = newScale;
     renderMMCanvas();
   }, { passive: false });
-
-  // Delete 키 → 선택된 선/원 삭제
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); mmUndo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); mmRedo(); return; }
@@ -1885,7 +1784,6 @@ function initMMCanvas() {
 
 function recalcMMDepths() {
   if (!mmNodes.length) return;
-  // BFS from root
   const depthMap = {};
   const root = mmNodes.find(n => n.id === mmRootId) || mmNodes[0];
   if (!root) return;
@@ -1901,11 +1799,9 @@ function recalcMMDepths() {
       if (e.to === id && !visited.has(e.from)) queue.push({ id: e.from, depth: depth + 1 });
     });
   }
-  // 연결 안 된 노드는 depth 2로
   mmNodes.forEach(n => {
     const d = depthMap[n.id] ?? 2;
     n._depth = d;
-    // depth별 크기: 0→44, 1→34, 2→26, 3+→22 (차이 최대 2배 이내)
     const sizes = [44, 34, 26, 22];
     n.r = sizes[Math.min(d, 3)];
   });
@@ -1916,8 +1812,6 @@ function renderMMCanvas() {
   recalcMMDepths();
   const canvas = document.getElementById('mmCanvas');
   if (!canvas || canvas.style.display === 'none') return;
-
-  // 디바운스 세션 저장 (1초 후 자동 저장 — 렌더링마다가 아닌 변경 멈춘 후)
   clearTimeout(_mmSaveTimer);
   _mmSaveTimer = setTimeout(() => {
     if (_currentSessionMsgs.length > 0) {
@@ -1927,16 +1821,12 @@ function renderMMCanvas() {
       }));
     }
   }, 1000);
-
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
-
   ctx.save();
   ctx.translate(mmTranslate.x, mmTranslate.y);
   ctx.scale(mmScale, mmScale);
-
-  // 연결선
   mmEdges.forEach(e => {
     const a = mmNodes.find(n => n.id === e.from);
     const b = mmNodes.find(n => n.id === e.to);
@@ -1947,19 +1837,15 @@ function renderMMCanvas() {
     ctx.strokeStyle = isSel ? '#e03030' : a.color + '88';
     ctx.lineWidth = isSel ? 3 : 2;
     ctx.setLineDash(isSel ? [] : [5, 4]); ctx.stroke(); ctx.setLineDash([]);
-    // 선택된 선 중간점 표시
     if (isSel) {
       const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
       ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI*2);
       ctx.fillStyle = '#e03030'; ctx.fill();
     }
   });
-
-  // 고아 노드 점선 + 연결 대기중 하이라이트 + connect 모드 첫 선택
   mmNodes.forEach(n => {
     const hasEdge = mmEdges.some(e => e.from === n.id || e.to === n.id);
     if (mmConnectFrom && n.id === mmConnectFrom) {
-      // connect 모드 첫 선택: 파란 글로우
       ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI*2);
       ctx.strokeStyle = '#2277dd'; ctx.lineWidth = 2.5;
       ctx.setLineDash([6, 3]); ctx.stroke(); ctx.setLineDash([]);
@@ -1974,8 +1860,6 @@ function renderMMCanvas() {
       ctx.setLineDash([]);
     }
   });
-
-  // 노드
   mmNodes.forEach(n => {
     const sel = n.id === mmSelected;
     const isMergeTarget = _mmMergeTarget && n.id === _mmMergeTarget;
@@ -1983,7 +1867,6 @@ function renderMMCanvas() {
     const highlighted = isMergeTarget || isConnectTarget;
     ctx.shadowColor = isMergeTarget ? 'rgba(34,119,221,0.5)' : isConnectTarget ? 'rgba(0,170,102,0.5)' : 'rgba(0,0,0,0.10)';
     ctx.shadowBlur = highlighted ? 20 : sel ? 14 : 5;
-    // 원 — 내부 흰색, 테두리만 색상
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
     ctx.fillStyle = isMergeTarget ? 'rgba(34,119,221,0.08)' : isConnectTarget ? 'rgba(0,170,102,0.08)' : '#ffffff';
     ctx.fill();
@@ -1993,15 +1876,12 @@ function renderMMCanvas() {
     ctx.stroke();
     if (highlighted) ctx.setLineDash([]);
     ctx.shadowBlur = 0;
-    // 텍스트 — 항상 해당 색상
     ctx.fillStyle = n.color;
     const fontSize = n._depth === 0 ? 13 : n._depth === 2 ? 10 : 11;
     ctx.font = `700 ${fontSize}px "Noto Sans KR", sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    // 긴 텍스트 줄바꿈 처리
     const maxWidth = n.r * 1.6;
     if (ctx.measureText(n.text).width > maxWidth && n.text.length > 4) {
-      // 자연스러운 중간 분할
       const mid = Math.ceil(n.text.length / 2);
       const line1 = n.text.slice(0, mid);
       const line2 = n.text.slice(mid);
@@ -2011,40 +1891,16 @@ function renderMMCanvas() {
       ctx.fillText(n.text, n.x, n.y);
     }
   });
-
   ctx.restore();
 }
 
-function addMMNode(text, color) {
-  // AI가 추가할 때 — 기존 노드들 피해서 배치
-  const canvas = document.getElementById('mmCanvas');
-  const W = canvas.width || 400, H = canvas.height || 400;
-  const angle = (mmNodes.length * 137.5) * Math.PI / 180;
-  const r = 100 + mmNodes.length * 20;
-  const x = W/2 - mmTranslate.x + Math.cos(angle) * r;
-  const y = H/2 - mmTranslate.y + Math.sin(angle) * r;
-  const node = { id: 'n_'+Date.now()+'_'+Math.random(), text, x, y, color: color || MM_COLORS[_mmColorIdx++ % MM_COLORS.length], r: 36 };
-  mmNodes.push(node);
-  if (mmNodes.length > 1) {
-    const prev = mmNodes[mmNodes.length - 2];
-    mmEdges.push({ from: prev.id, to: node.id });
-  }
-  if (canvas.style.display === 'none') initMMCanvas();
-  else renderMMCanvas();
-  return node;
-}
-
-// 계층형 마인드맵 — 루트 1개 유지, 대화마다 가지 추가
-let mmRootId = null; // 루트 노드 ID 고정
+let mmRootId = null;
 
 function buildMMFromStructure(mm) {
   const canvas = document.getElementById('mmCanvas');
   if (canvas.style.display === 'none') initMMCanvas();
   const W = canvas.width || 700, H = canvas.height || 500;
-
   if (!mm) return;
-
-  // ── 첫 대화: 루트 생성 ──
   if (!mmRootId || mmNodes.length === 0) {
     mmNodes = []; mmEdges = []; _mmColorIdx = 0;
     const cx = W / 2 - mmTranslate.x;
@@ -2059,18 +1915,14 @@ function buildMMFromStructure(mm) {
     mmNodes.push(rootNode);
     mmRootId = rootNode.id;
   }
-
-  // ── 재귀 트리 빌더: 노드만 추가 ──
   function _addTreeNodes(children, parentId, parentDepth) {
     if (!children || !children.length) return;
     children.forEach((child, ci) => {
       const label = (child.label || child).toString().slice(0, 10);
       if (!label || label.length < 1) return;
-
       const isDup = mmNodes.some(n => {
         if (n.id === parentId) return false;
         const a = n.text.replace(/\s/g,''), b = label.replace(/\s/g,'');
-        // 완전 일치 또는 한쪽이 다른쪽을 포함 (3자 이상일 때만)
         if (a === b) return true;
         if (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a))) return true;
         return false;
@@ -2085,34 +1937,26 @@ function buildMMFromStructure(mm) {
         }
         return;
       }
-
       const depth = parentDepth + 1;
       const color = depth === 1
         ? MM_COLORS[_mmColorIdx++ % MM_COLORS.length]
         : (mmNodes.find(n => n.id === parentId)?.color || MM_COLORS[0]);
       const r = depth === 1 ? 40 : depth === 2 ? 30 : 24;
-
       const node = { id: 'n_' + Date.now() + '_' + depth + '_' + ci + '_' + Math.random().toString(36).slice(2,5),
         text: label, x: 0, y: 0, color, r, _depth: depth };
       mmNodes.push(node);
       mmEdges.push({ from: parentId, to: node.id });
-
       if (Array.isArray(child.children) && child.children.length) {
         _addTreeNodes(child.children, node.id, depth);
       }
     });
   }
-
   const rootNodeObj = mmNodes.find(n => n.id === mmRootId);
   const topChildren = mm.children || mm.branches || [];
-
-  // 새로 추가된 노드 ID 수집
   const beforeIds = new Set(mmNodes.map(n => n.id));
-  const isFirstBuild = beforeIds.size <= 1; // 루트만 있었음 = 첫 빌드
+  const isFirstBuild = beforeIds.size <= 1;
   _addTreeNodes(topChildren, mmRootId, 0);
   const newNodeIds = new Set(mmNodes.filter(n => !beforeIds.has(n.id)).map(n => n.id));
-
-  // ── 첫 빌드: 전체 방사형 레이아웃 ──
   if (isFirstBuild && newNodeIds.size > 0) {
     function _subtreeSize(nodeId) {
       const kids = mmEdges.filter(e => e.from === nodeId).map(e => e.to);
@@ -2132,7 +1976,7 @@ function buildMMFromStructure(mm) {
       const totalMin = minSpanPerKid * kids.length;
       const useEqual = totalMin >= totalAngle;
       let cursor = angleStart;
-      kids.forEach((child, i) => {
+      kids.forEach((child) => {
         let actualSpan = useEqual ? totalAngle / kids.length
           : Math.max(totalAngle * (_subtreeSize(child.id) / totalSize), minSpanPerKid);
         const midAngle = cursor + actualSpan / 2;
@@ -2144,9 +1988,7 @@ function buildMMFromStructure(mm) {
     }
     _layoutTree(mmRootId, rootNodeObj.x, rootNodeObj.y, -Math.PI, Math.PI, 0);
     _resolveNodeOverlaps();
-  }
-  // ── 증분 추가: 새 노드만 부모 근처에 배치 (기존 노드 위치 보존) ──
-  else if (newNodeIds.size > 0) {
+  } else if (newNodeIds.size > 0) {
     newNodeIds.forEach(nid => {
       const node = mmNodes.find(n => n.id === nid);
       if (!node) return;
@@ -2154,24 +1996,17 @@ function buildMMFromStructure(mm) {
       if (!parentEdge) return;
       const parent = mmNodes.find(n => n.id === parentEdge.from);
       if (!parent) return;
-
-      // 부모의 기존 자식들 위치 파악해서 빈 각도 찾기
       const siblings = mmEdges.filter(e => e.from === parent.id && e.to !== nid)
         .map(e => mmNodes.find(n => n.id === e.to)).filter(Boolean);
-
       const depth = (parent._depth ?? 0) + 1;
       const dist = depth === 1 ? 210 : depth === 2 ? 165 : 125;
-
       if (siblings.length === 0) {
-        // 첫 자식: 부모에서 아래쪽
         const angle = Math.PI * 0.5 + (Math.random() - 0.5) * 0.3;
         node.x = parent.x + Math.cos(angle) * dist;
         node.y = parent.y + Math.sin(angle) * dist;
       } else {
-        // 기존 자식들의 각도 분석, 빈 각도에 배치
         const angles = siblings.map(s => Math.atan2(s.y - parent.y, s.x - parent.x));
         angles.sort((a, b) => a - b);
-        // 가장 큰 갭 찾기
         let bestGap = 0, bestAngle = 0;
         for (let i = 0; i < angles.length; i++) {
           const next = i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2;
@@ -2183,23 +2018,18 @@ function buildMMFromStructure(mm) {
       }
       node._depth = depth;
     });
-
-    // 새 노드끼리만 겹침 해소
     _resolveNewNodeOverlaps(newNodeIds);
   }
-
   document.getElementById('mmEmpty').style.display = 'none';
   recalcMMDepths();
   renderMMCanvas();
 }
 
-// 새 노드만 대상으로 겹침 해소 (기존 노드는 움직이지 않음)
 function _resolveNewNodeOverlaps(newIds) {
   const ITERATIONS = 8;
   const PADDING = 18;
   const newNodes = mmNodes.filter(n => newIds.has(n.id));
   if (newNodes.length < 1) return;
-
   for (let iter = 0; iter < ITERATIONS; iter++) {
     let moved = false;
     for (const newN of newNodes) {
@@ -2211,7 +2041,6 @@ function _resolveNewNodeOverlaps(newIds) {
         if (dist < minDist) {
           const push = (minDist - dist);
           const nx = dx / dist, ny = dy / dist;
-          // 새 노드만 밀어냄
           newN.x += nx * push;
           newN.y += ny * push;
           moved = true;
@@ -2222,13 +2051,11 @@ function _resolveNewNodeOverlaps(newIds) {
   }
 }
 
-// 노드 겹침 해소: 반복적으로 겹치는 노드를 밀어냄
 function _resolveNodeOverlaps() {
   const ITERATIONS = 12;
-  const PADDING = 18; // 노드 간 최소 여백 (px)
+  const PADDING = 18;
   const nonRoot = mmNodes.filter(n => n.id !== mmRootId);
   if (nonRoot.length < 2) return;
-
   for (let iter = 0; iter < ITERATIONS; iter++) {
     let moved = false;
     for (let i = 0; i < nonRoot.length; i++) {
@@ -2240,7 +2067,6 @@ function _resolveNodeOverlaps() {
         if (dist < minDist) {
           const overlap = (minDist - dist) / 2;
           const nx = dx / dist, ny = dy / dist;
-          // 루트에서 먼 노드를 더 많이 밀어냄
           a.x -= nx * overlap * 0.5;
           a.y -= ny * overlap * 0.5;
           b.x += nx * overlap * 0.5;
@@ -2270,7 +2096,6 @@ function getDescendants(nodeId) {
       if (!childId) return;
       const childNode = mmNodes.find(n => n.id === childId);
       const childDepth = childNode?._depth ?? 0;
-      // 자신보다 depth가 큰 노드만 자손으로 인식
       if (childDepth > currDepth) {
         visited.add(childId);
         result.push(childId);
@@ -2284,8 +2109,7 @@ function renameMMNode(text) {
   const node = mmNodes.find(n => n.id === (_editingNodeId || mmSelected));
   if (node) { node.text = text; renderMMCanvas(); }
 }
-let _editingNodeId = null; // 패널에서 편집중인 노드 ID
-
+let _editingNodeId = null;
 function previewMMNodeSize(r) {
   const node = mmNodes.find(n => n.id === (_editingNodeId || mmSelected));
   if (node) { node.r = r; renderMMCanvas(); }
@@ -2303,40 +2127,25 @@ function confirmMMNode() {
   mmSelected = null;
   renderMMCanvas();
 }
-function resizeMMNode(r) {
-  const node = mmNodes.find(n => n.id === mmSelected);
-  if (node) { node.r = r; document.getElementById('mmNodeSizeVal').textContent = r; renderMMCanvas(); }
-}
-// 두 노드 병합: dragNode를 targetNode에 합침
 function mergeMMNodes(dragId, targetId) {
   const dragNode = mmNodes.find(n => n.id === dragId);
   const targetNode = mmNodes.find(n => n.id === targetId);
   if (!dragNode || !targetNode) return;
-  if (dragId === mmRootId) return; // 루트는 병합 불가
-
+  if (dragId === mmRootId) return;
   mmSnapshot();
-
-  // 텍스트 병합 (중복 제거)
   const a = targetNode.text.trim(), b = dragNode.text.trim();
   if (a.includes(b) || b.includes(a)) {
     targetNode.text = a.length >= b.length ? a : b;
   } else {
-    // 합쳐서 최대 12자
     const merged = a + ' ' + b;
     targetNode.text = merged.length <= 12 ? merged : merged.slice(0, 12);
   }
-
-  // 크기는 둘 중 큰 것 + 약간
   targetNode.r = Math.min(60, Math.max(targetNode.r, dragNode.r) + 4);
-
-  // dragNode의 엣지를 targetNode로 이관
   mmEdges.forEach(e => {
     if (e.from === dragId) e.from = targetId;
     if (e.to === dragId) e.to = targetId;
   });
-  // 자기 자신 연결 제거
   mmEdges = mmEdges.filter(e => e.from !== e.to);
-  // 중복 엣지 제거
   const edgeSet = new Set();
   mmEdges = mmEdges.filter(e => {
     const key = [e.from, e.to].sort().join('|');
@@ -2344,16 +2153,12 @@ function mergeMMNodes(dragId, targetId) {
     edgeSet.add(key);
     return true;
   });
-
-  // dragNode 삭제
   mmNodes = mmNodes.filter(n => n.id !== dragId);
   mmSelected = targetNode.id;
-
   showToast(`병합: ${targetNode.text}`);
   renderMMCanvas();
   upsertLiveSession();
 }
-
 function deleteMMNode() {
   const nid = _editingNodeId || mmSelected;
   if (!nid) return;
@@ -2364,11 +2169,10 @@ function deleteMMNode() {
   document.getElementById('mmNodePanel').style.display = 'none';
   renderMMCanvas();
 }
+
 async function organizeMMWithAI() {
   if (mmNodes.length < 4) { showToast('노드가 너무 적어'); return; }
   if (!_apiKey) { showToast('API 키 설정 필요'); return; }
-
-  // 현재 노드/엣지 정보 수집
   const rootNode = mmNodes.find(n => n.id === mmRootId);
   const nodeList = mmNodes.map(n => n.text);
   const edgeList = mmEdges.map(e => {
@@ -2376,50 +2180,22 @@ async function organizeMMWithAI() {
     const to = mmNodes.find(n => n.id === e.to)?.text || '?';
     return `${from}→${to}`;
   });
-
   showToast('AI가 정리 중...');
-
   try {
     const raw = await callClaude([{role:'user', content:
-      `마인드맵 정리 요청.
-루트: "${rootNode?.text}"
-현재 노드: [${nodeList.join(', ')}]
-현재 연결: [${edgeList.join(', ')}]
-
-위 노드들을 인과관계와 속성별로 그룹핑해서 트리 구조로 재정리해줘.
-규칙:
-- 기존 노드 텍스트는 그대로 유지 (이름 변경 금지)
-- 필요하면 그룹 노드(카테고리)를 2~5개 새로 만들어 (4자 이내)
-- 루트 바로 아래에 그룹 노드, 그 아래에 기존 노드 배치
-- 같은 속성/인과관계인 노드끼리 같은 그룹에
-- JSON만 반환: {"groups":[{"label":"그룹명","nodes":["기존노드1","기존노드2"]},...]}`
+      `마인드맵 정리 요청.\n루트: "${rootNode?.text}"\n현재 노드: [${nodeList.join(', ')}]\n현재 연결: [${edgeList.join(', ')}]\n\n위 노드들을 인과관계와 속성별로 그룹핑해서 트리 구조로 재정리해줘.\n규칙:\n- 기존 노드 텍스트는 그대로 유지\n- 필요하면 그룹 노드 2~5개 새로 만들어 (4자 이내)\n- 루트 바로 아래에 그룹 노드, 그 아래에 기존 노드 배치\n- JSON만 반환: {"groups":[{"label":"그룹명","nodes":["기존노드1","기존노드2"]},...]}`
     }], 'JSON만 반환하는 구조화 도우미. 마크다운 금지.');
-
     const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
     if (!parsed.groups || !parsed.groups.length) { showToast('정리 실패'); return; }
-
-    mmSnapshot(); // undo 가능
-
-    // 기존 엣지 모두 제거
+    mmSnapshot();
     mmEdges = [];
-
-    // 기존 노드 ID 맵 (텍스트 → id)
     const textToNode = {};
-    mmNodes.forEach(n => {
-      const key = n.text.replace(/\s/g,'');
-      textToNode[key] = n;
-    });
-
-    // 그룹 노드 생성 + 기존 노드 재연결
+    mmNodes.forEach(n => { textToNode[n.text.replace(/\s/g,'')] = n; });
     const canvas = document.getElementById('mmCanvas');
-    const W = canvas.width || 700, H = canvas.height || 500;
-    const cx = rootNode?.x || W/2, cy = rootNode?.y || H/2;
+    const cx = rootNode?.x || (canvas.width||700)/2, cy = rootNode?.y || (canvas.height||500)/2;
     const groupCount = parsed.groups.length;
-
     parsed.groups.forEach((group, gi) => {
       const groupLabel = String(group.label || '기타').slice(0, 5);
-
-      // 기존에 같은 이름 노드가 있으면 재활용, 없으면 새로 생성
       let groupNode = mmNodes.find(n => n.text.replace(/\s/g,'') === groupLabel.replace(/\s/g,'') && n.id !== mmRootId);
       if (!groupNode) {
         const angle = (gi / groupCount) * Math.PI * 2 - Math.PI / 2;
@@ -2434,14 +2210,9 @@ async function organizeMMWithAI() {
         };
         mmNodes.push(groupNode);
       }
-
-      // 루트 → 그룹 연결
       mmEdges.push({ from: mmRootId, to: groupNode.id });
-
-      // 그룹 → 기존 노드 연결
       (group.nodes || []).forEach((nodeName, ni) => {
         const key = String(nodeName).replace(/\s/g,'');
-        // 텍스트 매칭 (부분 일치 포함)
         let matched = textToNode[key];
         if (!matched) {
           matched = mmNodes.find(n => {
@@ -2453,7 +2224,6 @@ async function organizeMMWithAI() {
         if (matched) {
           mmEdges.push({ from: groupNode.id, to: matched.id });
           matched.color = groupNode.color;
-          // 그룹 노드 주변에 재배치
           const subAngle = (ni / Math.max((group.nodes||[]).length, 1)) * Math.PI * 2;
           const subDist = 130;
           matched.x = groupNode.x + Math.cos(subAngle) * subDist;
@@ -2461,60 +2231,35 @@ async function organizeMMWithAI() {
         }
       });
     });
-
-    // 연결 안 된 고아 노드 → 루트에 직접 연결
     mmNodes.forEach(n => {
       if (n.id === mmRootId) return;
       const hasEdge = mmEdges.some(e => e.from === n.id || e.to === n.id);
       if (!hasEdge) mmEdges.push({ from: mmRootId, to: n.id });
     });
-
-    // 중복 엣지 제거
-    const edgeSet = new Set();
+    const edgeSet2 = new Set();
     mmEdges = mmEdges.filter(e => {
       const key = [e.from, e.to].sort().join('|');
-      if (edgeSet.has(key)) return false;
-      edgeSet.add(key);
+      if (edgeSet2.has(key)) return false;
+      edgeSet2.add(key);
       return true;
     });
-
     _resolveNodeOverlaps();
     recalcMMDepths();
     renderMMCanvas();
     upsertLiveSession();
-    showToast('✅ 정리 완료! (Ctrl+Z로 되돌리기 가능)');
+    showToast('✅ 정리 완료!');
   } catch(e) {
     console.error('organize error:', e);
     showToast('정리 실패: ' + (e.message || e));
   }
 }
 
-async function expandMMNode() {
-  const node = mmNodes.find(n => n.id === mmSelected);
-  if (!node) return;
-  document.getElementById('mmNodePanel').style.display = 'none';
-  showToast('AI 확장 중...');
-  try {
-    const raw = await callClaude([{role:'user',content:`"${node.text}" 에서 연결되는 아이디어/키워드 4개를 JSON으로:\n{"nodes":["키워드1","키워드2","키워드3","키워드4"]}\nJSON만 반환. 한국어.`}], '브레인스토밍 도우미. JSON만 반환.');
-    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
-    (parsed.nodes||[]).forEach((text, i) => {
-      const angle = (i / (parsed.nodes.length)) * Math.PI * 2 + Math.random();
-      const dist = 120 + Math.random() * 40;
-      const newNode = { id:'n_'+Date.now()+'_'+i, text, x: node.x + Math.cos(angle)*dist, y: node.y + Math.sin(angle)*dist, color: MM_COLORS[(_mmColorIdx++) % MM_COLORS.length], r: 32 };
-      mmNodes.push(newNode);
-      mmEdges.push({ from: node.id, to: newNode.id });
-    });
-    renderMMCanvas();
-  } catch(e) { showToast('확장 실패'); }
-}
 function closeMM() {
   mmSelected = null;
   document.getElementById('mmNodePanel').style.display = 'none';
   renderMMCanvas();
 }
-function clearDump() {
-  _doClearDump();
-}
+function clearDump() { _doClearDump(); }
 
 function _doClearDump() {
   clearAndAnalyze();
@@ -2535,7 +2280,6 @@ function _doClearDump() {
   renderRightDumps();
 }
 
-// ── 1. 생각 구조화 요약 카드 ──
 async function showThoughtSummaryCard() {
   if (_dumpHistory.length < 4) return;
   const msgs = document.getElementById('dumpMessages');
@@ -2555,7 +2299,6 @@ async function showThoughtSummaryCard() {
   } catch(e) {}
 }
 
-// ── 2. 핵심 질문 도출 카드 ──
 async function showKeyQuestionCard() {
   if (_dumpHistory.length < 6) return;
   const msgs = document.getElementById('dumpMessages');
@@ -2577,28 +2320,21 @@ async function showKeyQuestionCard() {
   } catch(e) {}
 }
 
-// ── 세션 정리 (수동 트리거, 이전 정리 카드 교체) ──
 async function doSessionSummary() {
   const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
   if (turnCount < 1) { showToast('대화 내용이 없어요'); return; }
-
   const msgs = document.getElementById('dumpMessages');
-
-  // 이전 정리 카드 삭제
   const prevCards = msgs.querySelectorAll('.session-summary-card');
   prevCards.forEach(c => c.remove());
-
   const convText = _dumpHistory.map(m =>
     `${m.role === 'user' ? 'JAY' : 'AI'}: ${typeof m.content === 'string' ? m.content.slice(0,300) : ''}`
   ).join('\n');
-
   const card = document.createElement('div');
   card.className = 'session-summary-card';
   card.style.cssText = 'background:linear-gradient(135deg,#f0fff4,#e8fdf0);border:1.5px solid #00aa66;border-radius:12px;padding:12px 16px;margin:8px 0;font-size:12px;color:var(--text2)';
   card.textContent = '세션 정리 중...';
   msgs.appendChild(card);
   msgs.scrollTop = msgs.scrollHeight;
-
   try {
     const raw = await callClaude(
       [{ role: 'user', content: `다음 브레인덤프 세션을 마무리 정리해줘. 아래 형식으로:\n\n💡 핵심 생각 (3개 이내)\n• ...\n\n🎯 올바른 질문\n• ...\n\n⚡ 다음 액션 (1개)\n• ...\n\n대화:\n${convText.slice(0,3000)}` }],
@@ -2607,7 +2343,7 @@ async function doSessionSummary() {
     card.style.cssText = 'background:linear-gradient(135deg,#f0fff4,#e8fdf0);border:1.5px solid #00aa66;border-radius:12px;padding:14px 16px;margin:8px 0;font-size:12px;line-height:1.8;color:var(--text)';
     card.innerHTML = `<div style="font-weight:700;color:#00aa66;margin-bottom:8px;font-size:11px">✅ 세션 마무리</div><div style="white-space:pre-wrap">${raw}</div>`;
     msgs.scrollTop = msgs.scrollHeight;
-    upsertLiveSession(); // 정리 포함해서 세션 저장
+    upsertLiveSession();
   } catch(e) {
     card.textContent = '정리 실패: ' + (e.message || e);
   }
@@ -2648,15 +2384,14 @@ function renderTasks() {
   const day = getDay();
   const tasks = day.tasks.filter(t => t.when === taskFilter || taskFilter === 'all');
   const el = document.getElementById('taskList');
-  const whenOrder = ['today','tomorrow','week','later'];
   const priColors = {1:'var(--red)',2:'var(--accent)',3:'var(--yellow)',4:'var(--muted)'};
   if (!tasks.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">할일이 없어</div></div>'; }
   else el.innerHTML = tasks.map((t) => {
     const ri = day.tasks.indexOf(t);
-    const wi = whenOrder.indexOf(t.when);
-    const canPrev = wi > 0, canNext = wi < whenOrder.length - 1;
+    const wi = ['today','tomorrow','week','later'].indexOf(t.when);
+    const canPrev = wi > 0, canNext = wi < 3;
     return `
-    <div class="task-card ${t.done?'done':''}" style="position:relative">
+    <div class="task-card ${t.done?'done':''}">
       <div class="task-pri" style="background:${priColors[t.priority]||'var(--muted)'}"></div>
       <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${ri})">${t.done?'✓':''}</div>
       <div class="task-text">${t.text}</div>
@@ -2688,14 +2423,13 @@ function editTask(i) {
   }
 }
 function toggleTask(i) { const day=getDay(); day.tasks[i].done=!day.tasks[i].done; save(); renderTasks(); }
-const _whenOrder = ['today','tomorrow','week','later'];
 function moveTask(i, dir) {
   const day = getDay();
   const t = day.tasks[i];
+  const _whenOrder = ['today','tomorrow','week','later'];
   const wi = _whenOrder.indexOf(t.when);
   const nw = _whenOrder[wi + dir];
   if (!nw) return;
-  // 타임라인에서 제거 (오늘이 아닌 곳으로 이동 시)
   if (nw !== 'today') {
     day.schedule = day.schedule.filter(s => s.task !== t.text);
   }
@@ -2712,16 +2446,13 @@ function deleteTask(i) {
 function scheduleTask(i) {
   const day = getDay();
   const t = day.tasks[i];
-  // 기존 시간배정 확인
   const exist = day.schedule.find(s => s.task === t.text);
   const currentTime = exist ? exist.time : '';
-  // 30분 단위 시간 목록 생성
   const times = [];
   for (let h = 0; h < 24; h++) {
     times.push(`${String(h).padStart(2,'0')}:00`);
     times.push(`${String(h).padStart(2,'0')}:30`);
   }
-  // 드롭다운 모달 표시
   document.getElementById('timepickerTask').textContent = `"${t.text.slice(0,20)}"`;
   const sel = document.getElementById('timepickerSel');
   sel.innerHTML = times.map(tm => `<option value="${tm}" ${tm===currentTime?'selected':''}>${tm}</option>`).join('');
@@ -2738,14 +2469,13 @@ function scheduleTask(i) {
 function renderSchedule() {
   const day = getDay();
   const el = document.getElementById('scheduleList');
-  // 오늘 할일에 있는 것만 타임라인에 표시 (오늘 아닌 곳으로 이동되면 자동 제거)
   day.schedule = day.schedule.filter(s => {
     const linked = day.tasks.find(t => t.text === s.task);
     return !linked || linked.when === 'today';
   });
   if (!day.schedule.length) { el.innerHTML='<div class="empty"><div class="empty-icon">🕐</div><div class="empty-text">+ 일정 눌러서 시간 배정</div></div>'; return; }
   el.innerHTML = day.schedule.sort((a,b)=>a.time.localeCompare(b.time)).map((s,i)=>`
-    <div class="timeline-item" style="position:relative" onmouseenter="this.querySelector('.tl-del').style.opacity=1" onmouseleave="this.querySelector('.tl-del').style.opacity=0">
+    <div class="timeline-item" onmouseenter="this.querySelector('.tl-del').style.opacity=1" onmouseleave="this.querySelector('.tl-del').style.opacity=0">
       <div class="timeline-time">${s.time}</div>
       <div style="flex:1"><div class="timeline-task">${s.task}</div>${s.note?`<div class="timeline-note">${s.note}</div>`:''}</div>
       <button class="tl-del" onclick="deleteSchedule(${i})" style="opacity:0;transition:opacity 0.15s;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px">✕</button>
@@ -2848,9 +2578,9 @@ function selectGoal(i) {
     </div>`;
 }
 
-// Feature 3: Updated updateGoalProgress (also calls renderRightGoals)
 function updateGoalProgress(i, val) {
   goals[i]._progress = parseInt(val);
+  save();
   renderGoals();
   renderRightGoals();
 }
@@ -2864,7 +2594,7 @@ async function generateActionPlanPC(i) {
       'JAY의 목표 실행계획 전문가. JSON만 반환.');
     const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
     goals[i]._actionPlan = (parsed.items||[]).map(a=>({text:a.text, note:a.note||'', done:false}));
-    /* saved in-memory */
+    save();
     selectGoal(i);
   } catch(e) { showToast('생성 실패'); }
   if (btn) { btn.disabled=false; btn.textContent='🔄 재생성'; }
@@ -2872,7 +2602,7 @@ async function generateActionPlanPC(i) {
 
 function toggleAction(gi, ai) {
   goals[gi]._actionPlan[ai].done = !goals[gi]._actionPlan[ai].done;
-  /* saved in-memory */
+  save();
   selectGoal(gi);
 }
 function addActionToToday(gi, ai) {
@@ -2890,7 +2620,6 @@ function openAddGoal() { openModal('addGoalModal'); }
 function sendToGoal(i) {
   const task = getDay().tasks[i];
   if (!task) return;
-  // 기존 목표 모달에 텍스트 미리 채우기
   document.getElementById('newGoalText').value = task.text;
   document.getElementById('newGoalWhy').value = '';
   document.getElementById('newGoalDeadline').value = '';
@@ -2903,33 +2632,28 @@ function saveGoal() {
   const text = document.getElementById('newGoalText').value.trim();
   if (!text) return;
   goals.push({ text, why:document.getElementById('newGoalWhy').value, deadline:document.getElementById('newGoalDeadline').value, type:document.getElementById('newGoalType').value, createdAt:new Date().toISOString(), _actionPlan:[], _progress:0 });
-  /* saved in-memory */
+  save();
   closeModal('addGoalModal'); renderGoals();
 }
 
-// Feature 5: deleteGoal function
 function deleteGoal(i) {
   goals.splice(i, 1);
   selectedGoalIdx = null;
   document.getElementById('goalDetailBox').style.display = 'none';
+  save();
   renderGoals();
   renderRightGoals();
   showToast('삭제됨');
 }
 
-// 우측 패널 — 브레인덤프 히스토리 최신순
-// ── 우측 패널: 세션 히스토리 ──
-// 세션 = 청소 또는 첫 오픈 시 저장되는 대화 묶음
-// 구조: [{id, date, summary, messages:[{role,text}], savedAt}]
+// ── 세션 히스토리 ──
 let sessionHistory = JSON.parse(localStorage.getItem('jay_sessions') || '[]');
-let _currentSessionMsgs = JSON.parse(localStorage.getItem('jay_currentSession') || '[]'); // 진행중 세션 복원
-
-let _liveSessionId = 'live_' + Date.now(); // 현재 진행중 세션 ID
+let _currentSessionMsgs = JSON.parse(localStorage.getItem('jay_currentSession') || '[]');
+let _liveSessionId = 'live_' + Date.now();
 
 function recordSessionMsg(role, text) {
   _currentSessionMsgs.push({ role, text: text.slice(0, 300) });
   localStorage.setItem('jay_currentSession', JSON.stringify(_currentSessionMsgs));
-  // 실시간으로 sessionHistory 맨 앞에 upsert
   upsertLiveSession();
 }
 
@@ -2959,7 +2683,6 @@ function upsertLiveSession() {
   renderRightDumps();
 }
 
-// 세션 저장 — 동기 (히스토리만, AI 분석 없음)
 function saveCurrentSession() {
   if (_currentSessionMsgs.length < 2) return;
   const firstUser = _currentSessionMsgs.find(m => m.role === 'user');
@@ -2969,16 +2692,14 @@ function saveCurrentSession() {
     id: 's_' + Date.now(),
     date: new Date().toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }),
     time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-    summary,
-    msgCount,
+    summary, msgCount,
     messages: _currentSessionMsgs.slice(),
     mmNodes: JSON.parse(JSON.stringify(mmNodes)),
     mmEdges: JSON.parse(JSON.stringify(mmEdges)),
     mmRootId,
     analyzed: false,
-    live: false  // 청소 시 live 플래그 해제
+    live: false
   };
-  // 기존 live 세션 업데이트 or 새로 추가
   const existing = sessionHistory.findIndex(s => s.id === _liveSessionId);
   if (existing !== -1) sessionHistory[existing] = session;
   else sessionHistory.unshift(session);
@@ -2989,34 +2710,27 @@ function saveCurrentSession() {
   return session;
 }
 
-// AI 세션 분석 → 메모/할일 추출 (async)
 async function analyzeSessionAndSave(session) {
   if (!session || session.analyzed) return;
-  if (!_apiKey) return; // API 키 없으면 skip
+  if (!_apiKey) return;
   const convo = session.messages.map(m => `[${m.role === 'user' ? 'JAY' : 'AI'}] ${m.text}`).join('\n');
-  // 기존 메모 텍스트 목록 (중복 방지용)
   const existingMemos = memoData.map(m => m.text.slice(0, 40)).join(' | ');
   try {
     const raw = await callClaude([{ role: 'user', content:
-      `다음 대화를 분석해서 JSON으로만 응답해:\n\n${convo}\n\n기존 메모(중복 금지): ${existingMemos||'없음'}\n\n반드시 JSON만:\n{"memos":[{"category":"💡 아이디어","text":"주제 요약(2-3문장)","tags":["태그"]}],"tasks":[{"text":"할일","priority":2}]}\n\n규칙:\n- memos: 대화 주제별 1개씩, 최대 3개. 기존 메모와 비슷한 내용은 제외. 내용 없으면 []\n- tasks: "해야해" "할거야" 같은 명확한 액션만. 없으면 []\n- 일정/약속이 있으면 tasks에 포함`
+      `다음 대화를 분석해서 JSON으로만 응답해:\n\n${convo}\n\n기존 메모(중복 금지): ${existingMemos||'없음'}\n\n반드시 JSON만:\n{"memos":[{"category":"💡 아이디어","text":"주제 요약(2-3문장)","tags":["태그"]}],"tasks":[{"text":"할일","priority":2}]}`
     }], '대화 분석 전문가. JSON만 반환. 한국어.');
     const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
     const day = getDay();
     let addedMemo = 0, addedTask = 0;
     (parsed.memos || []).forEach(m => {
       if (!m.text) return;
-      // 중복 체크 (기존 메모와 50% 이상 겹치면 skip)
-      const isDup = memoData.some(existing => {
-        const a = existing.text.slice(0, 30), b = m.text.slice(0, 30);
-        return a === b;
-      });
+      const isDup = memoData.some(existing => existing.text.slice(0, 30) === m.text.slice(0, 30));
       if (!isDup) { memoData.push({ ...m, id: 'm_' + Date.now() + '_' + Math.random(), date: new Date().toISOString() }); addedMemo++; }
     });
     (parsed.tasks || []).forEach(t => {
       if (!t.text) return;
       day.tasks.push({ ...t, when: 'today', urgent: false, done: false }); addedTask++;
     });
-    // 분석 완료 표시
     const si = sessionHistory.findIndex(s => s.id === session.id);
     if (si !== -1) sessionHistory[si].analyzed = true;
     save();
@@ -3028,19 +2742,17 @@ async function analyzeSessionAndSave(session) {
   } catch(e) { console.error('세션 분석 실패', e); }
 }
 
-// 청소 시: 저장 + 즉시 AI 분석
 async function clearAndAnalyze() {
   const session = saveCurrentSession();
   if (session) {
     showToast('🗑 청소됨 · AI 분석 중...');
-    analyzeSessionAndSave(session); // 백그라운드 실행
+    analyzeSessionAndSave(session);
   }
 }
 
-// 페이지 로드 시: 미분석 세션 있으면 처리
 async function analyzeUnprocessedSessions() {
   const unanalyzed = sessionHistory.filter(s => !s.analyzed && s.messages && s.messages.length >= 2);
-  for (const s of unanalyzed.slice(0, 3)) { // 최대 3개까지
+  for (const s of unanalyzed.slice(0, 3)) {
     await analyzeSessionAndSave(s);
   }
 }
@@ -3048,18 +2760,12 @@ async function analyzeUnprocessedSessions() {
 function loadSession(id) {
   const s = sessionHistory.find(s => s.id === id);
   if (!s || !s.messages) return;
-
-  // 브레인덤프 패널로 이동
   switchPanel('dump', document.querySelector('.nav-btn'));
-
-  // 대화 메시지 복원
   const msgs = document.getElementById('dumpMessages');
   msgs.innerHTML = s.messages.map(m => m.role === 'user'
     ? `<div class="msg-user">${m.text}</div>`
     : `<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>${m.text}</div>`
   ).join('');
-
-  // 마인드맵 복원
   if (s.mmNodes && s.mmNodes.length) {
     mmNodes = JSON.parse(JSON.stringify(s.mmNodes));
     mmEdges = JSON.parse(JSON.stringify(s.mmEdges || []));
@@ -3068,7 +2774,6 @@ function loadSession(id) {
     document.getElementById('mmEmpty').style.display = 'none';
     const canvas = document.getElementById('mmCanvas');
     canvas.style.display = 'block';
-    // canvas가 이미 초기화된 경우 resize+render만, 아닌 경우 initMMCanvas
     if (canvas._mmInited) {
       requestAnimationFrame(() => {
         const rect = canvas.parentElement.getBoundingClientRect();
@@ -3082,15 +2787,12 @@ function loadSession(id) {
       initMMCanvas();
     }
   } else {
-    // mmNodes 없으면 빈 상태로 초기화
     mmNodes = []; mmEdges = []; mmRootId = null;
     document.getElementById('mmEmpty').style.display = 'flex';
     document.getElementById('mmCanvas').style.display = 'none';
   }
-
-  // 대화 히스토리 복원 (AI 맥락 + turnCount 정상화)
-  _currentSessionMsgs = s.messages.slice(); // 세션 메시지 복원
-  _liveSessionId = s.id; // 세션 ID 연결
+  _currentSessionMsgs = s.messages.slice();
+  _liveSessionId = s.id;
   _dumpHistory = s.messages
     .filter(m => m.role === 'user' || m.role === 'ai' || m.role === 'assistant')
     .map(m => ({
@@ -3099,14 +2801,10 @@ function loadSession(id) {
         ? (() => { try { return JSON.parse(m.text.replace(/```json|```/g,'')).reply || m.text; } catch(e) { return m.text; } })()
         : m.text
     }));
-  // API는 반드시 user로 시작해야 함
   while (_dumpHistory.length && _dumpHistory[0].role !== 'user') _dumpHistory.shift();
-
-  // 읽기전용 표시
   if (!s.live) {
     msgs.innerHTML += `<div class="msg-meta" style="align-self:center;font-size:11px;color:var(--muted);background:var(--surface2);padding:6px 14px;border-radius:100px;margin-top:8px">📖 ${s.date} ${s.time} 세션 불러옴 · 이어서 대화 가능 · New로 초기화</div>`;
   }
-
   msgs.scrollTop = msgs.scrollHeight;
   showToast(`📖 ${s.date} ${s.time} 세션 불러옴`);
 }
@@ -3162,7 +2860,6 @@ function filterMemo(cat, el) {
 function renderMemoGrid(cat) {
   const el = document.getElementById('memoGrid');
   let filtered = cat==='전체' ? memoData.slice() : memoData.filter(m=>m.category===cat);
-  // 최신순 정렬
   filtered.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
   if (!filtered.length) { el.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🗂️</div><div class="empty-text">메모가 없어</div></div>'; return; }
   el.innerHTML = filtered.map((m) => {
@@ -3197,7 +2894,7 @@ function saveEditMemo() {
 }
 let _memoChatHistory = [];
 let _memoChatSending = false;
-let _memoChatMemoId = null; // 현재 대화 중인 메모 id
+let _memoChatMemoId = null;
 
 function _memoChatStorageKey(memoId) { return 'jay_memochat_' + memoId; }
 
@@ -3210,23 +2907,18 @@ function chatMemo(i) {
   const memo = memoData[i];
   _memoChatMemoId = memo.id;
   _memoChatSending = false;
-
   const msgs = document.getElementById('memoChatMessages');
   msgs.innerHTML = '';
-
-  // 저장된 대화 복원
   const saved = localStorage.getItem(_memoChatStorageKey(memo.id));
   if (saved) {
     try {
       _memoChatHistory = JSON.parse(saved);
-      // 메모 컨텍스트 카드
       const card = document.createElement('div');
       card.style.cssText = 'background:var(--surface2);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--text2);line-height:1.5;border-left:3px solid var(--accent)';
       card.textContent = memo.text;
       msgs.appendChild(card);
-      // 이전 대화 렌더
       _memoChatHistory.forEach(m => {
-        if (m.role === 'user' && m.content.startsWith('[메모]')) return; // 컨텍스트 메시지는 skip
+        if (m.role === 'user' && m.content.startsWith('[메모]')) return;
         _memoChatAddMsg(m.role === 'assistant' ? 'ai' : m.role, m.content);
       });
       const resumeNote = document.createElement('div');
@@ -3238,7 +2930,6 @@ function chatMemo(i) {
     }
   } else {
     _memoChatHistory = [];
-    // 메모 컨텍스트 첫 메시지
     const ctx = `[메모]\n카테고리: ${memo.category}\n내용: ${memo.text}\n태그: ${(memo.tags||[]).join(', ')}`;
     _memoChatHistory.push({ role: 'user', content: ctx });
     const card = document.createElement('div');
@@ -3246,11 +2937,8 @@ function chatMemo(i) {
     card.textContent = memo.text;
     msgs.appendChild(card);
   }
-
   openModal('memoChatModal');
   setTimeout(() => document.getElementById('memoChatInput').focus(), 100);
-
-  // 신규 대화면 AI 첫 응답 자동 시작
   if (!saved) {
     _sendMemoChatAI('이 메모에 대해 생각을 확장하거나 해결책, 다음 액션을 찾도록 도와줘. 핵심 질문 1개 또는 인사이트 1개만. 친구처럼 구어체로.');
   }
@@ -3289,7 +2977,7 @@ async function _sendMemoChatAI(overridePrompt) {
     typing.remove();
     _memoChatAddMsg('ai', raw);
     _memoChatHistory.push({ role: 'assistant', content: raw });
-    saveMemoChat(); // 자동 저장
+    saveMemoChat();
   } catch(e) {
     typing.remove();
     _memoChatAddMsg('ai', '오류 났어. 다시 해봐 🙏');
@@ -3319,7 +3007,6 @@ async function saveMemoChatAsDoc() {
       [{ role: 'user', content: `다음 대화를 문서로 정리해줘. 핵심 인사이트, 해결책, 다음 액션 중심으로. 마크다운 사용:\n\n${convText}` }],
       '당신은 문서 정리 전문가. 대화 내용을 깔끔한 한국어 문서로 정리해줘.'
     );
-    if (!docsData) window.docsData = [];
     docsData.push({ id: 'd_' + Date.now(), title: summary.split('\n')[0].replace(/^#+\s*/, '').slice(0, 40), text: summary, date: new Date().toISOString() });
     save();
     showToast('문서로 저장됨 ✓');
@@ -3340,7 +3027,7 @@ function saveMemo() {
   const text = document.getElementById('newMemoText').value.trim();
   if (!text) return;
   memoData.push({ id:'m_'+Date.now(), category:document.getElementById('newMemoCat').value, text, tags:[], date:new Date().toISOString() });
-  /* saved in-memory */
+  save();
   closeModal('addMemoModal');
   renderMemo();
 }
@@ -3382,7 +3069,6 @@ function openDocItemView(i) {
   openModal('docViewModal');
 }
 
-// ── 통계 ──
 function updateStat() {
   const day = getDay();
   const done = day.tasks.filter(t=>t.done).length;
@@ -3390,9 +3076,6 @@ function updateStat() {
   if (el) el.textContent = done+'/'+day.tasks.length;
 }
 
-
-
-// ── 메모 뷰 ──
 let _viewingMemoIdx = null;
 function openMemoView(idx) {
   _viewingMemoIdx = idx;
@@ -3412,25 +3095,23 @@ function deleteMemoView() {
   memoData.splice(_viewingMemoIdx, 1);
   _viewingMemoIdx = null;
   closeModal('memoViewModal');
+  save();
   renderMemo();
   showToast('삭제됨');
 }
 
-// ── 대화 저장 → 세션 히스토리 ──
 function saveChatAsDoc() {
   if (_currentSessionMsgs.length < 1 && _dumpHistory.length < 1) { showToast('대화 내용이 없어요'); return; }
   upsertLiveSession();
   showToast('✅ 최근항목에 저장됨');
 }
 
-// ── 마인드맵 저장 → 세션 히스토리 ──
 function saveMMAsDoc() {
   if (mmNodes.length < 2) { showToast('마인드맵이 비어있어요'); return; }
   upsertLiveSession();
   showToast('✅ 최근항목에 저장됨');
 }
 
-// ── 데일리 리포트 ──
 async function openDailyReport() {
   openModal('reportModal');
   const rc = document.getElementById('reportContent');
@@ -3444,10 +3125,7 @@ async function openDailyReport() {
   try {
     const raw = await callClaude(
       [{role:'user', content:
-        `오늘 날짜: ${TODAY_KEY}\n\n` +
-        `## 오늘 덤프 내용\n${dumpTexts || '없음'}\n\n` +
-        `## 할일 현황 (${done}/${total} 완료)\n${taskList || '없음'}\n\n` +
-        `## 목표 현황\n${goalList || '없음'}`
+        `오늘 날짜: ${TODAY_KEY}\n\n## 오늘 덤프 내용\n${dumpTexts || '없음'}\n\n## 할일 현황 (${done}/${total} 완료)\n${taskList || '없음'}\n\n## 목표 현황\n${goalList || '없음'}`
       }],
       'JAY의 AI 비서. 오늘 하루 리포트를 작성해. 형식: # 오늘 요약 / ## 잘한 것 / ## 내일 TOP 3 액션. 간결하고 실용적으로.'
     );
@@ -3481,9 +3159,7 @@ function saveProfile() {
   showToast('저장됨');
 }
 
-// ── 토스트 ──
 let _toastTimer = null;
-// ── 스크래치패드 저장 + 새 메모 ──
 function saveScratchAndNew() {
   const sp = document.getElementById('scratchPad');
   const text = sp.value.trim();
@@ -3501,13 +3177,11 @@ function saveScratchAndNew() {
   showToast('📝 메모 저장됨');
 }
 
-// ── 프로필 메뉴 ──
 function toggleProfileMenu() {
   const menu = document.getElementById('profileMenu');
   const isOpen = menu.style.display !== 'none';
   menu.style.display = isOpen ? 'none' : 'block';
   if (!isOpen) {
-    // 바깥 클릭 시 닫기
     setTimeout(() => {
       const close = (e) => {
         if (!menu.contains(e.target)) { menu.style.display = 'none'; document.removeEventListener('click', close); }
@@ -3515,23 +3189,6 @@ function toggleProfileMenu() {
       document.addEventListener('click', close);
     }, 10);
   }
-}
-
-// ── 퀵 메모 ──
-function saveQuickMemo() {
-  const input = document.getElementById('quickMemoInput');
-  const text = input.value.trim();
-  if (!text) return;
-  memoData.push({
-    id: 'm_' + Date.now(),
-    category: '💡 아이디어',
-    text,
-    tags: [],
-    date: new Date().toISOString()
-  });
-  save();
-  input.value = '';
-  showToast('📝 메모 저장됨');
 }
 
 function showToast(msg) {
@@ -3542,8 +3199,6 @@ function showToast(msg) {
   _toastTimer = setTimeout(()=>{ t.style.opacity='0'; }, 2000);
 }
 
-// ── 미니 캘린더 ──
-// Feature 9: renderMiniCal with null check
 function renderMiniCal() {
   const calEl = document.getElementById('miniCal');
   if (!calEl) return;
@@ -3563,7 +3218,6 @@ function renderMiniCal() {
   calEl.innerHTML = html;
 }
 
-// ── 초기화 ──
 function init() {
   initDate();
   renderTasks();
@@ -3575,7 +3229,6 @@ function init() {
     document.getElementById('profileJob').textContent = userProfile.job?.slice(0,20)||'설정하기 →';
     document.getElementById('profileAvatar').textContent = userProfile.name[0].toUpperCase();
   }
-  // 리사이저 초기 너비 복원
   const _chatCol = document.querySelector('.dump-chat-col');
   const _savedW = localStorage.getItem('jay_chatColW');
   if (_savedW && _chatCol) _chatCol.style.flexBasis = _savedW + 'px';
@@ -3611,14 +3264,10 @@ function resizerDown(e) {
 window.onload = () => {
   init();
   renderRightDumps();
-
-  // 스크래치패드 복원
   const sp = document.getElementById('scratchPad');
   if (sp) sp.value = localStorage.getItem('jay_scratchpad') || '';
-
-  // F5 새로고침 시 마인드맵 복원 (진행중 대화가 있을 때만)
   const savedMM = localStorage.getItem('jay_mmState');
-  localStorage.removeItem('jay_mmState'); // 항상 1회용 삭제
+  localStorage.removeItem('jay_mmState');
   if (savedMM && _currentSessionMsgs.length > 0) {
     try {
       const mm = JSON.parse(savedMM);
@@ -3636,8 +3285,6 @@ window.onload = () => {
       }
     } catch(e) { console.warn('mmState restore failed', e); }
   }
-
-  // 진행중 세션이 있으면 대화 메시지도 복원
   if (_currentSessionMsgs.length > 0) {
     const msgs = document.getElementById('dumpMessages');
     if (msgs) {
@@ -3647,7 +3294,6 @@ window.onload = () => {
       ).join('');
       msgs.scrollTop = msgs.scrollHeight;
     }
-    // 대화 히스토리도 복원
     _dumpHistory = _currentSessionMsgs
       .filter(m => m.role === 'user' || m.role === 'ai' || m.role === 'assistant')
       .map(m => ({
@@ -3656,14 +3302,10 @@ window.onload = () => {
       }));
     while (_dumpHistory.length && _dumpHistory[0].role !== 'user') _dumpHistory.shift();
   }
-
-  // 새로고침 후 미분석 세션 백그라운드 처리
   setTimeout(() => analyzeUnprocessedSessions(), 1500);
 };
 
-// 새로고침/탭 닫기 시 현재 세션 자동 저장
 window.addEventListener('beforeunload', () => {
-  // 마인드맵 상태 저장 (F5 복원용 — 진행중 대화 있을 때만)
   if (mmNodes.length > 0 && _currentSessionMsgs.length > 0) {
     localStorage.setItem('jay_mmState', JSON.stringify({
       nodes: mmNodes, edges: mmEdges, rootId: mmRootId
