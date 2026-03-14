@@ -604,8 +604,9 @@ body {
 
 <!-- 사이드바 -->
 <div id="sidebar">
-  <div class="sidebar-logo" style="padding:14px 20px 10px">
+  <div class="sidebar-logo" style="padding:10px 20px;border-bottom:1px solid var(--border)">
     <div class="sidebar-logo-title">🧠 JAY Daily OS</div>
+    <div class="sidebar-logo-sub" id="sidebarDate">2026.03.14</div>
   </div>
 
   <div class="sidebar-nav">
@@ -621,7 +622,7 @@ body {
       <span class="nav-icon">📅</span> 달력
     </button>
 
-    <div style="margin:8px 10px;border-top:1px solid var(--border)"></div>
+    <div style="margin:6px 10px;border-top:1px solid var(--border)"></div>
 
     <div class="nav-section-label">정리</div>
     <button class="nav-btn" onclick="switchPanel('goals',this)">
@@ -634,15 +635,15 @@ body {
       <span class="nav-icon">📄</span> 문서
     </button>
 
-    <div style="margin:8px 10px;border-top:1px solid var(--border)"></div>
+    <div style="margin:6px 10px;border-top:1px solid var(--border)"></div>
 
     <!-- 스크래치패드 -->
-    <div style="flex:1;display:flex;flex-direction:column;min-height:0;padding:0 6px 6px">
-      <div style="padding:0 4px 3px;display:flex;align-items:center;justify-content:flex-end">
+    <div style="flex:1;display:flex;flex-direction:column;min-height:0;padding:0 4px 4px">
+      <div style="padding:0 4px 2px;display:flex;align-items:center;justify-content:flex-end">
         <button onclick="saveScratchAndNew()" title="메모에 저장 + 새 메모" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--muted);padding:0 2px;line-height:1">+</button>
       </div>
       <textarea id="scratchPad" placeholder="메모"
-        style="flex:1;border:1px solid var(--border);background:#ffffff;border-radius:10px;padding:10px 12px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.8;min-height:0"
+        style="flex:1;border:1px solid var(--border);background:#ffffff;border-radius:8px;padding:10px 12px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.8;min-height:0"
         onfocus="this.style.borderColor='var(--border2)'" onblur="this.style.borderColor='var(--border)'"
         oninput="localStorage.setItem('jay_scratchpad',this.value)"></textarea>
     </div>
