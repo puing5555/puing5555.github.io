@@ -637,32 +637,26 @@ body {
     </button>
 
     <!-- 스크래치패드 — 사이드바 빈 공간 활용 -->
-    <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:6px;flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:6px;flex:1;display:flex;flex-direction:column;min-height:200px">
       <div style="padding:0 10px 2px;display:flex;align-items:center;justify-content:space-between">
         <span style="font-size:10px;font-weight:700;color:var(--muted)">📝 메모장</span>
         <span style="font-size:8px;color:var(--muted);opacity:0.4">자동저장</span>
       </div>
-      <textarea id="scratchPad" placeholder="여기에 자유롭게 메모...&#10;수시로 적어두기"
-        style="flex:1;border:none;background:#fffef5;border-radius:8px;margin:0 6px;padding:6px 10px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.7;min-height:0"
+      <textarea id="scratchPad" placeholder="여기에 자유롭게 메모...&#10;수시로 적어두기&#10;해야할 것, 아이디어 등"
+        style="flex:1;border:none;background:#fffef5;border-radius:8px;margin:0 6px;padding:8px 10px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.8;min-height:150px"
         oninput="localStorage.setItem('jay_scratchpad',this.value)"></textarea>
     </div>
   </div>
 
-  <!-- Feature 1: Daily Report Button -->
-  <div style="padding:8px 10px;border-top:1px solid var(--border)">
-    <button class="nav-btn" onclick="openDailyReport()" style="color:var(--accent);font-weight:700">
-      <span class="nav-icon">📊</span> 오늘 리포트
-    </button>
-    <button class="nav-btn" onclick="openModal('apiKeyModal')" style="color:var(--text2)">
-      <span class="nav-icon" id="apiKeyStatus">🔑</span> API 키 설정
-    </button>
-  </div>
-
-  <div class="sidebar-profile" onclick="openProfileModal()">
+  <div class="sidebar-profile" onclick="openProfileModal()" style="position:relative">
     <div class="profile-avatar" id="profileAvatar">J</div>
-    <div>
+    <div style="flex:1">
       <div class="profile-name" id="profileName">JAY</div>
       <div class="profile-job" id="profileJob">설정하기 →</div>
+    </div>
+    <div style="display:flex;gap:2px">
+      <button onclick="event.stopPropagation();openDailyReport()" title="오늘 리포트" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px">📊</button>
+      <button onclick="event.stopPropagation();openModal('apiKeyModal')" title="API 키 설정" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px"><span id="apiKeyStatus">🔑</span></button>
     </div>
   </div>
 </div>
