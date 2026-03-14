@@ -642,8 +642,8 @@ body {
         <span style="font-size:10px;font-weight:600;color:var(--muted)">📝 메모장</span>
         <span style="font-size:8px;color:var(--muted);opacity:0.3">자동저장</span>
       </div>
-      <textarea id="scratchPad" placeholder="자유롭게 메모..."
-        style="flex:1;border:1px solid var(--border);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.8;min-height:0"
+      <textarea id="scratchPad" placeholder="메모"
+        style="flex:1;border:1px solid var(--border);background:#ffffff;border-radius:10px;padding:10px 12px;font-size:11px;font-family:'Noto Sans KR',sans-serif;color:var(--text);resize:none;outline:none;line-height:1.8;min-height:0"
         onfocus="this.style.borderColor='var(--border2)'" onblur="this.style.borderColor='var(--border)'"
         oninput="localStorage.setItem('jay_scratchpad',this.value)"></textarea>
     </div>
