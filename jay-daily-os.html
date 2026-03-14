@@ -1714,6 +1714,7 @@ function initMMCanvas() {
       }
 
       mmSelected = hit.id;
+      _editingNodeId = hit.id;
       mmSelectedEdge = null;
       _mmDragging = { id: hit.id, ox: cx - hit.x, oy: cy - hit.y };
       document.getElementById('mmNodeTitle').value = hit.text;
@@ -1797,6 +1798,7 @@ function initMMCanvas() {
     const hit = mmNodes.find(n => Math.hypot(n.x-cx, n.y-cy) <= n.r);
     if (hit) {
       mmSelected = hit.id;
+      _editingNodeId = hit.id;
       const panel = document.getElementById('mmNodePanel');
       document.getElementById('mmNodeTitle').value = hit.text;
       const sizeInput = document.getElementById('mmNodeSize');
@@ -2268,21 +2270,24 @@ function getDescendants(nodeId) {
   return result;
 }
 function renameMMNode(text) {
-  const node = mmNodes.find(n => n.id === mmSelected);
+  const node = mmNodes.find(n => n.id === (_editingNodeId || mmSelected));
   if (node) { node.text = text; renderMMCanvas(); }
 }
+let _editingNodeId = null; // 패널에서 편집중인 노드 ID
+
 function previewMMNodeSize(r) {
-  // 슬라이더 실시간 미리보기
-  const node = mmNodes.find(n => n.id === mmSelected);
+  const node = mmNodes.find(n => n.id === (_editingNodeId || mmSelected));
   if (node) { node.r = r; renderMMCanvas(); }
   document.getElementById('mmNodeSizeVal').textContent = r;
 }
 function confirmMMNode() {
-  const node = mmNodes.find(n => n.id === mmSelected);
+  const nid = _editingNodeId || mmSelected;
+  const node = mmNodes.find(n => n.id === nid);
   if (!node) return;
   mmSnapshot();
   node.r = parseInt(document.getElementById('mmNodeSize').value);
   node.text = document.getElementById('mmNodeTitle').value.trim() || node.text;
+  _editingNodeId = null;
   document.getElementById('mmNodePanel').style.display = 'none';
   mmSelected = null;
   renderMMCanvas();
@@ -2339,11 +2344,12 @@ function mergeMMNodes(dragId, targetId) {
 }
 
 function deleteMMNode() {
-  if (!mmSelected) return;
+  const nid = _editingNodeId || mmSelected;
+  if (!nid) return;
   mmSnapshot();
-  mmNodes = mmNodes.filter(n => n.id !== mmSelected);
-  mmEdges = mmEdges.filter(e => e.from !== mmSelected && e.to !== mmSelected);
-  mmSelected = null;
+  mmNodes = mmNodes.filter(n => n.id !== nid);
+  mmEdges = mmEdges.filter(e => e.from !== nid && e.to !== nid);
+  mmSelected = null; _editingNodeId = null;
   document.getElementById('mmNodePanel').style.display = 'none';
   renderMMCanvas();
 }
