@@ -2824,6 +2824,7 @@ function upsertLiveSession() {
     analyzed: false,
     live: true
   };
+  if (existing !== -1 && sessionHistory[existing].customTitle) session.customTitle = sessionHistory[existing].customTitle; // 사용자 지정 제목 보존
   if (existing !== -1) sessionHistory[existing] = session;
   else sessionHistory.unshift(session);
   if (sessionHistory.length > 100) sessionHistory = sessionHistory.slice(0, 100);
@@ -2849,6 +2850,7 @@ function saveCurrentSession() {
     live: false
   };
   const existing = sessionHistory.findIndex(s => s.id === _liveSessionId);
+  if (existing !== -1 && sessionHistory[existing].customTitle) session.customTitle = sessionHistory[existing].customTitle; // 사용자 지정 제목 보존
   if (existing !== -1) sessionHistory[existing] = session;
   else sessionHistory.unshift(session);
   if (sessionHistory.length > 100) sessionHistory = sessionHistory.slice(0, 100);
@@ -2993,10 +2995,37 @@ function renderRightDumps() {
         <div style="font-size:10px;color:var(--muted);margin-bottom:3px">
           ${s.live ? '<span style="color:var(--accent);font-weight:700">● 진행중</span> · ' : ''}${s.date} · ${s.time} · ${s.msgCount}턴
         </div>
-        <div style="font-size:12px;color:var(--text);line-height:1.5;word-break:break-all;font-weight:600">${s.summary}</div>
+        <div id="sesstitle_${s.id}" style="font-size:12px;color:var(--text);line-height:1.5;word-break:break-all;font-weight:600">${s.customTitle || s.summary}</div>
       </div>
+      <button onclick="event.stopPropagation();startEditSessionTitle('${s.id}')" title="제목 수정" style="flex-shrink:0;border:none;background:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">✏️</button>
       <button onclick="event.stopPropagation();deleteSession('${s.id}')" title="삭제" style="flex-shrink:0;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:4px" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
     </div>`).join('');
+}
+
+// 세션 제목 인라인 편집 (표시용 customTitle만 수정, 대화 내용엔 영향 없음)
+function startEditSessionTitle(id) {
+  const s = sessionHistory.find(x => x.id === id);
+  const titleEl = document.getElementById('sesstitle_' + id);
+  if (!s || !titleEl) return;
+  const cur = (s.customTitle || s.summary || '').replace(/"/g, '&quot;');
+  titleEl.innerHTML = `<input id="sessedit_${id}" value="${cur}"
+    onclick="event.stopPropagation()"
+    onkeydown="event.stopPropagation(); if(event.key==='Enter'){this.blur();} else if(event.key==='Escape'){this.dataset.cancel='1';this.blur();}"
+    onblur="saveSessionTitle('${id}', this)"
+    style="width:100%;font-size:12px;font-weight:600;border:1.5px solid var(--accent);border-radius:6px;padding:2px 6px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)">`;
+  const inp = document.getElementById('sessedit_' + id);
+  if (inp) { inp.focus(); inp.select(); }
+}
+function saveSessionTitle(id, inp) {
+  const s = sessionHistory.find(x => x.id === id);
+  if (!s) { renderRightDumps(); return; }
+  if (inp.dataset.cancel !== '1') {
+    const v = inp.value.trim();
+    if (v) s.customTitle = v;       // 지정 제목 저장
+    else delete s.customTitle;      // 비우면 기본(첫 메시지)으로 복귀
+    localStorage.setItem('jay_sessions', JSON.stringify(sessionHistory)); // 즉시 저장
+  }
+  renderRightDumps();
 }
 
 // ── 메모 ──
