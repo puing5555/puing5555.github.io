@@ -2297,6 +2297,11 @@ function _doClearDump() {
   renderRightDumps();
 }
 
+// "지금까지 나온 생각" 카드 마크업 — 라이브 생성과 세션 복원이 동일한 HTML을 쓰도록 공유
+function _thoughtCardHtml(text) {
+  return `<div class="msg-thought-card" style="background:linear-gradient(135deg,#fff8f3,#fff3e8);border:1.5px solid var(--accent);border-radius:12px;padding:12px 16px;margin:8px 0;font-size:12px;line-height:1.7;color:var(--text)"><div style="font-weight:700;color:var(--accent);margin-bottom:6px;font-size:11px">🗂 지금까지 나온 생각</div><div style="white-space:pre-wrap">${text}</div></div>`;
+}
+
 async function showThoughtSummaryCard() {
   if (_dumpHistory.length < 4) return;
   const msgs = document.getElementById('dumpMessages');
@@ -2308,10 +2313,9 @@ async function showThoughtSummaryCard() {
       [{ role: 'user', content: `다음 대화에서 지금까지 나온 핵심 생각들을 3줄로 요약해. 각 줄은 "• " 로 시작. 짧고 명확하게:\n${convSummary}` }],
       '대화 요약 전문가. 3줄 이내 핵심만. 텍스트만 응답.'
     );
-    const card = document.createElement('div');
-    card.style.cssText = 'background:linear-gradient(135deg,#fff8f3,#fff3e8);border:1.5px solid var(--accent);border-radius:12px;padding:12px 16px;margin:8px 0;font-size:12px;line-height:1.7;color:var(--text)';
-    card.innerHTML = `<div style="font-weight:700;color:var(--accent);margin-bottom:6px;font-size:11px">🗂 지금까지 나온 생각</div><div style="white-space:pre-wrap">${raw}</div>`;
-    msgs.appendChild(card);
+    // DOM에 붙임과 동시에 세션 데이터(thought 메시지)로 기록 → 다른 탭 이동/새로고침/최근항목 재열람 시 복원됨
+    msgs.insertAdjacentHTML('beforeend', _thoughtCardHtml(raw));
+    recordSessionMsg('thought', raw);
     msgs.scrollTop = msgs.scrollHeight;
   } catch(e) {}
 }
@@ -2781,6 +2785,8 @@ function loadSession(id) {
   const msgs = document.getElementById('dumpMessages');
   msgs.innerHTML = s.messages.map(m => m.role === 'user'
     ? `<div class="msg-user">${m.text}</div>`
+    : m.role === 'thought'
+    ? _thoughtCardHtml(m.text)
     : `<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>${m.text}</div>`
   ).join('');
   if (s.mmNodes && s.mmNodes.length) {
@@ -3307,6 +3313,8 @@ window.onload = () => {
     if (msgs) {
       msgs.innerHTML = _currentSessionMsgs.map(m => m.role === 'user'
         ? `<div class="msg-user">${m.text}</div>`
+        : m.role === 'thought'
+        ? _thoughtCardHtml(m.text)
         : `<div class="msg-ai"><div class="msg-ai-name">JAY AI</div>${m.text}</div>`
       ).join('');
       msgs.scrollTop = msgs.scrollHeight;
