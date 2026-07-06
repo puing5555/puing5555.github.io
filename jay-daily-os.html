@@ -1134,12 +1134,19 @@ async function callClaude(messages, system) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'x-api-key': getApiKey() },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, system, messages })
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6', max_tokens: 4000, system, messages,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+    })
   });
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error?.message || `API ${res.status}: ${JSON.stringify(data)}`);
-  if (!data.content?.[0]?.text) throw new Error('빈 응답: ' + JSON.stringify(data));
-  return data.content[0].text;
+  // 웹 검색을 쓰면 content가 여러 text 블록(+검색 도구 블록)으로 쪼개져 옴 → text 블록만 전부 이어붙임
+  const text = Array.isArray(data.content)
+    ? data.content.filter(b => b.type === 'text').map(b => b.text).join('')
+    : '';
+  if (!text) throw new Error('빈 응답: ' + JSON.stringify(data));
+  return text;
 }
 
 // ── 덤프 ──
@@ -1191,7 +1198,7 @@ async function sendDump() {
   ta.value = ''; ta.style.height = 'auto';
   const typingEl = document.createElement('div');
   typingEl.className = 'msg-ai';
-  typingEl.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>';
+  typingEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><div class="dots"><span></span><span></span><span></span></div><span style="font-size:11px;color:var(--muted)">🔎 필요하면 웹 검색 중…</span></div>';
   msgs.appendChild(typingEl); msgs.scrollTop = msgs.scrollHeight;
   const day = getDay();
   day.dumps.push({ time: new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text: input.slice(0,200) }); save();
@@ -1224,7 +1231,9 @@ ${isAnswerMode
 - mindmap: 대화에서 나온 개념들을 인과/계층 트리로. root는 ${rootNode ? `"${rootNode.text}"` : '첫 대화의 핵심 주제'}.`}
 - 1-2문장 구어체, 이전 맥락 반영
 
-할일 규칙: 명확한 액션만. 상태/사실 금지.`;
+할일 규칙: 명확한 액션만. 상태/사실 금지.
+
+최신 정보나 연구, 사실 확인이 필요하면 웹 검색을 사용해. 검색 없이 구체적 수치나 연구 결과를 지어내지 마.`;
 
   try {
     let userContent = input;
