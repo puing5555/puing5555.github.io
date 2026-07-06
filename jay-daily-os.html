@@ -629,6 +629,9 @@ body {
     <button class="nav-btn" onclick="switchPanel('goals',this)">
       <span class="nav-icon">🎯</span> 목표
     </button>
+    <button class="nav-btn" onclick="switchPanel('routine',this)">
+      <span class="nav-icon">🔁</span> 루틴
+    </button>
     <button class="nav-btn" onclick="switchPanel('memo',this)">
       <span class="nav-icon">🗂️</span> 메모
     </button>
@@ -782,6 +785,11 @@ body {
       </div>
       <div id="goalDetailBox" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px"></div>
       <div id="goalList" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+    <!-- 루틴 패널 -->
+    <div id="panel-routine" class="panel" style="padding:20px 24px;overflow-y:auto">
+      <div id="routineBody"></div>
     </div>
 
     <!-- 메모 패널 -->
@@ -1093,6 +1101,7 @@ const TODAY_KEY = new Date().toISOString().slice(0,10).replace(/-/g,'');
 // ── 데이터 — localStorage 영구 저장 ──
 let allData = JSON.parse(localStorage.getItem('jay_allData')||'{}');
 let goals = JSON.parse(localStorage.getItem('jay_goals')||'[]');
+let routine = JSON.parse(localStorage.getItem('jay_routine')||'null'); // {name, time, checks:["2026-07-06",...]} | null
 let memoData = JSON.parse(localStorage.getItem('jay_memoData')||'[]');
 let docsData = JSON.parse(localStorage.getItem('jay_docsData')||'[]');
 let userProfile = JSON.parse(localStorage.getItem('jay_profile')||'{}');
@@ -1135,10 +1144,11 @@ function switchPanel(name, el) {
     }
   }
   currentPanel = name;
-  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', goals:'🎯 목표', memo:'🗂️ 메모', docs:'📄 문서' };
+  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', goals:'🎯 목표', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서' };
   document.getElementById('mainTitle').textContent = titles[name] || name;
   if (name === 'today') renderTasks();
   if (name === 'goals') renderGoals();
+  if (name === 'routine') renderRoutine();
   if (name === 'memo') renderMemo();
   if (name === 'docs') renderDocs();
 }
@@ -1243,7 +1253,8 @@ async function sendDump() {
   const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|해결|방향|뭘 해야|추천|선택|골라|뭐냐|뭐지|알려줘|뭐야|뭔데|줘봐|줘봐|알려|방법/.test(input);
   const isAnswerMode = mmRootId && (isAskingForAnswer || turnCount >= 5);
   const memoryBlock = _buildMemoryBlock();
-  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${memoryBlock ? '\n\n' + memoryBlock : ''}
+  const routineLine = _routineStatusLine();
+  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${routineLine ? '\n' + routineLine : ''}${memoryBlock ? '\n\n' + memoryBlock : ''}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
 
@@ -2764,6 +2775,119 @@ function openAddSchedule() {
 // ── 목표 ──
 const GOAL_COLORS = {life:'#7755cc',long:'#2277dd',mid:'#e07b00',short:'#ff6f0f',ultra:'#e03030'};
 let selectedGoalIdx = null;
+
+// ── 루틴 (의도적 제약: 루틴 1개 · 이름/시간만 · 달력 체크가 전부) ──
+let _routineViewYM = null; // {y, m} 표시 중인 월 (m은 0-based)
+let _routineEditing = false;
+function _dateStr(d) { const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
+function saveRoutine() { localStorage.setItem('jay_routine', JSON.stringify(routine)); }
+
+function saveRoutineSetup() {
+  const name = (document.getElementById('routineNameInput').value || '').trim();
+  const time = document.getElementById('routineTimeInput').value || '';
+  if (!name) { showToast('루틴 이름을 입력해줘'); return; }
+  routine = { name, time, checks: (routine && routine.checks) || [] }; // 수정 시 기록 유지
+  saveRoutine(); _routineEditing = false; renderRoutine();
+  showToast('✅ 루틴 저장됨');
+}
+function editRoutine() { _routineEditing = true; renderRoutine(); }
+function _routineMonth(delta) {
+  const now = new Date();
+  if (!_routineViewYM) _routineViewYM = { y: now.getFullYear(), m: now.getMonth() };
+  let m = _routineViewYM.m + delta, y = _routineViewYM.y;
+  if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
+  _routineViewYM = { y, m }; renderRoutine();
+}
+function toggleRoutineCheck(dateStr) {
+  if (!routine) return;
+  const i = routine.checks.indexOf(dateStr);
+  if (i === -1) routine.checks.push(dateStr); else routine.checks.splice(i, 1);
+  saveRoutine(); renderRoutine();
+}
+
+function renderRoutine() {
+  const el = document.getElementById('routineBody');
+  if (!el) return;
+  // 설정/수정 폼
+  if (!routine || _routineEditing) {
+    const nm = routine ? routine.name : '', tm = (routine && routine.time) || '13:05';
+    el.innerHTML = `
+      <div style="max-width:380px;margin:48px auto 0;text-align:center">
+        <div style="font-size:44px;margin-bottom:8px">🔁</div>
+        <div style="font-size:16px;font-weight:800;color:var(--text);margin-bottom:4px">매일 지킬 루틴 하나</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:24px">딱 하나만. 단순할수록 지켜져.</div>
+        <input id="routineNameInput" value="${nm.replace(/"/g,'&quot;')}" placeholder="루틴 이름 (예: 오후 1시 5분 운동)" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 14px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:10px">
+        <input id="routineTimeInput" type="time" value="${tm}" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 14px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:18px">
+        <button onclick="saveRoutineSetup()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">${routine ? '저장' : '루틴 시작하기'}</button>
+        ${routine ? `<button onclick="_routineEditing=false;renderRoutine()" style="width:100%;margin-top:8px;padding:10px;border-radius:10px;border:none;background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit">취소</button>` : ''}
+      </div>`;
+    return;
+  }
+  const now = new Date();
+  if (!_routineViewYM) _routineViewYM = { y: now.getFullYear(), m: now.getMonth() };
+  const { y, m } = _routineViewYM;
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const firstDow = new Date(y, m, 1).getDay();
+  const todayStr = _dateStr(now);
+  const yStr = _dateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const checkSet = new Set(routine.checks);
+  let monthCount = 0;
+  for (let d = 1; d <= daysInMonth; d++) if (checkSet.has(_dateStr(new Date(y, m, d)))) monthCount++;
+  // Never Miss Twice: 어제+오늘 둘 다 비었을 때만 (하루 빠짐은 무표시)
+  const showNMT = !checkSet.has(todayStr) && !checkSet.has(yStr);
+
+  const wdHead = ['일','월','화','수','목','금','토'].map((w,i)=>`<div style="text-align:center;font-size:11px;font-weight:700;color:${i===0?'#e06666':i===6?'#5588cc':'var(--muted)'};padding:4px 0">${w}</div>`).join('');
+  let cells = '';
+  for (let i = 0; i < firstDow; i++) cells += '<div></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const cellDate = new Date(y, m, d);
+    const ds = _dateStr(cellDate);
+    const checked = checkSet.has(ds);
+    const isToday = ds === todayStr;
+    const future = cellDate.setHours(0,0,0,0) > new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+    const size = isToday ? 46 : 38;
+    let style;
+    if (checked) style = 'background:var(--accent);color:#fff;border:2px solid var(--accent)';
+    else if (isToday) style = 'background:transparent;color:var(--accent);border:2.5px solid var(--accent)';
+    else if (future) style = 'background:transparent;color:var(--border2);border:1.5px solid var(--border)';
+    else style = 'background:transparent;color:var(--text2);border:1.5px solid var(--border2)';
+    const tap = future ? '' : `onclick="toggleRoutineCheck('${ds}')"`;
+    cells += `<div style="display:flex;justify-content:center;padding:3px 0">
+      <button ${tap} ${isToday?'title="오늘 — 한 번 탭해서 체크"':''} style="width:${size}px;height:${size}px;border-radius:50%;${style};font-size:${isToday?15:13}px;font-weight:${isToday?800:600};cursor:${future?'default':'pointer'};font-family:inherit;display:flex;align-items:center;justify-content:center;transition:transform 0.1s" ${future?'':'onmousedown="this.style.transform=\'scale(0.9)\'" onmouseup="this.style.transform=\'\'" onmouseleave="this.style.transform=\'\'"'}>${checked?'✓':d}</button>
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div style="font-size:18px;font-weight:800;color:var(--text)">${routine.name}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${routine.time ? '⏰ ' + routine.time + ' · ' : ''}이번 달 <b style="color:var(--accent)">${monthCount}</b>/${daysInMonth}</div>
+      </div>
+      <button onclick="editRoutine()" title="이름/시간 수정" style="border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:inherit">⚙ 수정</button>
+    </div>
+    ${showNMT ? `<div style="background:linear-gradient(135deg,#fff4e8,#ffe8d6);border:1.5px solid var(--accent);border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:700;color:var(--text)">⚡ 2일째야 — 오늘 하나만 하면 리셋 안 됨</div>` : ''}
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:10px">
+      <button onclick="_routineMonth(-1)" style="border:none;background:transparent;color:var(--text2);font-size:18px;cursor:pointer;padding:2px 8px">‹</button>
+      <div style="font-size:14px;font-weight:800;color:var(--text);min-width:100px;text-align:center">${y}년 ${m+1}월</div>
+      <button onclick="_routineMonth(1)" style="border:none;background:transparent;color:var(--text2);font-size:18px;cursor:pointer;padding:2px 8px">›</button>
+    </div>
+    <div style="max-width:420px;margin:0 auto">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr)">${wdHead}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr)">${cells}</div>
+    </div>`;
+}
+
+// 브레인덤프 시스템 프롬프트용 루틴 상태 한 줄
+function _routineStatusLine() {
+  if (!routine) return '';
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const checkSet = new Set(routine.checks);
+  let cnt = 0; const dim = new Date(y, m + 1, 0).getDate();
+  for (let d = 1; d <= dim; d++) if (checkSet.has(_dateStr(new Date(y, m, d)))) cnt++;
+  const yStr = _dateStr(new Date(y, m, now.getDate() - 1));
+  return `루틴: ${routine.name}, 이번달 ${cnt}회, 어제 ${checkSet.has(yStr) ? '완료' : '미완료'}`;
+}
 
 function renderGoals() {
   const el = document.getElementById('goalList');
