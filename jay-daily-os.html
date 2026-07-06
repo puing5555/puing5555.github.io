@@ -690,6 +690,7 @@ body {
             <textarea class="dump-ta" id="dumpInput" rows="1" placeholder="지금 머릿속에 있는 거 쏟아내..."
               oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';clearTimeout(window._dumpTimer)"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendDump()}"></textarea>
+            <button class="dump-icon-btn" onclick="toggleSearch()" id="searchToggleBtn" title="웹 검색 (연구·통계·최신정보)">🔎</button>
             <button class="dump-icon-btn" onclick="triggerPhotoPC()" title="사진">📷</button>
             <button class="dump-icon-btn" onclick="startVoicePC()" id="voiceBtnPC" title="음성">🎙</button>
             <button class="dump-send" onclick="sendDump()">↑</button>
@@ -1130,14 +1131,14 @@ function switchPanel(name, el) {
 }
 
 // ── API ──
-async function callClaude(messages, system) {
+async function callClaude(messages, system, useSearch = false) {
+  const body = { model: 'claude-sonnet-4-6', max_tokens: 4000, system, messages };
+  // 웹 검색은 옵트인. 기본 대화·정형 응답은 tools 없이 예전처럼 빠르게.
+  if (useSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'x-api-key': getApiKey() },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6', max_tokens: 4000, system, messages,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }]
-    })
+    body: JSON.stringify(body)
   });
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error?.message || `API ${res.status}: ${JSON.stringify(data)}`);
@@ -1153,6 +1154,22 @@ async function callClaude(messages, system) {
 let _sending = false;
 let _attachedPhotos = [];
 let _dumpHistory = [];
+
+// 웹 검색 옵트인 토글 (기본 꺼짐). 켰을 때만 메인 대화에서 웹 검색 사용.
+let _useSearch = localStorage.getItem('jay_useSearch') === '1';
+function _renderSearchToggle() {
+  const btn = document.getElementById('searchToggleBtn');
+  if (!btn) return;
+  btn.style.opacity = _useSearch ? '1' : '0.4';
+  btn.style.background = _useSearch ? 'var(--accent)' : '';
+  btn.title = _useSearch ? '웹 검색 켜짐 — 연구·통계·최신정보 질문에만 사용' : '웹 검색 꺼짐 (탭하면 켜짐)';
+}
+function toggleSearch() {
+  _useSearch = !_useSearch;
+  localStorage.setItem('jay_useSearch', _useSearch ? '1' : '0');
+  _renderSearchToggle();
+  showToast(_useSearch ? '🔎 웹 검색 켜짐' : '웹 검색 꺼짐');
+}
 
 function _extractSolutionsFromReply(reply) {
   if (!reply || reply.length < 5) return [];
@@ -1198,7 +1215,9 @@ async function sendDump() {
   ta.value = ''; ta.style.height = 'auto';
   const typingEl = document.createElement('div');
   typingEl.className = 'msg-ai';
-  typingEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><div class="dots"><span></span><span></span><span></span></div><span style="font-size:11px;color:var(--muted)">🔎 필요하면 웹 검색 중…</span></div>';
+  typingEl.innerHTML = _useSearch
+    ? '<div style="display:flex;align-items:center;gap:8px"><div class="dots"><span></span><span></span><span></span></div><span style="font-size:11px;color:var(--muted)">🔎 필요하면 웹 검색 중…</span></div>'
+    : '<div class="dots"><span></span><span></span><span></span></div>';
   msgs.appendChild(typingEl); msgs.scrollTop = msgs.scrollHeight;
   const day = getDay();
   day.dumps.push({ time: new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text: input.slice(0,200) }); save();
@@ -1232,8 +1251,8 @@ ${isAnswerMode
 - 1-2문장 구어체, 이전 맥락 반영
 
 할일 규칙: 명확한 액션만. 상태/사실 금지.
-
-최신 정보나 연구, 사실 확인이 필요하면 웹 검색을 사용해. 검색 없이 구체적 수치나 연구 결과를 지어내지 마.`;
+${_useSearch ? '\n사용자가 연구, 통계, 최신 정보를 명시적으로 물을 때만 웹 검색을 써. 일상 대화에는 검색하지 마.\n' : ''}
+검색 없이 구체적 수치나 연구 결과를 지어내지 마.`;
 
   try {
     let userContent = input;
@@ -1243,7 +1262,7 @@ ${isAnswerMode
     }
     _dumpHistory.push({ role: 'user', content: userContent });
     if (_dumpHistory.length > 20) _dumpHistory = _dumpHistory.slice(-20);
-    const raw = await callClaude(_dumpHistory, system);
+    const raw = await callClaude(_dumpHistory, system, _useSearch);
     typingEl.remove();
     let parsed;
     try {
@@ -3324,6 +3343,7 @@ function resizerDown(e) {
 window.onload = () => {
   init();
   renderRightDumps();
+  _renderSearchToggle();
   const sp = document.getElementById('scratchPad');
   if (sp) sp.value = localStorage.getItem('jay_scratchpad') || '';
   const savedMM = localStorage.getItem('jay_mmState');
