@@ -704,6 +704,11 @@ body {
           <div style="margin-left:auto;display:flex;gap:4px">
             <button onclick="saveMMAsDoc()" title="마인드맵을 문서로 저장" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">💾 저장</button>
             <button onclick="organizeMMWithAI()" title="AI가 인과관계/속성별로 정리" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--purple);background:transparent;color:var(--purple);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🧹 정리</button>
+            <div style="display:flex;align-items:center;gap:2px;border:1.5px solid var(--border2);border-radius:6px;padding:0 2px" title="표시 단계 조절 (AI 아님, 접기/펼치기)">
+              <button onclick="mmDepthShallower()" title="한 단계 접기" style="padding:4px 7px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">−</button>
+              <span id="mmDepthLabel" style="font-size:10px;color:var(--muted);min-width:30px;text-align:center;font-weight:700">전체</span>
+              <button onclick="mmDepthDeeper()" title="한 단계 펼치기" style="padding:4px 7px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
+            </div>
             <button onclick="mmUndo()" title="실행 취소 (Ctrl+Z)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↩ 취소</button>
             <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
             <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
@@ -1527,6 +1532,7 @@ async function ytProcess(videoId, mode) {
 // ── 마인드맵 (자유 캔버스) ──
 let mmNodes = [];
 let mmEdges = [];
+let _mmDepthLimit = Infinity; // 표시 레벨: Infinity=전부. N이면 depth>=N 노드는 접힘(하위 숨김). +/- 버튼으로 조절
 let mmMode = 'normal';
 let mmSelected = null;
 let mmConnectFrom = null;
@@ -1866,6 +1872,50 @@ function recalcMMDepths() {
   });
 }
 
+// ── depth 기반 단계 정리 (+/-): AI 호출 없이 순수 표시 레벨 조절 ──
+function _mmMaxDepth() {
+  return mmNodes.reduce((m, n) => Math.max(m, n._depth || 0), 0);
+}
+// _mmDepthLimit에 맞춰 _collapsed 일괄 설정. depth>=limit인 노드는 접힘(하위 숨김).
+function applyMMDepthLimit() {
+  recalcMMDepths();
+  mmNodes.forEach(n => {
+    n._collapsed = (_mmDepthLimit !== Infinity && (n._depth || 0) >= _mmDepthLimit);
+  });
+}
+function updateMMDepthLabel() {
+  const el = document.getElementById('mmDepthLabel');
+  if (!el) return;
+  el.textContent = _mmDepthLimit === Infinity ? '전체' : (_mmDepthLimit + '단계');
+}
+// 레벨 변경 즉시 현재 세션 데이터에 저장 (다시 열어도 유지). Infinity는 JSON 불가 → null로 저장
+function persistMMDepth() {
+  const idx = sessionHistory.findIndex(s => s.id === _liveSessionId);
+  if (idx !== -1) {
+    sessionHistory[idx].mmDepthLimit = _mmDepthLimit === Infinity ? null : _mmDepthLimit;
+    localStorage.setItem('jay_sessions', JSON.stringify(sessionHistory));
+  }
+}
+function mmDepthDeeper() { // [-] 한 단계 깊게 펼침 (트리 커짐)
+  if (!mmNodes.length) return;
+  recalcMMDepths();
+  const maxD = _mmMaxDepth();
+  if (_mmDepthLimit === Infinity || _mmDepthLimit >= maxD) { showToast('이미 전부 펼쳐져 있어'); return; }
+  _mmDepthLimit = _mmDepthLimit + 1;
+  if (_mmDepthLimit >= maxD) _mmDepthLimit = Infinity; // 최대 깊이 도달 → 전부 표시
+  applyMMDepthLimit(); renderMMCanvas(); persistMMDepth(); updateMMDepthLabel();
+}
+function mmDepthShallower() { // [+] 한 단계 얕게 접음 (트리 줄어듦), 최소 1(루트+1층)
+  if (!mmNodes.length) return;
+  recalcMMDepths();
+  const maxD = _mmMaxDepth();
+  let cur = _mmDepthLimit === Infinity ? maxD : _mmDepthLimit;
+  cur = Math.max(1, cur - 1);
+  if (_mmDepthLimit !== Infinity && cur === _mmDepthLimit) { showToast('더 접을 수 없어 (최소 1단계)'); return; }
+  _mmDepthLimit = cur;
+  applyMMDepthLimit(); renderMMCanvas(); persistMMDepth(); updateMMDepthLabel();
+}
+
 let _mmSaveTimer = null;
 // 접힌 노드의 하위는 숨김. root에서 열린 노드만 따라 내려가며 도달한 노드 = 표시 대상.
 function _mmVisibleIds() {
@@ -1904,10 +1954,12 @@ function renderMMCanvas() {
     if (_currentSessionMsgs.length > 0) {
       upsertLiveSession();
       localStorage.setItem('jay_mmState', JSON.stringify({
-        nodes: mmNodes, edges: mmEdges, rootId: mmRootId
+        nodes: mmNodes, edges: mmEdges, rootId: mmRootId,
+        depthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit
       }));
     }
   }, 1000);
+  updateMMDepthLabel();
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
@@ -1955,7 +2007,6 @@ function renderMMCanvas() {
     const isMergeTarget = _mmMergeTarget && n.id === _mmMergeTarget;
     const isConnectTarget = !isMergeTarget && _mmConnectTarget && n.id === _mmConnectTarget;
     const highlighted = isMergeTarget || isConnectTarget;
-    ctx.globalAlpha = n._prev ? 0.4 : 1; // 이전 세션 노드는 흐리게
     ctx.shadowColor = isMergeTarget ? 'rgba(34,119,221,0.5)' : isConnectTarget ? 'rgba(0,170,102,0.5)' : 'rgba(0,0,0,0.10)';
     ctx.shadowBlur = highlighted ? 20 : sel ? 14 : 5;
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
@@ -1989,7 +2040,6 @@ function renderMMCanvas() {
       ctx.fillStyle = '#fff'; ctx.font = '700 13px "Noto Sans KR", sans-serif';
       ctx.fillText('+', bx, by + 0.5);
     }
-    ctx.globalAlpha = 1;
   });
   ctx.restore();
 }
@@ -2389,7 +2439,7 @@ function _doClearDump() {
   _liveSessionId = 'live_' + Date.now();
   localStorage.removeItem('jay_currentSession');
   localStorage.removeItem('jay_mmState');
-  mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0; mmRootId = null;
+  mmNodes = []; mmEdges = []; mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null; _mmColorIdx = 0; mmRootId = null; _mmDepthLimit = Infinity;
   mmTranslate = {x:0, y:0};
   const canvas = document.getElementById('mmCanvas');
   canvas.style.display = 'none';
@@ -2822,6 +2872,7 @@ function upsertLiveSession() {
     mmNodes: JSON.parse(JSON.stringify(mmNodes)),
     mmEdges: JSON.parse(JSON.stringify(mmEdges)),
     mmRootId,
+    mmDepthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit,
     analyzed: false,
     live: true
   };
@@ -2847,6 +2898,7 @@ function saveCurrentSession() {
     mmNodes: JSON.parse(JSON.stringify(mmNodes)),
     mmEdges: JSON.parse(JSON.stringify(mmEdges)),
     mmRootId,
+    mmDepthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit,
     analyzed: false,
     live: false
   };
@@ -2925,10 +2977,9 @@ function loadSession(id) {
     mmRootId = s.mmRootId || (mmNodes[0]?.id ?? null);
     mmSelected = null; mmSelectedEdge = null; mmConnectFrom = null;
     recalcMMDepths();
-    mmNodes.forEach(n => {
-      n._prev = true; // 불러온 세션 노드 = 이전 세션 → 흐리게
-      n._collapsed = (n.id !== mmRootId && n._depth === 1 && mmEdges.some(e => e.from === n.id)); // 상위 가지만 남기고 기본 접힘
-    });
+    // 세션 열면 일단 전부 정상 표시. 저장된 표시 레벨이 있으면 그 레벨만 복원(req6).
+    _mmDepthLimit = (s.mmDepthLimit == null) ? Infinity : s.mmDepthLimit;
+    applyMMDepthLimit();
     document.getElementById('mmEmpty').style.display = 'none';
     const canvas = document.getElementById('mmCanvas');
     canvas.style.display = 'block';
@@ -3461,6 +3512,7 @@ window.onload = () => {
         mmNodes = mm.nodes;
         mmEdges = mm.edges || [];
         mmRootId = mm.rootId;
+        _mmDepthLimit = (mm.depthLimit == null) ? Infinity : mm.depthLimit; // 표시 레벨 복원
         const canvas = document.getElementById('mmCanvas');
         if (canvas) {
           document.getElementById('mmEmpty').style.display = 'none';
@@ -3496,7 +3548,8 @@ window.onload = () => {
 window.addEventListener('beforeunload', () => {
   if (mmNodes.length > 0 && _currentSessionMsgs.length > 0) {
     localStorage.setItem('jay_mmState', JSON.stringify({
-      nodes: mmNodes, edges: mmEdges, rootId: mmRootId
+      nodes: mmNodes, edges: mmEdges, rootId: mmRootId,
+      depthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit
     }));
   } else {
     localStorage.removeItem('jay_mmState');
