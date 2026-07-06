@@ -1203,7 +1203,8 @@ async function sendDump() {
   const turnCount = _dumpHistory.filter(m => m.role === 'user').length;
   const isAskingForAnswer = /어떻게|뭐가 맞|어떤게 나아|결론|정리해|요약|해결|방향|뭘 해야|추천|선택|골라|뭐냐|뭐지|알려줘|뭐야|뭔데|줘봐|줘봐|알려|방법/.test(input);
   const isAnswerMode = mmRootId && (isAskingForAnswer || turnCount >= 5);
-  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}
+  const memoryBlock = _buildMemoryBlock();
+  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${memoryBlock ? '\n\n' + memoryBlock : ''}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","children":[{"label":"개념A(8자이내)","children":[{"label":"세부a(8자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
 
@@ -2295,6 +2296,33 @@ function _doClearDump() {
   document.getElementById('mmEmpty').style.display = 'flex';
   document.getElementById('mmNodePanel').style.display = 'none';
   renderRightDumps();
+}
+
+// 이전 세션 기억 블록 생성 — thought(지금까지 나온 생각) 요약 기반, 전체 대화 주입 금지
+// 규칙: 현재 진행 세션 제외 / thought 있는 세션만 / 최신순 최대 5개 / 전체 2000자 초과 시 오래된 것부터 컷
+function _buildMemoryBlock() {
+  const HEADER = '이전 대화 기억:';
+  const MAX_SESSIONS = 5, MAX_CHARS = 2000;
+  const lines = [];
+  let total = HEADER.length;
+  for (const s of sessionHistory) {
+    if (s.id === _liveSessionId) continue;          // 현재 진행 중인 세션은 이미 대화 맥락에 있으므로 제외
+    if (!s || !Array.isArray(s.messages)) continue;
+    const thoughts = s.messages.filter(m => m.role === 'thought');
+    if (!thoughts.length) continue;                  // thought 없는 옛 세션은 제외
+    const summary = thoughts[thoughts.length - 1].text
+      .split(/\n+/)
+      .map(t => t.replace(/^\s*[•·\-]\s*/, '').trim()) // 각 줄 맨 앞 리스트 마커만 제거(문장 중간 하이픈 보존)
+      .filter(Boolean).join(', ');
+    if (!summary) continue;
+    const dateLabel = (s.date || '').replace(/[^\d]+/g, '/').replace(/^\/|\/$/g, ''); // "7. 6." → "7/6"
+    const line = `[${dateLabel}] ${summary}`;
+    if (total + 1 + line.length > MAX_CHARS) break;  // 2000자 초과 → 오래된 것 추가 중단(최신순 순회이므로 오래된 것부터 잘림)
+    lines.push(line);
+    total += 1 + line.length;
+    if (lines.length >= MAX_SESSIONS) break;
+  }
+  return lines.length ? HEADER + '\n' + lines.join('\n') : '';
 }
 
 // "지금까지 나온 생각" 카드 마크업 — 라이브 생성과 세션 복원이 동일한 HTML을 쓰도록 공유
