@@ -1133,7 +1133,7 @@ function switchPanel(name, el) {
 
 // ── API ──
 async function callClaude(messages, system, useSearch = false) {
-  const body = { model: 'claude-sonnet-4-6', max_tokens: 4000, system, messages };
+  const body = { model: 'claude-sonnet-4-6', max_tokens: useSearch ? 8000 : 4000, system, messages };
   // 웹 검색은 옵트인. 기본 대화·정형 응답은 tools 없이 예전처럼 빠르게.
   if (useSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1249,11 +1249,12 @@ ${isAnswerMode
 - 예: [{"group":"시간","items":["블록배정","우선순위"]},{"group":"실행","items":["주간리뷰","체크리스트"]}]`
   : `- 탐색 모드: 질문 1개로 끝내. solutions: [].
 - mindmap: ${mmRootId ? '새 핵심 개념 1개만(없으면 null). 기존과 겹치면 자식으로 연결만.' : `첫 대화의 핵심 주제로 root + 핵심 가지 2~4개. root는 ${rootNode ? `"${rootNode.text}"` : '핵심 주제'}.`}`}
-- 기본은 1-3문장 구어체로 짧게. 단, 사용자가 '자세히', '구체적으로', '심도있게', '설명해줘' 등 깊이를 요구하거나 연구/분석을 물으면 구조 잡아서 충분히 길게 답해도 됨. 웹 검색을 쓴 답변은 찾은 내용을 요약하지 말고 출처와 함께 충실히 전달.
-- 이전 맥락 반영
+${_useSearch ? '' : `- 기본은 1-3문장 구어체로 짧게. 단, 사용자가 '자세히', '구체적으로', '심도있게', '설명해줘' 등 깊이를 요구하거나 연구/분석을 물으면 구조 잡아서 충분히 길게 답해도 됨.\n`}- 이전 맥락 반영
 
 할일 규칙: 명확한 액션만. 상태/사실 금지.
-${_useSearch ? '\n사용자가 연구, 통계, 최신 정보를 명시적으로 물을 때만 웹 검색을 써. 일상 대화에는 검색하지 마.\n' : ''}
+${_useSearch ? `
+검색 모드: 지금은 깊이 있는 리서치 답변을 원하는 상황이야. 1-3문장 규칙 무시. 찾은 연구/자료를 충분히 길게 정리해줘 — 각 근거마다 출처(기관/연구명), 핵심 수치, 그게 사용자 상황에 어떻게 적용되는지까지. 구조(번호, 소제목) 잡아서 길게 써도 됨. 마지막에 '요약 3줄'로 마무리.
+` : ''}
 검색 없이 구체적 수치나 연구 결과를 지어내지 마.`;
 
   try {
