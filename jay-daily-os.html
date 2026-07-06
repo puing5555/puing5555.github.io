@@ -1037,6 +1037,23 @@ body {
 </div>
 
 <script>
+// ── 마이그레이션: 저장된 옛날 모델명 → claude-sonnet-4-6 자동 치환 ──
+// localStorage에 저장된 채팅/세션/메모 기록에 남아있는 예전 에러 메시지·모델명을 정리.
+(function migrateModelName() {
+  try {
+    const OLD = /claude-sonnet-4-20250514|claude-sonnet-4-2025\d{4}|claude-3-5-sonnet-\d+/g;
+    const NEW = 'claude-sonnet-4-6';
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('jay_')) continue;
+      const val = localStorage.getItem(key);
+      if (val && OLD.test(val)) {
+        localStorage.setItem(key, val.replace(OLD, NEW));
+      }
+    }
+  } catch (e) { /* 마이그레이션 실패해도 앱은 정상 동작 */ }
+})();
+
 let _apiKey = localStorage.getItem('jay_apiKey') || '';
 function getApiKey() {
   if (!_apiKey) {
