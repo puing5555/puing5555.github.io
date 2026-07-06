@@ -699,22 +699,29 @@ body {
       </div>
       <div class="dump-resizer" id="dumpResizer" onmousedown="resizerDown(event)"></div>
       <div class="dump-map-col">
-        <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span>🗺 브레인 스토밍</span>
-          <div style="margin-left:auto;display:flex;gap:4px">
-            <button onclick="saveMMAsDoc()" title="마인드맵을 문서로 저장" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">💾 저장</button>
-            <button onclick="organizeMMWithAI()" title="AI가 인과관계/속성별로 정리" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--purple);background:transparent;color:var(--purple);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🧹 정리</button>
-            <div style="display:flex;align-items:center;gap:2px;border:1.5px solid var(--border2);border-radius:6px;padding:0 2px" title="표시 단계 조절 (AI 아님, 접기/펼치기)">
-              <button onclick="mmDepthShallower()" title="한 단계 접기" style="padding:4px 7px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">−</button>
-              <span id="mmDepthLabel" style="font-size:10px;color:var(--muted);min-width:30px;text-align:center;font-weight:700">전체</span>
-              <button onclick="mmDepthDeeper()" title="한 단계 펼치기" style="padding:4px 7px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
+        <div class="dump-col-hdr" style="display:flex;align-items:center;gap:8px">
+          <!-- 표시 단계 조절 (크게, 최좌측) -->
+          <div style="display:flex;align-items:center;gap:2px;border:1.5px solid var(--accent);border-radius:8px;padding:2px" title="표시 단계 조절 (접기/펼치기 · AI 아님)">
+            <button onclick="mmDepthShallower()" title="한 단계 접기" style="padding:5px 12px;border:none;background:transparent;color:var(--accent);font-size:17px;font-weight:800;cursor:pointer;font-family:inherit;line-height:1">−</button>
+            <span id="mmDepthLabel" style="font-size:12px;color:var(--text);min-width:40px;text-align:center;font-weight:800">전체</span>
+            <button onclick="mmDepthDeeper()" title="한 단계 펼치기" style="padding:5px 12px;border:none;background:transparent;color:var(--accent);font-size:17px;font-weight:800;cursor:pointer;font-family:inherit;line-height:1">+</button>
+          </div>
+          <span style="font-size:12px;color:var(--muted);font-weight:600">🗺 브레인 스토밍</span>
+          <!-- 더보기 -->
+          <div style="margin-left:auto;position:relative">
+            <button onclick="toggleMMMore(event)" title="더보기" style="padding:5px 12px;border-radius:8px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit;line-height:1">⋯</button>
+            <div id="mmMoreMenu" style="display:none;position:absolute;top:38px;right:0;z-index:60;background:var(--surface);border:1.5px solid var(--border2);border-radius:10px;padding:6px;box-shadow:0 6px 20px rgba(0,0,0,0.15);flex-direction:column;gap:3px;min-width:130px">
+              <button onclick="rebuildMMFromThoughts();closeMMMore()" title="thought 요약 기준으로 지도 새로 만들기 (기존은 백업)" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--purple);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🔄 지도 재구성</button>
+              <button onclick="saveMMAsDoc();closeMMMore()" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--blue);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">💾 문서로 저장</button>
+              <div style="height:1px;background:var(--border);margin:2px 0"></div>
+              <button onclick="mmUndo();closeMMMore()" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">↩ 취소</button>
+              <button onclick="mmRedo();closeMMMore()" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
+              <div style="height:1px;background:var(--border);margin:2px 0"></div>
+              <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
+              <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원 추가</button>
+              <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 → 원 클릭 → 선 연결" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🔗 선 연결</button>
+              <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🗑 삭제</button>
             </div>
-            <button onclick="mmUndo()" title="실행 취소 (Ctrl+Z)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↩ 취소</button>
-            <button onclick="mmRedo()" title="다시 실행 (Ctrl+Y)" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">↪ 복원</button>
-            <button id="mmModeNormal" onclick="setMMMode('normal')" title="이동 모드" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--accent);background:var(--accent);color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">✋ 이동</button>
-            <button id="mmModeAdd" onclick="setMMMode('add')" title="빈 곳 클릭 → 원 추가" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">⭕ 원추가</button>
-            <button id="mmModeConnect" onclick="setMMMode('connect')" title="원 클릭 → 원 클릭 → 선 연결" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🔗 선</button>
-            <button id="mmModeDelete" onclick="setMMMode('delete')" title="원/선 클릭 → 삭제" style="padding:4px 10px;border-radius:6px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 삭제</button>
           </div>
         </div>
         <div id="mmEmpty" class="mm-empty">
@@ -1238,22 +1245,12 @@ async function sendDump() {
   const memoryBlock = _buildMemoryBlock();
   const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${memoryBlock ? '\n\n' + memoryBlock : ''}
 반드시 JSON만 응답:
-{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"mindmap":{"root":"핵심주제(8자이내)","children":[{"label":"개념A(8자이내)","children":[{"label":"세부a(8자이내)","children":[]}]}]},"solutions":[],"focus":"오늘 딱 하나만"}
-
-mindmap 규칙 (지도가 폭발하지 않게 엄격히):
-→ 명사형 핵심 개념만 노드로. 질문·감상·문장 조각("근데 내가 아는", "어떤 게 더 궁금") 절대 노드 금지.
-→ 한 턴에 새 노드 최대 1개. 정말 새로운 핵심 개념이 있을 때만. 없으면 mindmap: null.
-→ 기존 노드와 의미가 조금이라도 겹치면 새로 만들지 말고 그 노드의 자식으로 연결만: {"label":"기존노드명","children":[{"label":"새개념","children":[]}]}
-→ root는 반드시 기존 루트 "${rootNode?.text || '주제'}" 유지.
-→ 기존 노드: [${existingNodes || '없음'}] — 이미 있는 건 label에 반복 금지.
+{"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
 
 대화 모드 (지금 ${turnCount}턴):
 ${isAnswerMode
-  ? `- 답변 모드: 구체적 액션/판단 직접 줘.
-- solutions: 카테고리별 그룹. 형식: [{"group":"카테고리명(4자이내)","items":["항목1","항목2"]}] (2~4그룹, 항목 각 1~3개, 8자이내). mindmap은 null.
-- 예: [{"group":"시간","items":["블록배정","우선순위"]},{"group":"실행","items":["주간리뷰","체크리스트"]}]`
-  : `- 탐색 모드: 질문 1개로 끝내. solutions: [].
-- mindmap: ${mmRootId ? '새 핵심 개념 1개만(없으면 null). 기존과 겹치면 자식으로 연결만.' : `첫 대화의 핵심 주제로 root + 핵심 가지 2~4개. root는 ${rootNode ? `"${rootNode.text}"` : '핵심 주제'}.`}`}
+  ? `- 답변 모드: 구체적 액션/판단 직접 줘.`
+  : `- 탐색 모드: 질문 1개로 끝내.`}
 ${_useSearch ? '' : `- 기본은 1-3문장 구어체로 짧게. 단, 사용자가 '자세히', '구체적으로', '심도있게', '설명해줘' 등 깊이를 요구하거나 연구/분석을 물으면 구조 잡아서 충분히 길게 답해도 됨.\n`}- 이전 맥락 반영
 
 할일 규칙: 명확한 액션만. 상태/사실 금지.
@@ -1329,30 +1326,7 @@ ${_useSearch ? `
     msgs.scrollTop = msgs.scrollHeight;
     updateStat();
     renderRightDumps();
-    if (isAnswerMode) {
-      let solutions = parsed.solutions || [];
-      if (solutions.length === 0 && parsed.reply) {
-        const extracted = _extractSolutionsFromReply(parsed.reply);
-        if (extracted.length > 0) solutions = [{ group: '해결', items: extracted }];
-      }
-      if (solutions.length > 0 && mmRootId) {
-        mmSnapshot();
-        const rootText = mmNodes.find(n => n.id === mmRootId)?.text || '';
-        let solutionChildren;
-        if (solutions[0] && solutions[0].group) {
-          solutionChildren = solutions.map(g => ({
-            label: '💡' + String(g.group || '해결').slice(0, 5),
-            children: (g.items || []).map(item => ({ label: String(item).slice(0, 10), children: [] }))
-          }));
-        } else {
-          solutionChildren = [{ label: '💡해결', children: solutions.map(s => ({ label: String(s).slice(0, 10), children: [] })) }];
-        }
-        buildMMFromStructure({ root: rootText, children: solutionChildren });
-      }
-    } else if (parsed.mindmap && (parsed.mindmap.children?.length || parsed.mindmap.branches?.length)) {
-      mmSnapshot();
-      buildMMFromStructure(parsed.mindmap);
-    }
+    // 매 턴 노드 추출 폐지 — 트리는 "지금까지 나온 생각" 요약 카드 생성 시점에만 갱신(showThoughtSummaryCard)
   } catch(e) {
     typingEl.remove();
     console.error('sendDump error:', e, e.stack);
@@ -1916,6 +1890,23 @@ function mmDepthShallower() { // [+] 한 단계 얕게 접음 (트리 줄어듦)
   applyMMDepthLimit(); renderMMCanvas(); persistMMDepth(); updateMMDepthLabel();
 }
 
+function toggleMMMore(ev) {
+  if (ev) ev.stopPropagation();
+  const menu = document.getElementById('mmMoreMenu');
+  if (!menu) return;
+  const open = menu.style.display !== 'none';
+  menu.style.display = open ? 'none' : 'flex';
+  if (!open) {
+    // 바깥 클릭 시 닫기 (한 번만)
+    setTimeout(() => document.addEventListener('click', _closeMMMoreOnOutside, { once: true }), 0);
+  }
+}
+function _closeMMMoreOnOutside() { closeMMMore(); }
+function closeMMMore() {
+  const menu = document.getElementById('mmMoreMenu');
+  if (menu) menu.style.display = 'none';
+}
+
 let _mmSaveTimer = null;
 // 접힌 노드의 하위는 숨김. root에서 열린 노드만 따라 내려가며 도달한 노드 = 표시 대상.
 function _mmVisibleIds() {
@@ -2046,7 +2037,7 @@ function renderMMCanvas() {
 
 let mmRootId = null;
 
-function buildMMFromStructure(mm) {
+function buildMMFromStructure(mm, maxNew) {
   const canvas = document.getElementById('mmCanvas');
   if (canvas.style.display === 'none') initMMCanvas();
   const W = canvas.width || 700, H = canvas.height || 500;
@@ -2110,7 +2101,7 @@ function buildMMFromStructure(mm) {
   const topChildren = mm.children || mm.branches || [];
   const beforeIds = new Set(mmNodes.map(n => n.id));
   const isFirstBuild = beforeIds.size <= 1;
-  _newBudget = isFirstBuild ? Infinity : 1; // 첫 씨앗 트리는 여러 개 허용, 이후 대화 턴은 최대 1개
+  _newBudget = isFirstBuild ? Infinity : (maxNew != null ? maxNew : 1); // 첫 씨앗 트리는 전부, 이후엔 maxNew(기본 1)
   _addTreeNodes(topChildren, mmRootId, 0);
   const newNodeIds = new Set(mmNodes.filter(n => !beforeIds.has(n.id)).map(n => n.id));
   if (isFirstBuild && newNodeIds.size > 0) {
@@ -2480,6 +2471,35 @@ function _thoughtCardHtml(text) {
   return `<div class="msg-thought-card" style="background:linear-gradient(135deg,#fff8f3,#fff3e8);border:1.5px solid var(--accent);border-radius:12px;padding:12px 16px;margin:8px 0;font-size:12px;line-height:1.7;color:var(--text)"><div style="font-weight:700;color:var(--accent);margin-bottom:6px;font-size:11px">🗂 지금까지 나온 생각</div><div style="white-space:pre-wrap">${text}</div></div>`;
 }
 
+// 노드 라벨 하드 필터: 조사/어미로 끝나거나 공백제외 10자 초과, 여러 단어면 거부
+function _mmRejectLabel(label) {
+  const t = (label || '').trim();
+  if (!t) return true;
+  if (t.replace(/\s/g, '').length > 10) return true;               // 공백 제외 10자 초과
+  if (/\s/.test(t)) return true;                                    // 여러 단어 = 문장 조각
+  if (/(해줘|해요|했어|하자|하고|하면|해서|맞아|같아|거야|인데|잖아|니까|는데|어때|을까|볼까|일까|구나|군요|네요|겠어)$/.test(t)) return true; // 동사·감탄·의문 어미
+  if (/^(내|네|제|그|저|이|우리|너|당신)?(가|는|은|이|를|을|게|도|만)$/.test(t)) return true; // 대명사+조사 기능어(내가/그게/저는 등)
+  return false;
+}
+// 요약에서 뽑은 개념들 → 트리에 넣을 신규 라벨(필터+8자컷+최대3개+기존 중복 제거)
+function _mmConceptsToTree(concepts) {
+  if (!Array.isArray(concepts)) return [];
+  const existing = mmNodes.map(n => n.text.replace(/\s/g, ''));
+  const out = [];
+  for (const c of concepts) {
+    const label = String(c || '').trim().slice(0, 8);
+    if (_mmRejectLabel(label)) continue;
+    const key = label.replace(/\s/g, '');
+    if (!key) continue;
+    if (existing.some(e => e === key || (e.length >= 3 && key.length >= 3 && (e.includes(key) || key.includes(e))))) continue; // 의미 겹침 → 신규 금지
+    if (out.includes(label)) continue;
+    out.push(label);
+    existing.push(key);
+    if (out.length >= 3) break; // 한 번 갱신에 신규 최대 3개
+  }
+  return out;
+}
+
 async function showThoughtSummaryCard() {
   if (_dumpHistory.length < 4) return;
   const msgs = document.getElementById('dumpMessages');
@@ -2488,14 +2508,51 @@ async function showThoughtSummaryCard() {
       `${m.role === 'user' ? 'JAY' : 'AI'}: ${typeof m.content === 'string' ? m.content.slice(0,200) : ''}`
     ).join('\n');
     const raw = await callClaude(
-      [{ role: 'user', content: `다음 대화에서 지금까지 나온 핵심 생각들을 3줄로 요약해. 각 줄은 "• " 로 시작. 짧고 명확하게:\n${convSummary}` }],
-      '대화 요약 전문가. 3줄 이내 핵심만. 텍스트만 응답.'
+      [{ role: 'user', content: `다음 대화에서 지금까지 나온 핵심 생각을 정리해.\n${convSummary}\n\nJSON만 반환:\n{"summary":"• 로 시작하는 3줄 요약","concepts":["핵심개념",...]}\nconcepts: summary에 실제 등장한 핵심 개념만, 명사형 8자 이내, 최대 3개. 질문·문장조각 금지.` }],
+      'JSON만 반환하는 요약 도우미. 마크다운 코드펜스 금지.'
     );
-    // DOM에 붙임과 동시에 세션 데이터(thought 메시지)로 기록 → 다른 탭 이동/새로고침/최근항목 재열람 시 복원됨
-    msgs.insertAdjacentHTML('beforeend', _thoughtCardHtml(raw));
-    recordSessionMsg('thought', raw);
+    let summary = raw, concepts = [];
+    try {
+      const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+      if (parsed.summary) summary = parsed.summary;
+      if (Array.isArray(parsed.concepts)) concepts = parsed.concepts;
+    } catch(e) { /* JSON 실패 시 원문을 요약으로 사용, concepts 없음 */ }
+    // DOM에 붙임과 동시에 세션 데이터(thought 메시지)로 기록 → 복원/기억/재구성에 사용
+    msgs.insertAdjacentHTML('beforeend', _thoughtCardHtml(summary));
+    recordSessionMsg('thought', summary);
     msgs.scrollTop = msgs.scrollHeight;
+    // ★ 트리는 이 시점에만 갱신 (매 턴 아님)
+    const fresh = _mmConceptsToTree(concepts);
+    if (fresh.length) {
+      mmSnapshot();
+      const rootText = (mmNodes.find(n => n.id === mmRootId)?.text)
+        || summary.split('\n')[0].replace(/^[•·\-\s]+/, '').trim().slice(0, 8) || '생각';
+      buildMMFromStructure({ root: rootText, children: fresh.map(c => ({ label: c, children: [] })) }, 3);
+      renderMMCanvas();
+    }
   } catch(e) {}
+}
+
+// ⋯ 메뉴: 현재 세션 thought 요약 기준으로 트리 재구성 (기존 노드는 jay_mmBackup에 백업)
+async function rebuildMMFromThoughts() {
+  const thoughts = _currentSessionMsgs.filter(m => m.role === 'thought').map(m => m.text);
+  if (!thoughts.length) { showToast('요약이 아직 없어 — 대화를 더 나눠봐'); return; }
+  if (!_apiKey) { showToast('API 키 설정 필요'); return; }
+  localStorage.setItem('jay_mmBackup', JSON.stringify({ nodes: mmNodes, edges: mmEdges, rootId: mmRootId, at: Date.now() })); // 기존 백업
+  showToast('지도 재구성 중...');
+  try {
+    const raw = await callClaude([{ role: 'user', content:
+      `브레인스토밍 요약들이야:\n${thoughts.join('\n')}\n\n핵심 주제 1개와 핵심 개념 3~7개를 뽑아줘. 모두 명사형 8자 이내, 질문·문장조각 금지.\nJSON만: {"root":"주제","concepts":["개념1","개념2"]}` }],
+      'JSON만 반환. 명사형 핵심 개념만. 마크다운 금지.');
+    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    const root = String(parsed.root || '생각').trim().slice(0, 8);
+    const concepts = (parsed.concepts || []).map(c => String(c).trim().slice(0, 8)).filter(c => !_mmRejectLabel(c)).slice(0, 7);
+    mmSnapshot();
+    mmNodes = []; mmEdges = []; mmRootId = null; _mmColorIdx = 0; _mmDepthLimit = Infinity;
+    buildMMFromStructure({ root, children: concepts.map(c => ({ label: c, children: [] })) }, Infinity);
+    recalcMMDepths(); renderMMCanvas(); updateMMDepthLabel();
+    showToast('✅ 지도 재구성 완료 (기존은 백업됨)');
+  } catch(e) { console.error('rebuild error', e); showToast('재구성 실패: ' + (e.message || e)); }
 }
 
 async function showKeyQuestionCard() {
