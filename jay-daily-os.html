@@ -630,6 +630,9 @@ body {
     <button class="nav-btn" onclick="switchPanel('goals',this)">
       <span class="nav-icon">🎯</span> 목표
     </button>
+    <button class="nav-btn" onclick="switchPanel('poker',this)">
+      <span class="nav-icon">🃏</span> 포커
+    </button>
     <button class="nav-btn" onclick="switchPanel('routine',this)">
       <span class="nav-icon">🔁</span> 루틴
     </button>
@@ -793,6 +796,11 @@ body {
       </div>
       <div id="goalDetailBox" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px"></div>
       <div id="goalList" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+    <!-- 포커 패널 -->
+    <div id="panel-poker" class="panel" style="padding:20px 24px;overflow-y:auto">
+      <div id="pokerBody"></div>
     </div>
 
     <!-- 루틴 패널 -->
@@ -990,6 +998,15 @@ body {
   </div>
 </div>
 
+<!-- 포커 세션 시작 오버레이 -->
+<div class="modal-overlay" id="pokerStartModal">
+  <div class="modal-box" style="width:460px"><div id="pokerStartBody"></div></div>
+</div>
+<!-- 포커 세션 종료 폼 -->
+<div class="modal-overlay" id="pokerEndModal">
+  <div class="modal-box" style="width:460px"><div id="pokerEndBody"></div></div>
+</div>
+
 <div class="modal-overlay" id="addGoalModal">
   <div class="modal-box">
     <div class="modal-title">🎯 목표 추가</div>
@@ -1114,6 +1131,19 @@ let memoData = JSON.parse(localStorage.getItem('jay_memoData')||'[]');
 let docsData = JSON.parse(localStorage.getItem('jay_docsData')||'[]');
 let userProfile = JSON.parse(localStorage.getItem('jay_profile')||'{}');
 
+// ── 포커 데이터 ──
+// pokerSessions: [{date, start, end, balance, tilt, tiltType, grade, goal, goalKept, note}]
+let pokerSessions = JSON.parse(localStorage.getItem('jay_poker_sessions')||'[]');
+let bankroll = JSON.parse(localStorage.getItem('jay_bankroll')||'[]'); // [{date, amount, src}]
+let pokerLeak = JSON.parse(localStorage.getItem('jay_poker_leak')||'null'); // {text, since, quitRule}
+let pokerLearn = JSON.parse(localStorage.getItem('jay_poker_learn')||'[]'); // [{date, text}]
+let pokerCurrent = JSON.parse(localStorage.getItem('jay_poker_current')||'null'); // {date, start, goal} | null
+function savePokerSessions(){ localStorage.setItem('jay_poker_sessions', JSON.stringify(pokerSessions)); }
+function saveBankroll(){ localStorage.setItem('jay_bankroll', JSON.stringify(bankroll)); }
+function savePokerLeak(){ localStorage.setItem('jay_poker_leak', JSON.stringify(pokerLeak)); }
+function savePokerLearn(){ localStorage.setItem('jay_poker_learn', JSON.stringify(pokerLearn)); }
+function savePokerCurrent(){ pokerCurrent ? localStorage.setItem('jay_poker_current', JSON.stringify(pokerCurrent)) : localStorage.removeItem('jay_poker_current'); }
+
 function save() {
   localStorage.setItem('jay_allData', JSON.stringify(allData));
   localStorage.setItem('jay_goals', JSON.stringify(goals));
@@ -1152,10 +1182,11 @@ function switchPanel(name, el) {
     }
   }
   currentPanel = name;
-  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', cal:'📅 달력', goals:'🎯 목표', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서' };
+  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', cal:'📅 달력', goals:'🎯 목표', poker:'🃏 포커', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서' };
   document.getElementById('mainTitle').textContent = titles[name] || name;
   if (name === 'today') renderTasks();
   if (name === 'cal') renderCal();
+  if (name === 'poker') renderPoker();
   if (name === 'goals') renderGoals();
   if (name === 'routine') renderRoutine();
   if (name === 'memo') renderMemo();
@@ -1263,7 +1294,8 @@ async function sendDump() {
   const isAnswerMode = mmRootId && (isAskingForAnswer || turnCount >= 5);
   const memoryBlock = _buildMemoryBlock();
   const routineLine = _routineStatusLine();
-  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${routineLine ? '\n' + routineLine : ''}${memoryBlock ? '\n\n' + memoryBlock : ''}
+  const pokerLine = _pokerStatusLine();
+  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${routineLine ? '\n' + routineLine : ''}${pokerLine ? '\n' + pokerLine : ''}${memoryBlock ? '\n\n' + memoryBlock : ''}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
 
@@ -3368,6 +3400,370 @@ function _calAddFormHtml(ds) {
       <button onclick="closeCalAddForm()" style="padding:9px 14px;border-radius:8px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">취소</button>
     </div>
   </div>`;
+}
+
+// ═══════════ 포커 ═══════════
+const TILT_TYPES = {
+  running_bad: { easy:'계속 짐',   orig:'러닝배드' },
+  entitlement: { easy:'내가 왜 져', orig:'엔타이틀먼트' },
+  revenge:     { easy:'저놈 잡는다', orig:'복수' },
+  desperation: { easy:'본전 찾자',  orig:'절망' },
+  winner:      { easy:'나 무적임',  orig:'승리틸트' },
+};
+const TILT_LOGIC = {
+  running_bad: ['단기 런은 통제 밖. 장기가 전부다', '지금 지는 건 실력이 아니라 분산이다'],
+  entitlement: ['카드는 나한테 빚진 게 없다', "'당연히 이겨야 한다'는 생각이 판단을 흐린다"],
+  revenge:     ['상대를 이기려 하지 말고 옳은 결정을 하라', '한 사람만 노리면 나머지 테이블을 놓친다'],
+  desperation: ['본전 생각이 나쁜 콜을 부른다', '잃은 돈은 이미 없다. 지금 이 결정만 본다'],
+  winner:      ['이기고 있을 때가 가장 위험하다', '운을 실력으로 착각하지 마라'],
+  _generic:    ['결과가 아니라 결정의 질만 통제할 수 있다', '한 판의 결과는 노이즈. 과정을 지켜라'],
+};
+const GRADE_BG = { A:'#C0DD97', B:'#D3D1C7', C:'#F7C1C1' };
+const GRADE_FG = { A:'#3f6b1f', B:'#5b544d', C:'#b23b3b' };
+
+let _pokerCalYM = null, _pokerCalSel = null, _pokerLearnSkip = null, _endDraft = null;
+
+// 공통 헬퍼
+function _todayDS(){ return _dateStr(new Date()); }
+function _hhmm(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function _num(n){ return Math.round(n).toLocaleString('en-US'); }
+function _esc(s){ return (s||'').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function _mdShort(ds){ if(!ds) return ''; const p=ds.split('-'); return `${+p[1]}/${+p[2]}`; }
+function _daysSince(ds){ if(!ds) return 0; return Math.max(0, Math.round((new Date(_todayDS()+'T00:00:00')-new Date(ds+'T00:00:00'))/86400000)); }
+function _cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#888'; }
+function _isLateNight(hhmm){ if(!hhmm) return false; const h=parseInt(hhmm.split(':')[0],10); return h>=2 && h<6; }
+function _gradeBadge(g){ if(!g) return ''; return `<span style="display:inline-block;font-size:11px;font-weight:800;padding:1px 8px;border-radius:6px;background:${GRADE_BG[g]};color:${GRADE_FG[g]}">${g}</span>`; }
+function _pokerScroll(id){ const e=document.getElementById(id); if(e) e.scrollIntoView({behavior:'smooth',block:'start'}); }
+
+// 세션/뱅크롤 조회
+function _sortSessions(){ return pokerSessions.slice().sort((a,b)=> (a.date+(a.end||a.start||'')) < (b.date+(b.end||b.start||'')) ? 1 : -1); }
+function _latestSession(){ return _sortSessions()[0] || null; }
+function _sessionsOn(ds){ return pokerSessions.filter(s=>s.date===ds); }
+function _lastSessionOn(ds){ const l=_sessionsOn(ds).slice().sort((a,b)=>(a.end||a.start||'')<(b.end||b.start||'')?-1:1); return l.length? l[l.length-1] : null; }
+function _sortedBankroll(){ return bankroll.slice().sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0)); }
+function _latestBalance(){ const b=_sortedBankroll(); return b.length? b[b.length-1] : null; }
+function _bankrollChange(days){
+  const s=_sortedBankroll(); if(s.length<1) return null;
+  const latest=s[s.length-1];
+  const cutoff=new Date(_todayDS()+'T00:00:00'); cutoff.setDate(cutoff.getDate()-days);
+  let base=null; for(const b of s){ if(new Date(b.date+'T00:00:00')<=cutoff) base=b; }
+  if(!base) base=s[0];
+  if(base===latest) return null;
+  return latest.amount-base.amount;
+}
+function _sessionDelta(s){ const sb=_sortedBankroll(); const i=sb.findIndex(b=>b.date===s.date); if(i<=0) return null; return sb[i].amount-sb[i-1].amount; }
+function upsertBankroll(date, amount, src){
+  const ex=bankroll.find(b=>b.date===date);
+  if(ex){ if(ex.src==='checkout' && src==='manual') return; ex.amount=amount; ex.src=src; }
+  else bankroll.push({date, amount, src});
+  saveBankroll();
+}
+
+// 공부(루틴 checks 재사용)
+function _studyCheckedOn(ds){ return !!(routine && routine.checks && routine.checks.includes(ds)); }
+function _studyStreak(){ let n=0, d=new Date(); if(!_studyCheckedOn(_dateStr(d))) d.setDate(d.getDate()-1); while(_studyCheckedOn(_dateStr(d))){ n++; d.setDate(d.getDate()-1); } return n; }
+function _studyWeekCount(){ let n=0; for(let i=0;i<7;i++){ const d=new Date(); d.setDate(d.getDate()-i); if(_studyCheckedOn(_dateStr(d))) n++; } return n; }
+
+// AI 주입용 상태 한 줄
+function _pokerStatusLine(){
+  const leak = pokerLeak && pokerLeak.text ? pokerLeak.text : '';
+  const ls=_latestSession();
+  if(!leak && !ls) return '';
+  let s='';
+  if(leak) s+=`JAY 현재 포커 리크: ${leak}.`;
+  if(ls){ const tt=ls.tiltType&&TILT_TYPES[ls.tiltType]?TILT_TYPES[ls.tiltType].easy:''; s+=` 최근 세션: ${ls.date} 틸트${ls.tilt||'-'}${tt?'('+tt+')':''} 등급${ls.grade||'-'}`; }
+  return s.trim();
+}
+
+// ── 메인 렌더 ──
+function renderPoker(){
+  const el=document.getElementById('pokerBody'); if(!el) return;
+  el.innerHTML=`
+    ${_pokerCardsHtml()}
+    <div style="display:flex;gap:10px;margin:16px 0 20px">
+      <button onclick="openPokerStart()" style="flex:1;padding:15px;border-radius:14px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">▶ 세션 시작</button>
+      <button onclick="openPokerEnd()" style="flex:1;padding:15px;border-radius:14px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">■ 세션 종료</button>
+    </div>
+    <div id="pokerBankrollSec">${_pokerBankrollHtml()}</div>
+    <div id="pokerCalSec" style="margin-top:24px">${_pokerCalHtml()}</div>
+    <div id="pokerStudySec" style="margin-top:24px">${_pokerStudyHtml()}</div>
+    <div id="pokerLeakSec" style="margin-top:24px">${_pokerLeakHtml()}</div>`;
+  _drawBankrollChart();
+}
+
+function _pokerCardsHtml(){
+  const leak = pokerLeak&&pokerLeak.text?pokerLeak.text:'리크 미설정';
+  const leakDays = pokerLeak&&pokerLeak.since?_daysSince(pokerLeak.since)+1:0;
+  const bal=_latestBalance();
+  const ch=_bankrollChange(30);
+  const chStr = ch===null?'' : (ch>=0?`+$${_num(ch)}`:`-$${_num(Math.abs(ch))}`);
+  const chColor = ch===null?'var(--muted)':(ch>=0?'var(--green)':'var(--red)');
+  const week=_studyWeekCount(), streak=_studyStreak();
+  const ls=_latestSession();
+  const card=(t,l,inner)=>`<div onclick="_pokerScroll('${t}')" style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:13px 14px;cursor:pointer"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l}</div>${inner}</div>`;
+  const c1=card('pokerLeakSec','리크', `<div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.4">${_esc(leak)}</div>${leakDays?`<div style="font-size:11px;color:var(--accent);font-weight:700;margin-top:4px">진행 ${leakDays}일째</div>`:''}`);
+  const c2=card('pokerBankrollSec','뱅크롤', `<div style="font-size:18px;font-weight:800;color:var(--text)">${bal?'$'+_num(bal.amount):'—'}</div><div style="font-size:11px;font-weight:700;color:${chColor};margin-top:2px">${chStr?`30일 ${chStr}`:'기록 부족'}</div>`);
+  const c3=card('pokerStudySec','공부', `<div style="font-size:18px;font-weight:800;color:var(--text)">${week}<span style="font-size:12px;color:var(--muted)">/7</span></div><div style="font-size:11px;font-weight:700;color:var(--accent);margin-top:2px">연속 ${streak}일</div>`);
+  let s4; if(ls){ const tt=ls.tiltType&&TILT_TYPES[ls.tiltType]?TILT_TYPES[ls.tiltType].easy:''; s4=`<div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;font-weight:700;color:var(--text)">${_mdShort(ls.date)}</span>${_gradeBadge(ls.grade)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px">틸트 ${ls.tilt||'-'}/5 · ${ls.goalKept===true?'목표 지킴':ls.goalKept===false?'목표 못지킴':'—'}</div>`; }
+  else s4=`<div style="font-size:13px;color:var(--muted)">세션 없음</div>`;
+  const c4=card('pokerCalSec','최근 세션', s4);
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${c1}${c2}${c3}${c4}</div>`;
+}
+
+function _pokerBankrollHtml(){
+  const bal=_latestBalance();
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:15px;font-weight:800;color:var(--text)">뱅크롤${bal?' · $'+_num(bal.amount):''}</div>
+      <button onclick="pokerAddBankroll()" style="border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:inherit">+ 잔액 기록</button>
+    </div>
+    <canvas id="bankrollChart" style="width:100%;height:160px;display:block"></canvas>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">최근 30개 기록 · <span style="color:var(--red)">●</span> 틸트 4+</div>`;
+}
+function pokerAddBankroll(){
+  const a=prompt('잔액(USD) 입력'); if(a===null) return;
+  const amt=parseFloat(a.replace(/[^0-9.\-]/g,'')); if(isNaN(amt)){ showToast('숫자를 입력해줘'); return; }
+  const ds0=prompt('날짜 (YYYY-MM-DD)', _todayDS()) || _todayDS();
+  const ds=/^\d{4}-\d{2}-\d{2}$/.test(ds0.trim())?ds0.trim():_todayDS();
+  upsertBankroll(ds, amt, 'manual'); showToast('✅ 잔액 기록됨'); renderPoker();
+}
+function _drawBankrollChart(){
+  const cv=document.getElementById('bankrollChart'); if(!cv) return;
+  const dpr=window.devicePixelRatio||1, w=cv.clientWidth||520, h=160;
+  cv.width=w*dpr; cv.height=h*dpr;
+  const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
+  const data=_sortedBankroll().slice(-30);
+  if(data.length<2){ ctx.fillStyle=_cssVar('--muted'); ctx.font='12px sans-serif'; ctx.textAlign='center'; ctx.fillText('기록이 2개 이상이면 그래프가 그려져', w/2, h/2); return; }
+  const pad={l:10,r:10,t:16,b:16};
+  const xs=i=> pad.l+(w-pad.l-pad.r)*(i/(data.length-1));
+  const amts=data.map(d=>d.amount); let mn=Math.min(...amts), mx=Math.max(...amts); if(mn===mx){ mn-=1; mx+=1; }
+  const ys=v=> pad.t+(h-pad.t-pad.b)*(1-(v-mn)/(mx-mn));
+  ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle=_cssVar('--accent');
+  data.forEach((d,i)=>{ const x=xs(i),y=ys(d.amount); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke();
+  const tiltDates=new Set(pokerSessions.filter(s=>(s.tilt||0)>=4).map(s=>s.date));
+  data.forEach((d,i)=>{ const x=xs(i),y=ys(d.amount);
+    ctx.beginPath(); ctx.arc(x,y,2.5,0,7); ctx.fillStyle=_cssVar('--accent'); ctx.fill();
+    if(tiltDates.has(d.date)){ ctx.beginPath(); ctx.arc(x,y,4.5,0,7); ctx.fillStyle=_cssVar('--red'); ctx.fill(); }
+  });
+}
+
+// ── 포커 미니 달력 ──
+function _pokerCalHtml(){
+  const now=new Date(); if(!_pokerCalYM) _pokerCalYM={y:now.getFullYear(), m:now.getMonth()};
+  const {y,m}=_pokerCalYM;
+  const dim=new Date(y,m+1,0).getDate(), firstDow=new Date(y,m,1).getDay(), todayStr=_dateStr(now);
+  const wd=['일','월','화','수','목','금','토'].map((w,i)=>`<div style="text-align:center;font-size:11px;font-weight:700;color:${i===0?'#e06666':i===6?'#5588cc':'var(--muted)'};padding:3px 0">${w}</div>`).join('');
+  let cells=''; for(let i=0;i<firstDow;i++) cells+='<div></div>';
+  for(let d=1;d<=dim;d++){
+    const ds=_dateStr(new Date(y,m,d)); const last=_lastSessionOn(ds); const g=last&&last.grade?last.grade:null;
+    const isSel=ds===_pokerCalSel, isToday=ds===todayStr;
+    const bg=g?GRADE_BG[g]:'transparent', fg=g?GRADE_FG[g]:'var(--text2)';
+    const tilt4=_sessionsOn(ds).some(s=>(s.tilt||0)>=4);
+    const dot=tilt4?`<span style="position:absolute;top:3px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--red)"></span>`:'';
+    const border=isSel?'2px solid var(--accent)':(isToday?'1.5px solid var(--accent)':'1.5px solid var(--border)');
+    cells+=`<div onclick="pokerCalSelect('${ds}')" style="position:relative;height:38px;display:flex;align-items:center;justify-content:center;border:${border};border-radius:8px;background:${bg};color:${fg};font-size:12px;font-weight:${g?800:600};cursor:pointer;margin:2px">${d}${dot}</div>`;
+  }
+  const lg=(c,t,round)=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:${round?'8px':'11px'};height:${round?'8px':'11px'};border-radius:${round?'50%':'3px'};background:${c}"></span>${t}</span>`;
+  const legend=`<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--text2)">${lg(GRADE_BG.A,'A')}${lg(GRADE_BG.B,'B')}${lg(GRADE_BG.C,'C')}${lg('var(--red)','틸트4+',true)}</div>`;
+  return `<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:10px">포커 달력</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:8px">
+      <button onclick="pokerCalMonth(-1)" style="border:none;background:transparent;color:var(--text2);font-size:18px;cursor:pointer;padding:2px 8px">‹</button>
+      <div style="font-size:14px;font-weight:800;min-width:100px;text-align:center">${y}년 ${m+1}월</div>
+      <button onclick="pokerCalMonth(1)" style="border:none;background:transparent;color:var(--text2);font-size:18px;cursor:pointer;padding:2px 8px">›</button>
+    </div>
+    <div style="max-width:420px"><div style="display:grid;grid-template-columns:repeat(7,1fr)">${wd}</div><div style="display:grid;grid-template-columns:repeat(7,1fr)">${cells}</div></div>
+    ${legend}
+    <div style="margin-top:12px">${_pokerCalDetailHtml()}</div>`;
+}
+function _rerenderPokerCal(){ const s=document.getElementById('pokerCalSec'); if(s) s.innerHTML=_pokerCalHtml(); }
+function pokerCalMonth(delta){ const now=new Date(); if(!_pokerCalYM)_pokerCalYM={y:now.getFullYear(),m:now.getMonth()}; let m=_pokerCalYM.m+delta,y=_pokerCalYM.y; if(m<0){m=11;y--;}else if(m>11){m=0;y++;} _pokerCalYM={y,m}; _pokerCalSel=null; _rerenderPokerCal(); }
+function pokerCalSelect(ds){ _pokerCalSel=(_pokerCalSel===ds)?null:ds; _rerenderPokerCal(); }
+function _pokerCalDetailHtml(){
+  if(!_pokerCalSel) return `<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">날짜를 탭하면 그날 세션 요약이 나와</div>`;
+  const list=_sessionsOn(_pokerCalSel).slice().sort((a,b)=>(a.end||a.start||'')<(b.end||b.start||'')?-1:1);
+  if(!list.length) return `<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px;font-size:13px;color:var(--muted)">${_mdShort(_pokerCalSel)} — 세션 없음</div>`;
+  const rows=list.map(_sessionSummaryHtml).join('<div style="border-top:1px solid var(--border);margin:8px 0"></div>');
+  return `<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">${_mdShort(_pokerCalSel)} 요약</div>${rows}</div>`;
+}
+function _sessionSummaryHtml(s){
+  const timeColor=_isLateNight(s.end)?'var(--red)':'var(--text)';
+  const delta=(typeof s.balance==='number')?_sessionDelta(s):null;
+  const tt=s.tiltType&&TILT_TYPES[s.tiltType]?TILT_TYPES[s.tiltType].easy:'';
+  return `<div style="font-size:13px;color:var(--text);line-height:1.7">
+    <div>🕐 <span style="color:${timeColor};font-weight:700">${s.start||'?'}~${s.end||'?'}</span></div>
+    <div>💵 잔액 $${_num(s.balance)}${delta!==null?` (<span style="color:${delta>=0?'var(--green)':'var(--red)'}">${delta>=0?'+':''}$${_num(delta)}</span>)`:''}</div>
+    <div>🎢 틸트 ${s.tilt||'-'}/5${tt?` · ${tt}`:''}</div>
+    <div>${_gradeBadge(s.grade)} · 목표 ${s.goalKept===true?'지킴':s.goalKept===false?'못지킴':'—'}</div>
+    ${s.note?`<div style="color:var(--text2)">📝 ${_esc(s.note)}</div>`:''}</div>`;
+}
+
+// ── 공부 섹션 ──
+function _rerenderPokerStudy(){ const s=document.getElementById('pokerStudySec'); if(s) s.innerHTML=_pokerStudyHtml(); }
+function _pokerStudyHtml(){
+  const ds=_todayDS(), checked=_studyCheckedOn(ds), week=_studyWeekCount(), streak=_studyStreak();
+  const hasNote=pokerLearn.some(l=>l.date===ds);
+  let input='';
+  if(checked && !hasNote && _pokerLearnSkip!==ds){
+    input=`<div style="margin-top:10px;background:var(--surface2);border-radius:10px;padding:12px">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">오늘 배운 것 하나?</div>
+      <input id="pokerLearnInput" placeholder="한 줄로" onkeydown="if(event.key==='Enter')savePokerLearnNote()" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:8px">
+      <div style="display:flex;gap:8px">
+        <button onclick="savePokerLearnNote()" style="flex:1;padding:8px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">저장</button>
+        <button onclick="_pokerLearnSkip='${ds}';_rerenderPokerStudy()" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">건너뛰기</button>
+      </div></div>`;
+  }
+  const log=pokerLearn.slice().sort((a,b)=>a.date<b.date?1:-1).map(l=>`<div style="display:flex;gap:10px;padding:6px 0;font-size:13px;border-bottom:1px solid var(--border)"><span style="color:var(--muted);font-weight:700;min-width:38px">${_mdShort(l.date)}</span><span style="color:var(--text)">${_esc(l.text)}</span></div>`).join('') || '<div style="font-size:12px;color:var(--muted);padding:6px 0">아직 기록이 없어</div>';
+  return `<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:10px">공부 일지</div>
+    <div style="display:flex;align-items:center;gap:12px;background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:12px 14px">
+      <button onclick="togglePokerStudy()" style="width:30px;height:30px;border-radius:8px;border:2px solid ${checked?'var(--accent)':'var(--border2)'};background:${checked?'var(--accent)':'transparent'};color:#fff;font-size:15px;font-weight:800;cursor:pointer;flex-shrink:0">${checked?'✓':''}</button>
+      <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--text)">오늘 포커 공부</div><div style="font-size:11px;color:var(--muted)">이번 주 ${week}/7 · 연속 ${streak}일</div></div>
+    </div>
+    ${input}
+    <div style="margin-top:14px">${log}</div>`;
+}
+function togglePokerStudy(){
+  const ds=_todayDS();
+  if(!routine) routine={name:'포커 공부', time:'', checks:[]};
+  if(!routine.checks) routine.checks=[];
+  const i=routine.checks.indexOf(ds); if(i===-1) routine.checks.push(ds); else routine.checks.splice(i,1);
+  saveRoutine(); _pokerLearnSkip=null; renderPoker();
+}
+function savePokerLearnNote(){
+  const ds=_todayDS(), inp=document.getElementById('pokerLearnInput'); if(!inp) return;
+  const t=inp.value.trim(); if(!t){ showToast('한 줄 적거나 건너뛰기를 눌러줘'); return; }
+  pokerLearn.push({date:ds, text:t}); savePokerLearn(); showToast('✅ 기록됨'); renderPoker();
+}
+
+// ── 리크 노트 ──
+function _pokerLeakHtml(){
+  const has=pokerLeak&&pokerLeak.text;
+  const days=has&&pokerLeak.since?_daysSince(pokerLeak.since)+1:0;
+  const quit=has&&pokerLeak.quitRule!=null?pokerLeak.quitRule:'';
+  return `<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:10px">리크 노트</div>
+    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">지금 고치는 리크</div>
+      <div style="font-size:15px;font-weight:800;color:var(--text);line-height:1.4">${has?_esc(pokerLeak.text):'아직 설정 안 됨'}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+        <span style="font-size:12px;color:var(--accent);font-weight:700">${days?`진행 ${days}일째`:''}</span>
+        <button onclick="changePokerLeak()" style="border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:inherit">${has?'교체':'설정'}</button>
+      </div>
+      <div style="border-top:1px solid var(--border);margin:12px 0"></div>
+      <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">퀴트 룰</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;color:var(--text)">$</span>
+        <input id="pokerQuitInput" type="number" value="${quit}" placeholder="예: 300" style="width:110px;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)">
+        <span style="font-size:12px;color:var(--muted)">다운이면 종료</span>
+        <button onclick="savePokerQuit()" style="border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:8px 12px;border-radius:8px;cursor:pointer;font-family:inherit">저장</button>
+      </div>
+    </div>`;
+}
+function changePokerLeak(){
+  const cur=pokerLeak&&pokerLeak.text?pokerLeak.text:'';
+  const t=prompt('지금 고칠 리크 하나', cur); if(t===null) return;
+  const tt=t.trim(); if(!tt){ showToast('리크를 입력해줘'); return; }
+  pokerLeak={ text:tt, since:_todayDS(), quitRule: pokerLeak?pokerLeak.quitRule:null };
+  savePokerLeak(); showToast('✅ 리크 갱신 · 카운트 리셋'); renderPoker();
+}
+function savePokerQuit(){
+  const v=parseFloat((document.getElementById('pokerQuitInput').value||'').replace(/[^0-9.]/g,''));
+  if(!pokerLeak) pokerLeak={text:'', since:_todayDS(), quitRule:null};
+  pokerLeak.quitRule=isNaN(v)?null:v; savePokerLeak(); showToast('✅ 퀴트 룰 저장');
+}
+
+// ── 세션 시작 오버레이 ──
+function _recentTiltType(){ const ls=_latestSession(); return ls&&ls.tiltType?ls.tiltType:null; }
+function _logicSentence(){ const t=_recentTiltType(); const pool=(t&&TILT_LOGIC[t])?TILT_LOGIC[t]:TILT_LOGIC._generic; return pool[pokerSessions.length % pool.length]; }
+async function openPokerStart(){
+  openModal('pokerStartModal'); _renderPokerStart('');
+  const g=await _suggestGoal();
+  const inp=document.getElementById('pokerGoalInput');
+  if(inp && !inp.value) inp.value=g;
+}
+function _renderPokerStart(goalVal){
+  const el=document.getElementById('pokerStartBody');
+  const ls=_latestSession();
+  const warn=(ls&&(ls.tilt||0)>=4)?`<div style="background:#fff4e0;border:1.5px solid var(--yellow);border-radius:12px;padding:12px 14px;font-size:13px;font-weight:700;color:#8a5a00;line-height:1.5;margin-bottom:14px">⚠️ 어제 틸트 ${ls.tilt}/5였어${ls.tiltType&&TILT_TYPES[ls.tiltType]?` (${TILT_TYPES[ls.tiltType].easy})`:''}. 스테이크 한 단계 내리거나 30분 뒤 시작은 어때?</div>`:'';
+  const leak=pokerLeak&&pokerLeak.text?pokerLeak.text:'리크 미설정';
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div class="modal-title" style="margin:0">🃏 세션 시작</div><button onclick="closeModal('pokerStartModal')" style="border:none;background:transparent;font-size:22px;color:var(--muted);cursor:pointer;line-height:1">×</button></div>
+    ${warn}
+    <div style="text-align:center;margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">오늘의 규칙</div><div style="font-size:20px;font-weight:800;color:var(--text);line-height:1.4">${_esc(leak)}</div></div>
+    <div style="background:var(--surface2);border-radius:12px;padding:14px;text-align:center;font-size:14px;font-weight:700;color:var(--text2);line-height:1.5;margin-bottom:16px">"${_esc(_logicSentence())}"</div>
+    <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">오늘의 목표</div>
+    <input id="pokerGoalInput" value="${_esc(goalVal||'')}" placeholder="AI가 목표 제안 중…" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 13px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:16px">
+    <button onclick="startPokerSession()" style="width:100%;padding:13px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">세션 시작</button>`;
+}
+async function _suggestGoal(){
+  const ls=_latestSession(); const leak=pokerLeak&&pokerLeak.text?pokerLeak.text:'';
+  const fallback = leak ? `오늘은 "${leak}" 딱 하나만 신경 쓰기` : '결과 신경 안 쓰고 결정의 질만 지키기';
+  try{
+    if(!getApiKey()) return fallback;
+    const ctx=`최근 세션 소감: ${ls&&ls.note?ls.note:'없음'}. 최근 틸트: ${ls?ls.tilt+'/5':'없음'} ${ls&&ls.tiltType&&TILT_TYPES[ls.tiltType]?TILT_TYPES[ls.tiltType].easy:''}. 현재 고치는 리크: ${leak||'없음'}.`;
+    const sys='너는 포커 코치야. JAY가 이번 세션에서 지킬 목표를 딱 한 문장으로 제안해. 결과(돈)가 아니라 통제 가능한 행동/과정 목표로. 25자 내외 한국어 한 문장만. 따옴표·설명 없이 문장만 출력.';
+    const txt=await callClaude([{role:'user', content: ctx+'\n\n이번 세션 목표 한 문장:'}], sys);
+    const clean=(txt||'').trim().replace(/^["'“”]+|["'“”]+$/g,'').split('\n')[0].slice(0,60);
+    return clean||fallback;
+  }catch(e){ return fallback; }
+}
+function startPokerSession(){
+  const goal=(document.getElementById('pokerGoalInput').value||'').trim();
+  pokerCurrent={ date:_todayDS(), start:_hhmm(new Date()), goal };
+  savePokerCurrent(); closeModal('pokerStartModal'); showToast('▶ 세션 시작');
+}
+
+// ── 세션 종료 폼 ──
+function openPokerEnd(){ _endDraft={ balance:'', tilt:0, tiltType:null, grade:null, note:'', goalKept:null }; openModal('pokerEndModal'); _renderPokerEnd(); }
+function _endStore(k,v){ if(_endDraft) _endDraft[k]=v; }
+function _endSet(k,v){ if(!_endDraft) return; _endDraft[k]=v; _renderPokerEnd(); }
+function _endSetTilt(n){ if(!_endDraft) return; _endDraft.tilt=n; if(n<4) _endDraft.tiltType=null; _renderPokerEnd(); }
+function _durText(start,end){ const [sh,sm]=start.split(':').map(Number), [eh,em]=end.split(':').map(Number); let mins=(eh*60+em)-(sh*60+sm); if(mins<0) mins+=1440; return `${Math.floor(mins/60)}시간 ${mins%60}분`; }
+function _endTab(label, on, fn){ return `<button onclick="${fn}" style="flex:1;padding:10px 0;border-radius:10px;border:1.5px solid ${on?'var(--accent)':'var(--border2)'};background:${on?'var(--accent)':'transparent'};color:${on?'#fff':'var(--text2)'};font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">${label}</button>`; }
+function _renderPokerEnd(){
+  const el=document.getElementById('pokerEndBody'); const d=_endDraft; if(!d) return;
+  const end=_hhmm(new Date()); const start=pokerCurrent?pokerCurrent.start:null;
+  const dur=start?_durText(start,end):''; const lateColor=_isLateNight(end)?'var(--red)':'var(--text)';
+  const goalBlock=(pokerCurrent&&pokerCurrent.goal)?`<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">오늘 목표: <span style="color:var(--text)">${_esc(pokerCurrent.goal)}</span> — 지켰어?</div><div style="display:flex;gap:8px">${_endTab('지킴',d.goalKept===true,"_endSet('goalKept',true)")}${_endTab('못 지킴',d.goalKept===false,"_endSet('goalKept',false)")}</div></div>`:'';
+  const lastBal=_latestBalance(); let balInfo='';
+  if(d.balance!==''&&!isNaN(parseFloat(d.balance))){
+    const b=parseFloat(d.balance); const delta=lastBal?b-lastBal.amount:null;
+    const quit=pokerLeak&&pokerLeak.quitRule!=null?pokerLeak.quitRule:null;
+    let quitTxt=''; if(quit!=null&&delta!=null) quitTxt = delta<=-quit?` · 퀴트 룰($${_num(quit)}) 초과`:` · 퀴트 룰($${_num(quit)}) 이내`;
+    balInfo=`<div style="font-size:12px;font-weight:700;margin-top:6px"><span style="color:${delta!=null&&delta<0?'var(--red)':'var(--green)'}">${delta!=null?`직전 대비 ${delta>=0?'+':''}$${_num(delta)}`:'첫 기록'}</span><span style="color:${quit!=null&&delta!=null&&delta<=-quit?'var(--red)':'var(--muted)'}">${quitTxt}</span></div>`;
+  }
+  const tiltTabs=[1,2,3,4,5].map(n=>`<button onclick="_endSetTilt(${n})" style="flex:1;padding:9px 0;border-radius:8px;border:1.5px solid ${d.tilt===n?'var(--accent)':'var(--border2)'};background:${d.tilt===n?'var(--accent)':'transparent'};color:${d.tilt===n?'#fff':'var(--text2)'};font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">${n}</button>`).join('');
+  let typeChips='';
+  if(d.tilt>=4){ typeChips=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">`+Object.keys(TILT_TYPES).map(k=>{ const sel=d.tiltType===k; return `<button onclick="_endSet('tiltType','${k}')" style="padding:9px;border-radius:10px;border:1.5px solid ${sel?'var(--accent)':'var(--border2)'};background:${sel?'var(--accent-dim)':'transparent'};cursor:pointer;font-family:inherit;text-align:left"><div style="font-size:13px;font-weight:800;color:${sel?'var(--accent)':'var(--text)'}">${TILT_TYPES[k].easy}</div><div style="font-size:10px;color:var(--muted)">${TILT_TYPES[k].orig}</div></button>`; }).join('')+`</div>`; }
+  const gradeTabs=['A','B','C'].map(g=>`<button onclick="_endSet('grade','${g}')" style="flex:1;padding:11px 0;border-radius:10px;border:2px solid ${d.grade===g?GRADE_FG[g]:'var(--border2)'};background:${d.grade===g?GRADE_BG[g]:'transparent'};color:${d.grade===g?GRADE_FG[g]:'var(--text2)'};font-size:16px;font-weight:800;cursor:pointer;font-family:inherit">${g}</button>`).join('');
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div class="modal-title" style="margin:0">🃏 세션 종료</div><button onclick="closeModal('pokerEndModal')" style="border:none;background:transparent;font-size:22px;color:var(--muted);cursor:pointer;line-height:1">×</button></div>
+    <div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:16px">${start?`<span style="color:var(--text)">${start}</span> ~ `:''}<span style="color:${lateColor}">${end}</span>${dur?`<span style="color:var(--muted)"> · ${dur}</span>`:''}</div>
+    ${goalBlock}
+    <div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">잔액 (USD)</div>
+      <input id="pokerBalInput" type="number" value="${d.balance}" oninput="_endStore('balance',this.value)" onchange="_endSet('balance',this.value)" placeholder="현재 잔액" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 13px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)">${balInfo}</div>
+    <div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">틸트 (1~5)</div><div style="display:flex;gap:6px">${tiltTabs}</div>${typeChips}</div>
+    <div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">게임 등급 <span style="color:var(--muted);font-weight:500">— 결과 말고 결정의 질</span></div><div style="display:flex;gap:8px">${gradeTabs}</div></div>
+    <div style="margin-bottom:16px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">한 줄 소감 (선택)</div>
+      <input id="pokerNoteInput" value="${_esc(d.note)}" oninput="_endStore('note',this.value)" placeholder="오늘 어땠어?" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 13px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)"></div>
+    <button onclick="savePokerSession()" style="width:100%;padding:13px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">기록하고 종료</button>`;
+}
+function savePokerSession(){
+  const d=_endDraft; if(!d) return;
+  const bal=parseFloat((''+d.balance).replace(/[^0-9.\-]/g,''));
+  if(isNaN(bal)){ showToast('잔액(숫자)을 입력해줘'); return; }
+  if(!d.tilt){ showToast('틸트를 선택해줘'); return; }
+  if(!d.grade){ showToast('등급을 선택해줘'); return; }
+  const sess={
+    date: pokerCurrent?pokerCurrent.date:_todayDS(),
+    start: pokerCurrent?pokerCurrent.start:null,
+    end: _hhmm(new Date()), balance: bal, tilt: d.tilt,
+    tiltType: d.tilt>=4?(d.tiltType||null):null, grade: d.grade,
+    goal: pokerCurrent?pokerCurrent.goal:'',
+    goalKept: (pokerCurrent&&pokerCurrent.goal)?(d.goalKept===true?true:(d.goalKept===false?false:null)):null,
+    note: (d.note||'').trim(),
+  };
+  pokerSessions.push(sess); savePokerSessions();
+  upsertBankroll(sess.date, bal, 'checkout');
+  pokerCurrent=null; savePokerCurrent(); _endDraft=null;
+  closeModal('pokerEndModal'); showToast('✅ 세션 기록됨'); renderPoker();
 }
 
 function renderGoals() {
