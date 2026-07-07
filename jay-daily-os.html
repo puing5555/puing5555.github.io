@@ -2966,7 +2966,8 @@ function _routineStatusLine() {
 let _calViewYM = null;   // {y, m} (m은 0-based)
 let _calSelDate = null;  // 'YYYY-MM-DD' | null
 const GCAL_CLIENT_KEY = 'jay_gcal_client_id';
-const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events'; // 읽기+쓰기
+const GCAL_TZ = 'Asia/Bangkok';
 
 let _gcalTokenClient = null; // GIS token client
 let _gcalToken = null;       // access token (메모리에만, 만료되면 버림)
@@ -2975,6 +2976,9 @@ let _gcalEventsYM = null;    // _gcalEvents가 담고 있는 달 "y-m"
 let _gcalLoading = false;
 let _gcalState = 'idle';     // 'idle' | 'connected' | 'loading' | 'error' | 'expired'
 let _gcalErrMsg = '';
+let _calAddOpen = false;                 // 상세 패널 일정 추가 폼 열림
+let _calAddDraft = null;                 // {title, allDay, start, end} — API 실패 시 입력값 보존
+let _calAddError = '';                   // 폼 상단 에러 메시지
 
 function _dayTasks(ds) { // ds: 'YYYY-MM-DD' → allData 키는 'YYYYMMDD'
   const key = ds.replace(/-/g, '');
@@ -3061,15 +3065,108 @@ function _bucketGcalEvents(items) {
     if (it.start && it.start.date) { // 종일 일정 (start.date ~ end.date 배타적)
       const s = new Date(it.start.date + 'T00:00:00');
       const e = it.end && it.end.date ? new Date(it.end.date + 'T00:00:00') : new Date(s.getTime() + 86400000);
-      for (let d = new Date(s); d < e; d.setDate(d.getDate() + 1)) push(_dateStr(d), { allDay: true, time: '', title });
+      for (let d = new Date(s); d < e; d.setDate(d.getDate() + 1)) push(_dateStr(d), { id: it.id, allDay: true, time: '', title });
     } else if (it.start && it.start.dateTime) { // 시간 지정 일정
       const dt = new Date(it.start.dateTime);
       const time = String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
-      push(_dateStr(dt), { allDay: false, time, title, _sort: dt.getTime() });
+      push(_dateStr(dt), { id: it.id, allDay: false, time, title, _sort: dt.getTime() });
     }
   }
   for (const ds in map) map[ds].sort((a, b) => (a.allDay === b.allDay) ? ((a._sort || 0) - (b._sort || 0)) : (a.allDay ? -1 : 1));
   return map;
+}
+
+// ── 일정 쓰기 (생성/삭제) — primary 캘린더, Asia/Bangkok ──
+function _addTime(hhmm, addH) { // "09:00" +1h → "10:00"
+  let [h, mi] = (hhmm || '09:00').split(':').map(Number);
+  h = (h + addH) % 24; if (h < 0) h += 24;
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+}
+function openCalAddForm() {
+  if (!_gcalToken) { // 미연결/만료 → 연결 유도, 폼 열지 않음
+    if (_gcalClientId()) connectGoogle(); else { showToast('먼저 ⚙에서 클라이언트 ID 입력'); openGcalSettings(); }
+    return;
+  }
+  _calAddOpen = true; _calAddError = '';
+  _calAddDraft = { title: '', allDay: false, start: '09:00', end: '10:00' };
+  renderCalMine();
+  setTimeout(() => { const i = document.getElementById('calAddTitle'); if (i) i.focus(); }, 30);
+}
+function closeCalAddForm() { _calAddOpen = false; _calAddError = ''; _calAddDraft = null; renderCalMine(); }
+function _readAddDraft() {
+  const g = id => document.getElementById(id);
+  if (!g('calAddTitle')) return;
+  _calAddDraft = {
+    title: g('calAddTitle').value,
+    allDay: g('calAddAllDay').checked,
+    start: g('calAddStart') ? g('calAddStart').value : '09:00',
+    end: g('calAddEnd') ? g('calAddEnd').value : '10:00',
+  };
+}
+function calAddAllDayToggle() { _readAddDraft(); renderCalMine(); }
+async function saveCalEvent() {
+  _readAddDraft();
+  const ds = _calSelDate;
+  const draft = _calAddDraft || {};
+  const title = (draft.title || '').trim();
+  if (!ds) { _calAddError = '날짜를 먼저 선택해줘'; renderCalMine(); return; }
+  if (!title) { _calAddError = '제목을 입력해줘'; renderCalMine(); return; }
+  if (!_gcalToken) { _calAddError = '구글 연결이 필요해'; _gcalState = 'expired'; renderCalMine(); _renderGoogleBar(); return; }
+  let body;
+  if (draft.allDay) {
+    const [yy, mm, dd] = ds.split('-').map(Number);
+    const next = _dateStr(new Date(yy, mm - 1, dd + 1)); // end.date 배타적
+    body = { summary: title, start: { date: ds }, end: { date: next } };
+  } else {
+    const start = draft.start || '09:00';
+    let end = draft.end || _addTime(start, 1);
+    if (end <= start) end = _addTime(start, 1); // 종료가 시작보다 빠르면 +1h 보정
+    body = {
+      summary: title,
+      start: { dateTime: `${ds}T${start}:00`, timeZone: GCAL_TZ },
+      end:   { dateTime: `${ds}T${end}:00`,   timeZone: GCAL_TZ },
+    };
+  }
+  _calAddError = '저장 중…'; renderCalMine();
+  try {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + _gcalToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401 || res.status === 403) { // 토큰 만료 — 입력값 보존
+      _gcalToken = null; _gcalState = 'expired';
+      _calAddError = '토큰이 만료됐어. 위에서 구글 다시 연결 후 저장을 눌러줘';
+      renderCalMine(); _renderGoogleBar(); return;
+    }
+    if (!res.ok) throw new Error('구글 API ' + res.status);
+    _calAddOpen = false; _calAddError = ''; _calAddDraft = null;
+    showToast('✅ 일정이 구글 캘린더에 추가됨');
+    await fetchGcalEvents(); // 그리드 즉시 갱신
+  } catch (e) {
+    _calAddError = '저장 실패: ' + (e.message || e) + ' — 입력값은 그대로 있어';
+    renderCalMine();
+  }
+}
+async function deleteCalEvent(id) {
+  if (!id) return;
+  if (!_gcalToken) { showToast('구글 연결이 필요해'); _gcalState = 'expired'; _renderGoogleBar(); return; }
+  if (!confirm('이 일정을 구글 캘린더에서 삭제할까?')) return;
+  try {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + _gcalToken },
+    });
+    if (res.status === 401 || res.status === 403) {
+      _gcalToken = null; _gcalState = 'expired';
+      showToast('토큰이 만료됐어 — 구글 다시 연결'); _renderGoogleBar(); renderCalMine(); return;
+    }
+    if (!res.ok && res.status !== 410) throw new Error('구글 API ' + res.status); // 410 = 이미 삭제됨
+    showToast('🗑️ 일정 삭제됨');
+    await fetchGcalEvents();
+  } catch (e) {
+    showToast('삭제 실패: ' + (e.message || e));
+  }
 }
 
 function _renderGoogleBar() {
@@ -3103,7 +3200,7 @@ function openGcalSettings() {
   el.innerHTML = `
     <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px 16px">
       <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:6px">구글 캘린더 API 연결 설정</div>
-      <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px">Google Cloud Console → OAuth 클라이언트 ID(웹) 생성 → 이 페이지 도메인을 승인된 JavaScript 원본에 추가 → <b>클라이언트 ID</b> 붙여넣기. 읽기 전용(${'calendar.readonly'})으로만 접근해요.</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px">Google Cloud Console → OAuth 클라이언트 ID(웹) 생성 → 이 페이지 도메인을 승인된 JavaScript 원본에 추가 → <b>클라이언트 ID</b> 붙여넣기. 일정 읽기·생성·삭제(${'calendar.events'}) 권한을 사용해요.</div>
       <input id="gcalClientInput" value="${cid.replace(/"/g,'&quot;')}" placeholder="xxxx.apps.googleusercontent.com" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:8px">
       <div style="display:flex;gap:8px">
         <button onclick="saveGcalClientId()" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">저장</button>
@@ -3227,12 +3324,18 @@ function _calDetailHtml() {
     if (!evs.length) evHtml = `<div style="font-size:12px;color:var(--muted);padding:6px 0">구글 일정 없음</div>`;
     else evHtml = evs.map(ev => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text)">
         <span style="font-size:11px;font-weight:700;color:var(--blue);min-width:42px">${ev.allDay ? '종일' : ev.time}</span>
-        <span>${(ev.title||'').replace(/</g,'&lt;')}</span>
+        <span style="flex:1">${(ev.title||'').replace(/</g,'&lt;')}</span>
+        ${ev.id ? `<button onclick="deleteCalEvent('${ev.id}')" title="구글 캘린더에서 삭제" style="border:none;background:transparent;color:var(--red);font-size:13px;cursor:pointer;padding:2px 6px;font-family:inherit">✕</button>` : ''}
       </div>`).join('');
+    const addBtn = `<button onclick="openCalAddForm()" style="border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:12px;font-weight:700;padding:4px 12px;border-radius:8px;cursor:pointer;font-family:inherit">+ 일정</button>`;
     gcalSection = `
       <div style="border-top:1px solid var(--border);margin:8px 0 4px"></div>
-      <div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:2px">🗓️ 구글 일정${evs.length?` · ${evs.length}개`:''}</div>
-      ${evHtml}`;
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+        <span style="font-size:11px;font-weight:700;color:var(--blue)">🗓️ 구글 일정${evs.length?` · ${evs.length}개`:''}</span>
+        ${_calAddOpen ? '' : addBtn}
+      </div>
+      ${evHtml}
+      ${_calAddOpen ? _calAddFormHtml(ds) : ''}`;
   }
   return `<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px">
     <div style="font-size:14px;font-weight:800;color:var(--text);margin-bottom:8px">${+mm}월 ${+dd}일 (${dow})</div>
@@ -3240,6 +3343,30 @@ function _calDetailHtml() {
     <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:2px">할일${tasks.length?` · ${tasks.filter(t=>!t.done).length}개 남음`:''}</div>
     ${taskHtml}
     ${gcalSection}
+  </div>`;
+}
+
+function _calAddFormHtml(ds) {
+  const d = _calAddDraft || { title: '', allDay: false, start: '09:00', end: '10:00' };
+  const inpStyle = 'box-sizing:border-box;border:1.5px solid var(--border2);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)';
+  const timeRow = d.allDay ? '' : `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input id="calAddStart" type="time" value="${d.start||'09:00'}" onchange="_readAddDraft()" style="${inpStyle};flex:1">
+      <span style="color:var(--muted);font-size:12px">~</span>
+      <input id="calAddEnd" type="time" value="${d.end||'10:00'}" onchange="_readAddDraft()" style="${inpStyle};flex:1">
+    </div>`;
+  const err = _calAddError ? `<div style="font-size:11px;font-weight:700;color:${_calAddError.includes('저장 중')?'var(--muted)':'var(--red)'};margin-bottom:6px">${_calAddError.replace(/</g,'&lt;')}</div>` : '';
+  return `<div style="border-top:1px dashed var(--border2);margin-top:8px;padding-top:10px">
+    ${err}
+    <input id="calAddTitle" value="${(d.title||'').replace(/"/g,'&quot;')}" placeholder="일정 제목" oninput="_readAddDraft()" style="${inpStyle};width:100%;margin-bottom:8px">
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:8px;cursor:pointer">
+      <input id="calAddAllDay" type="checkbox" ${d.allDay?'checked':''} onchange="calAddAllDayToggle()"> 종일
+    </label>
+    ${timeRow}
+    <div style="display:flex;gap:8px">
+      <button onclick="saveCalEvent()" style="flex:1;padding:9px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">저장</button>
+      <button onclick="closeCalAddForm()" style="padding:9px 14px;border-radius:8px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">취소</button>
+    </div>
   </div>`;
 }
 
