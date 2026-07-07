@@ -600,6 +600,7 @@ body {
   cursor: pointer; font-family: inherit;
 }
 </style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -779,12 +780,8 @@ body {
 
     <!-- 달력 패널 -->
     <div id="panel-cal" class="panel" style="padding:20px 24px;overflow-y:auto">
-      <div class="chip-row" id="calTabs" style="margin-bottom:16px">
-        <button class="chip on" onclick="switchCalTab('mine',this)">📅 내 달력</button>
-        <button class="chip" onclick="switchCalTab('gcal',this)">🗓️ 구글 캘린더</button>
-      </div>
+      <div id="calGoogleBar" style="margin-bottom:12px"></div>
       <div id="calMine"></div>
-      <div id="calGcal" style="display:none"></div>
     </div>
 
     <!-- 목표 패널 -->
@@ -2900,32 +2897,163 @@ function _routineStatusLine() {
   return `루틴: ${routine.name}, 이번달 ${cnt}회, 어제 ${checkSet.has(yStr) ? '완료' : '미완료'}`;
 }
 
-// ── 달력 (내 달력 + 구글 캘린더) — jay_routine / allData 공유 ──
+// ── 달력 — 앱 데이터(jay_routine/allData) + 구글 캘린더 API 겹쳐보기 ──
+// 구글은 GIS 토큰 방식(읽기 전용). access token은 1시간 만료 → 재발급 버튼으로 단순 처리.
 let _calViewYM = null;   // {y, m} (m은 0-based)
-let _calTab = 'mine';    // 'mine' | 'gcal'
 let _calSelDate = null;  // 'YYYY-MM-DD' | null
-const GCAL_KEY = 'jay_gcal_id';
+const GCAL_CLIENT_KEY = 'jay_gcal_client_id';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+
+let _gcalTokenClient = null; // GIS token client
+let _gcalToken = null;       // access token (메모리에만, 만료되면 버림)
+let _gcalEvents = {};        // 'YYYY-MM-DD' → [{time, title, allDay}]  (표시 중인 달)
+let _gcalEventsYM = null;    // _gcalEvents가 담고 있는 달 "y-m"
+let _gcalLoading = false;
+let _gcalState = 'idle';     // 'idle' | 'connected' | 'loading' | 'error' | 'expired'
+let _gcalErrMsg = '';
 
 function _dayTasks(ds) { // ds: 'YYYY-MM-DD' → allData 키는 'YYYYMMDD'
   const key = ds.replace(/-/g, '');
   return (allData[key] && allData[key].tasks) || [];
 }
+function _gcalClientId() { return (localStorage.getItem(GCAL_CLIENT_KEY) || '').trim(); }
+function _gcalEventsFor(ds) { return _gcalEvents[ds] || []; }
 
 function renderCal() {
-  // 진입 시 현재 탭 상태 반영
-  document.querySelectorAll('#calTabs .chip').forEach((c,i) => c.classList.toggle('on', (_calTab==='mine'&&i===0)||(_calTab==='gcal'&&i===1)));
-  document.getElementById('calMine').style.display = _calTab === 'mine' ? '' : 'none';
-  document.getElementById('calGcal').style.display = _calTab === 'gcal' ? '' : 'none';
-  if (_calTab === 'mine') renderCalMine(); else renderCalGcal();
+  _renderGoogleBar();
+  renderCalMine();
 }
 
-function switchCalTab(tab, el) {
-  _calTab = tab;
-  document.querySelectorAll('#calTabs .chip').forEach(c => c.classList.remove('on'));
-  if (el) el.classList.add('on');
-  document.getElementById('calMine').style.display = tab === 'mine' ? '' : 'none';
-  document.getElementById('calGcal').style.display = tab === 'gcal' ? '' : 'none';
-  if (tab === 'mine') renderCalMine(); else renderCalGcal();
+// ── 구글 연동 ──
+function _ensureTokenClient() {
+  const cid = _gcalClientId();
+  if (!cid) return false;
+  if (!window.google || !google.accounts || !google.accounts.oauth2) return false;
+  if (!_gcalTokenClient || _gcalTokenClient._cid !== cid) {
+    _gcalTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: cid,
+      scope: GCAL_SCOPE,
+      callback: _onGcalToken,
+    });
+    _gcalTokenClient._cid = cid;
+  }
+  return true;
+}
+function connectGoogle() {
+  const cid = _gcalClientId();
+  if (!cid) { showToast('먼저 구글 클라이언트 ID를 입력해줘'); openGcalSettings(); return; }
+  if (!_ensureTokenClient()) { showToast('구글 로그인 스크립트 로딩 중 — 잠시 후 다시 눌러줘'); return; }
+  try { _gcalTokenClient.requestAccessToken({ prompt: _gcalToken ? '' : 'consent' }); }
+  catch (e) { _gcalState = 'error'; _gcalErrMsg = String(e.message || e); _renderGoogleBar(); }
+}
+function _onGcalToken(resp) {
+  if (!resp || resp.error || !resp.access_token) {
+    _gcalToken = null; _gcalState = 'error';
+    _gcalErrMsg = (resp && (resp.error_description || resp.error)) || '토큰 발급 실패';
+    _renderGoogleBar();
+    return;
+  }
+  _gcalToken = resp.access_token;
+  _gcalState = 'connected';
+  _gcalErrMsg = '';
+  fetchGcalEvents();
+}
+async function fetchGcalEvents() {
+  if (!_gcalToken) return;
+  const now = new Date();
+  if (!_calViewYM) _calViewYM = { y: now.getFullYear(), m: now.getMonth() };
+  const { y, m } = _calViewYM;
+  const timeMin = new Date(y, m, 1).toISOString();
+  const timeMax = new Date(y, m + 1, 1).toISOString();
+  _gcalLoading = true; _gcalState = 'loading'; _renderGoogleBar();
+  try {
+    const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+      + '?singleEvents=true&orderBy=startTime&maxResults=250'
+      + '&timeMin=' + encodeURIComponent(timeMin)
+      + '&timeMax=' + encodeURIComponent(timeMax);
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + _gcalToken } });
+    if (res.status === 401 || res.status === 403) { // 토큰 만료/거부 → 재연결 안내
+      _gcalToken = null; _gcalLoading = false; _gcalState = 'expired';
+      _renderGoogleBar();
+      return;
+    }
+    if (!res.ok) throw new Error('구글 API ' + res.status);
+    const data = await res.json();
+    _gcalEvents = _bucketGcalEvents(data.items || []);
+    _gcalEventsYM = y + '-' + m;
+    _gcalLoading = false; _gcalState = 'connected';
+    _renderGoogleBar(); renderCalMine();
+  } catch (e) {
+    _gcalLoading = false; _gcalState = 'error'; _gcalErrMsg = String(e.message || e);
+    _renderGoogleBar(); // 그리드는 그대로 — 앱 달력은 절대 안 깨짐
+  }
+}
+function _bucketGcalEvents(items) {
+  const map = {};
+  const push = (ds, ev) => { (map[ds] = map[ds] || []).push(ev); };
+  for (const it of items) {
+    if (it.status === 'cancelled') continue;
+    const title = it.summary || '(제목 없음)';
+    if (it.start && it.start.date) { // 종일 일정 (start.date ~ end.date 배타적)
+      const s = new Date(it.start.date + 'T00:00:00');
+      const e = it.end && it.end.date ? new Date(it.end.date + 'T00:00:00') : new Date(s.getTime() + 86400000);
+      for (let d = new Date(s); d < e; d.setDate(d.getDate() + 1)) push(_dateStr(d), { allDay: true, time: '', title });
+    } else if (it.start && it.start.dateTime) { // 시간 지정 일정
+      const dt = new Date(it.start.dateTime);
+      const time = String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+      push(_dateStr(dt), { allDay: false, time, title, _sort: dt.getTime() });
+    }
+  }
+  for (const ds in map) map[ds].sort((a, b) => (a.allDay === b.allDay) ? ((a._sort || 0) - (b._sort || 0)) : (a.allDay ? -1 : 1));
+  return map;
+}
+
+function _renderGoogleBar() {
+  const el = document.getElementById('calGoogleBar');
+  if (!el) return;
+  const cid = _gcalClientId();
+  const gearBtn = `<button onclick="openGcalSettings()" title="구글 클라이언트 ID 설정" style="border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit">⚙</button>`;
+  let left;
+  if (_gcalState === 'connected' && _gcalToken) {
+    left = `<span style="font-size:12px;color:var(--green);font-weight:700">● 구글 캘린더 연결됨</span>
+      <button onclick="fetchGcalEvents()" style="border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:inherit">↻ 새로고침</button>`;
+  } else if (_gcalState === 'loading' || _gcalLoading) {
+    left = `<span style="font-size:12px;color:var(--muted);font-weight:700">구글 일정 불러오는 중…</span>`;
+  } else if (_gcalState === 'expired') {
+    left = `<span style="font-size:12px;color:var(--yellow);font-weight:700">토큰 만료됨</span>
+      <button onclick="connectGoogle()" style="border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit">구글 다시 연결</button>`;
+  } else if (_gcalState === 'error') {
+    left = `<span style="font-size:12px;color:var(--red);font-weight:700" title="${_gcalErrMsg.replace(/"/g,'&quot;')}">연결 오류</span>
+      <button onclick="connectGoogle()" style="border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit">다시 시도</button>`;
+  } else {
+    left = `<button onclick="connectGoogle()" style="border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit">🗓️ 구글 연결</button>
+      ${cid ? '' : '<span style="font-size:11px;color:var(--muted)">먼저 ⚙에서 클라이언트 ID 입력</span>'}`;
+  }
+  el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${left}<span style="margin-left:auto"></span>${gearBtn}</div>`;
+}
+
+function openGcalSettings() {
+  const el = document.getElementById('calGoogleBar');
+  if (!el) return;
+  const cid = _gcalClientId();
+  el.innerHTML = `
+    <div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px 16px">
+      <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:6px">구글 캘린더 API 연결 설정</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px">Google Cloud Console → OAuth 클라이언트 ID(웹) 생성 → 이 페이지 도메인을 승인된 JavaScript 원본에 추가 → <b>클라이언트 ID</b> 붙여넣기. 읽기 전용(${'calendar.readonly'})으로만 접근해요.</div>
+      <input id="gcalClientInput" value="${cid.replace(/"/g,'&quot;')}" placeholder="xxxx.apps.googleusercontent.com" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:8px">
+      <div style="display:flex;gap:8px">
+        <button onclick="saveGcalClientId()" style="flex:1;padding:10px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">저장</button>
+        <button onclick="_renderGoogleBar()" style="padding:10px 14px;border-radius:10px;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">취소</button>
+      </div>
+    </div>`;
+}
+function saveGcalClientId() {
+  const v = (document.getElementById('gcalClientInput').value || '').trim();
+  if (!v) { showToast('클라이언트 ID를 입력해줘'); return; }
+  localStorage.setItem(GCAL_CLIENT_KEY, v);
+  _gcalTokenClient = null; _gcalToken = null; _gcalState = 'idle';
+  showToast('✅ 클라이언트 ID 저장됨 — 구글 연결을 눌러줘');
+  _renderGoogleBar();
 }
 
 function _calMonth(delta) {
@@ -2933,7 +3061,10 @@ function _calMonth(delta) {
   if (!_calViewYM) _calViewYM = { y: now.getFullYear(), m: now.getMonth() };
   let m = _calViewYM.m + delta, y = _calViewYM.y;
   if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
-  _calViewYM = { y, m }; _calSelDate = null; renderCalMine();
+  _calViewYM = { y, m }; _calSelDate = null;
+  _gcalEvents = {}; _gcalEventsYM = null; // 이전 달 일정 비우기
+  renderCalMine();
+  if (_gcalToken) fetchGcalEvents(); // 새 달 일정 로드
 }
 
 function selectCalDate(ds) {
@@ -2962,21 +3093,31 @@ function renderCalMine() {
     const checked = checkSet.has(ds);
     const tasks = _dayTasks(ds);
     const undone = tasks.filter(t => !t.done).length;
+    const evs = _gcalEventsFor(ds);
     const dow = new Date(y, m, d).getDay();
     const numColor = isToday ? 'var(--accent)' : (dow===0?'#e06666':dow===6?'#5588cc':'var(--text)');
     const border = isSel ? '2px solid var(--accent)' : '1.5px solid var(--border2)';
     const bg = isToday ? 'var(--accent-dim)' : 'transparent';
     const routineBadge = checked ? `<div style="position:absolute;top:3px;right:4px;width:16px;height:16px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center">✓</div>` : '';
+    // 구글 일정: 제목 최대 2개, 넘치면 +N
+    let evHtml = '';
+    if (evs.length) {
+      const shown = evs.slice(0, 2).map(ev =>
+        `<div style="font-size:9px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:rgba(34,119,221,0.12);color:var(--blue);border-radius:3px;padding:0 3px;margin:0 3px 1px">${(ev.title||'').replace(/</g,'&lt;')}</div>`
+      ).join('');
+      const more = evs.length > 2 ? `<div style="font-size:9px;color:var(--blue);font-weight:700;padding:0 4px">+${evs.length - 2}</div>` : '';
+      evHtml = `<div style="position:absolute;top:21px;left:0;right:0">${shown}${more}</div>`;
+    }
     let dots = '';
     if (tasks.length) {
       const n = Math.min(tasks.length, 3);
       let d3 = '';
       for (let k = 0; k < n; k++) d3 += `<span style="width:5px;height:5px;border-radius:50%;background:${undone?'var(--accent)':'var(--muted)'}"></span>`;
-      dots = `<div style="position:absolute;bottom:5px;left:0;right:0;display:flex;gap:3px;justify-content:center">${d3}</div>`;
+      dots = `<div style="position:absolute;bottom:4px;left:0;right:0;display:flex;gap:3px;justify-content:center">${d3}</div>`;
     }
-    cells += `<div onclick="selectCalDate('${ds}')" style="position:relative;height:56px;border:${border};border-radius:10px;background:${bg};cursor:pointer;margin:2px">
+    cells += `<div onclick="selectCalDate('${ds}')" style="position:relative;height:72px;overflow:hidden;border:${border};border-radius:10px;background:${bg};cursor:pointer;margin:2px">
       <div style="position:absolute;top:5px;left:7px;font-size:13px;font-weight:${isToday?800:600};color:${numColor}">${d}</div>
-      ${routineBadge}${dots}
+      ${routineBadge}${evHtml}${dots}
     </div>`;
   }
 
@@ -2995,13 +3136,14 @@ function renderCalMine() {
 
 function _calDetailHtml() {
   if (!_calSelDate) {
-    return `<div style="text-align:center;color:var(--muted);font-size:12px;padding:14px">날짜를 탭하면 그 날의 할일과 루틴을 볼 수 있어</div>`;
+    return `<div style="text-align:center;color:var(--muted);font-size:12px;padding:14px">날짜를 탭하면 그 날의 할일·루틴·구글 일정을 볼 수 있어</div>`;
   }
   const ds = _calSelDate;
   const [yy, mm, dd] = ds.split('-');
   const dow = ['일','월','화','수','목','금','토'][new Date(+yy, +mm-1, +dd).getDay()];
   const tasks = _dayTasks(ds);
   const checked = new Set((routine && routine.checks) || []).has(ds);
+  const evs = _gcalEventsFor(ds);
   let taskHtml;
   if (!tasks.length) taskHtml = `<div style="font-size:12px;color:var(--muted);padding:6px 0">할일 없음</div>`;
   else taskHtml = tasks.map(t => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text)">
@@ -3015,46 +3157,26 @@ function _calDetailHtml() {
        </div>
        <div style="border-top:1px solid var(--border);margin:6px 0"></div>`
     : '';
+  let gcalSection = '';
+  if (_gcalToken || evs.length) {
+    let evHtml;
+    if (!evs.length) evHtml = `<div style="font-size:12px;color:var(--muted);padding:6px 0">구글 일정 없음</div>`;
+    else evHtml = evs.map(ev => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text)">
+        <span style="font-size:11px;font-weight:700;color:var(--blue);min-width:42px">${ev.allDay ? '종일' : ev.time}</span>
+        <span>${(ev.title||'').replace(/</g,'&lt;')}</span>
+      </div>`).join('');
+    gcalSection = `
+      <div style="border-top:1px solid var(--border);margin:8px 0 4px"></div>
+      <div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:2px">🗓️ 구글 일정${evs.length?` · ${evs.length}개`:''}</div>
+      ${evHtml}`;
+  }
   return `<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;padding:16px">
     <div style="font-size:14px;font-weight:800;color:var(--text);margin-bottom:8px">${+mm}월 ${+dd}일 (${dow})</div>
     ${routineLine}
     <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:2px">할일${tasks.length?` · ${tasks.filter(t=>!t.done).length}개 남음`:''}</div>
     ${taskHtml}
+    ${gcalSection}
   </div>`;
-}
-
-function renderCalGcal() {
-  const el = document.getElementById('calGcal');
-  if (!el) return;
-  const id = (localStorage.getItem(GCAL_KEY) || '').trim();
-  if (!id) {
-    el.innerHTML = `
-      <div style="max-width:440px;margin:32px auto 0;text-align:center">
-        <div style="font-size:40px;margin-bottom:10px">🗓️</div>
-        <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:6px">구글 캘린더 연결</div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:18px">구글 캘린더 → 설정(⚙) → 내 캘린더 선택 → "캘린더 통합" → <b>캘린더 ID</b> 복사 (보통 gmail 주소 형태)</div>
-        <input id="gcalIdInput" placeholder="예: yourname@gmail.com" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 14px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text);margin-bottom:10px">
-        <button onclick="saveGcalId()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">연결하기</button>
-      </div>`;
-    return;
-  }
-  const src = encodeURIComponent(id);
-  el.innerHTML = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-      <button onclick="changeGcalId()" style="border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:inherit">⚙ ID 변경</button>
-    </div>
-    <iframe src="https://calendar.google.com/calendar/embed?src=${src}&ctz=Asia/Bangkok" style="border:0;width:100%;height:640px;border-radius:12px;background:var(--surface)" frameborder="0" scrolling="no"></iframe>`;
-}
-function saveGcalId() {
-  const v = (document.getElementById('gcalIdInput').value || '').trim();
-  if (!v) { showToast('캘린더 ID를 입력해줘'); return; }
-  localStorage.setItem(GCAL_KEY, v);
-  showToast('✅ 구글 캘린더 연결됨');
-  renderCalGcal();
-}
-function changeGcalId() {
-  localStorage.removeItem(GCAL_KEY);
-  renderCalGcal();
 }
 
 function renderGoals() {
