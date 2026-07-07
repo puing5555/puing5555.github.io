@@ -758,6 +758,7 @@ body {
         <button class="chip" onclick="filterTasks('tomorrow',this)">내일</button>
         <button class="chip" onclick="filterTasks('week',this)">이번주</button>
         <button class="chip" onclick="filterTasks('later',this)">나중에</button>
+        <button class="chip" onclick="filterTasks('past',this)">지난 할일</button>
       </div>
       <div class="today-grid" style="flex:1;overflow:hidden">
         <div class="today-col">
@@ -2649,6 +2650,33 @@ function startVoicePC() {
 
 // ── 할일 ──
 let taskFilter = 'today';
+
+// 'YYYYMMDD' → '7/6'
+function _keyToMD(key) { return `${+key.slice(4,6)}/${+key.slice(6,8)}`; }
+function _keyDow(key) { return ['일','월','화','수','목','금','토'][new Date(+key.slice(0,4),+key.slice(4,6)-1,+key.slice(6,8)).getDay()]; }
+
+// 미완료 자동 이월 — 앱 로드 시 1회. 오늘 이전 버킷의 미완료 할일을 오늘로 "이동"(복사 아님).
+// 완료 항목은 원래 날짜에 보존. 이동 시 원본에서 제거하므로 재실행해도 중복 이월 없음(멱등).
+function carryOverTasks() {
+  const todayKey = TODAY_KEY;
+  const today = getDay(); // 오늘 버킷 보장
+  let moved = 0;
+  Object.keys(allData).forEach(key => {
+    if (!/^\d{8}$/.test(key) || key >= todayKey) return; // 날짜 버킷 & 과거만 (문자열 비교로 충분)
+    const bucket = allData[key];
+    if (!bucket || !Array.isArray(bucket.tasks)) return;
+    const remain = [];
+    bucket.tasks.forEach(t => {
+      if (t.done) { remain.push(t); return; }      // 완료 → 원래 날짜 보존(기록)
+      if (!t.carriedFrom) t.carriedFrom = key;      // 원래 마감 날짜(최초 1회만 기록)
+      today.tasks.push(t); moved++;                 // 미완료 → 오늘로 이동
+    });
+    bucket.tasks = remain;
+  });
+  if (moved) save();
+  return moved;
+}
+
 function filterTasks(f, el) {
   taskFilter = f;
   document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
@@ -2656,6 +2684,7 @@ function filterTasks(f, el) {
   renderTasks();
 }
 function renderTasks() {
+  if (taskFilter === 'past') { renderPastTasks(); renderSchedule(); updateStat(); return; }
   const day = getDay();
   const tasks = day.tasks.filter(t => t.when === taskFilter || taskFilter === 'all');
   const el = document.getElementById('taskList');
@@ -2665,11 +2694,13 @@ function renderTasks() {
     const ri = day.tasks.indexOf(t);
     const wi = ['today','tomorrow','week','later'].indexOf(t.when);
     const canPrev = wi > 0, canNext = wi < 3;
+    const carried = t.carriedFrom ? `<span title="원래 마감 ${_keyToMD(t.carriedFrom)}" style="flex-shrink:0;font-size:10px;font-weight:700;color:var(--yellow);background:rgba(224,123,0,0.12);border-radius:5px;padding:1px 6px;margin-left:4px">${_keyToMD(t.carriedFrom)}</span>` : '';
     return `
     <div class="task-card ${t.done?'done':''}">
       <div class="task-pri" style="background:${priColors[t.priority]||'var(--muted)'}"></div>
       <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${ri})">${t.done?'✓':''}</div>
       <div class="task-text">${t.text}</div>
+      ${carried}
       <div class="task-actions">
         ${canPrev?`<button onclick="moveTask(${ri},-1)" title="앞으로">←</button>`:'<span></span>'}
         ${canNext?`<button onclick="moveTask(${ri},1)" title="뒤로">→</button>`:'<span></span>'}
@@ -2688,6 +2719,39 @@ function renderTasks() {
   renderSchedule();
   updateStat();
 }
+
+// 지난 할일 — 과거 날짜 버킷을 날짜 역순으로 그룹핑. 데이터 있는 날짜만.
+function renderPastTasks() {
+  const el = document.getElementById('taskList');
+  const priColors = {1:'var(--red)',2:'var(--accent)',3:'var(--yellow)',4:'var(--muted)'};
+  const keys = Object.keys(allData)
+    .filter(k => /^\d{8}$/.test(k) && k < TODAY_KEY && allData[k].tasks && allData[k].tasks.length)
+    .sort().reverse();
+  if (!keys.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🗂️</div><div class="empty-text">지난 할일이 없어</div></div>';
+    document.getElementById('taskCnt').textContent = '0';
+    return;
+  }
+  el.innerHTML = keys.map(key => {
+    const items = allData[key].tasks.map((t, ti) => `
+      <div class="task-card ${t.done?'done':''}">
+        <div class="task-pri" style="background:${priColors[t.priority]||'var(--muted)'}"></div>
+        <div class="task-check ${t.done?'checked':''}" onclick="togglePastTask('${key}',${ti})">${t.done?'✓':''}</div>
+        <div class="task-text">${t.text}</div>
+      </div>`).join('');
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:800;color:var(--text2);padding:2px 2px 6px">${_keyToMD(key)} (${_keyDow(key)})</div>
+      ${items}
+    </div>`;
+  }).join('');
+  document.getElementById('taskCnt').textContent = keys.reduce((n,k)=>n+allData[k].tasks.filter(t=>!t.done).length,0);
+}
+function togglePastTask(key, i) {
+  if (!allData[key] || !allData[key].tasks[i]) return;
+  allData[key].tasks[i].done = !allData[key].tasks[i].done;
+  save(); renderTasks();
+}
+
 function editTask(i) {
   const day = getDay();
   const t = day.tasks[i];
@@ -3927,6 +3991,8 @@ function renderMiniCal() {
 
 function init() {
   initDate();
+  const _moved = carryOverTasks(); // 지난 미완료 할일 오늘로 이월
+  if (_moved) showToast(`📌 지난 미완료 할일 ${_moved}개를 오늘로 가져왔어`);
   renderTasks();
   renderRightGoals();
   renderMiniCal();
