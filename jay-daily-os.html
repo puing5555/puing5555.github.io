@@ -673,6 +673,7 @@ body {
   <div class="main-header">
     <div class="main-header-title" id="mainTitle">🧠 브레인덤프</div>
     <div class="main-header-sub" id="mainSub"></div>
+    <span id="syncStatus" onclick="onSyncStatusClick()" title="동기화" style="display:none;align-items:center;font-size:15px;cursor:pointer;padding:2px 8px"></span>
   </div>
 
     <!-- 덤프 패널 -->
@@ -1005,6 +1006,27 @@ body {
 <!-- 포커 세션 종료 폼 -->
 <div class="modal-overlay" id="pokerEndModal">
   <div class="modal-box" style="width:460px"><div id="pokerEndBody"></div></div>
+</div>
+<!-- 기기 동기화 (GitHub Gist) -->
+<div class="modal-overlay" id="syncModal">
+  <div class="modal-box" style="width:460px">
+    <div class="modal-title">🔄 기기 간 동기화</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px">
+      GitHub 비공개 Gist에 데이터를 백업해서 다른 기기와 동기화해.
+      <a href="https://github.com/settings/tokens/new?scopes=gist&description=jay-daily-os" target="_blank" style="color:var(--accent)">Personal Access Token</a>을 만들 때
+      <b>gist</b> 권한(scope)만 체크하면 돼. 토큰은 이 기기에만 저장되고 코드/서버에 안 올라가.
+    </div>
+    <div class="form-group">
+      <label class="form-label">GitHub Personal Access Token</label>
+      <input class="form-input" id="syncTokenInput" placeholder="ghp_... 또는 github_pat_..." autocomplete="off">
+    </div>
+    <div id="syncModalInfo" style="font-size:12px;color:var(--text2);margin-bottom:6px"></div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="closeModal('syncModal')">닫기</button>
+      <button class="btn-secondary" onclick="syncNow()">지금 동기화</button>
+      <button class="btn-primary" onclick="saveSyncToken()">저장</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="addGoalModal">
@@ -4557,8 +4579,126 @@ function resizerDown(e) {
   };
 }
 
+// ═══════════ 기기 간 동기화 (GitHub Gist, last-write-wins) ═══════════
+const SYNC_TOKEN_KEY='jay_sync_token', SYNC_GIST_KEY='jay_sync_gist_id', SYNC_LAST_KEY='jay_sync_last_push', SYNC_FILENAME='jay-daily-os-data.json';
+let _syncState='idle', _syncTimer=null, _syncApplying=false, _syncPending=false;
+
+function _syncToken(){ return (localStorage.getItem(SYNC_TOKEN_KEY)||'').trim(); }
+// 비밀키(jay_apiKey)와 동기화 메타(jay_sync_*)는 기기별 로컬 유지 → 동기화 제외
+function _syncExcluded(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_'); }
+function _collectSyncData(){ const o={}; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) o[k]=localStorage.getItem(k); } return o; }
+
+// 앱 저장을 가로채 30초 디바운스 자동 푸시
+const _origSetItem = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function(k, v){ _origSetItem(k, v); if(typeof k==='string' && k.startsWith('jay_') && !_syncExcluded(k)) _scheduleSyncPush(); };
+
+function _scheduleSyncPush(){
+  if(_syncApplying || !_syncToken()) return;
+  _syncPending=true;
+  if(_syncState!=='syncing') _setSyncState('pending');
+  if(_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer=setTimeout(()=>{ _syncTimer=null; _syncPushNow(); }, 30000);
+}
+
+async function _gistApi(path, opts={}){
+  const t=_syncToken(); if(!t) throw {code:'no_token'};
+  const res=await fetch('https://api.github.com/'+path, { ...opts, headers:{ 'Authorization':'Bearer '+t, 'Accept':'application/vnd.github+json', ...(opts.headers||{}) } });
+  if(res.status===401) throw {code:'unauthorized'};
+  if(!res.ok) throw {code:'http', status:res.status};
+  return res.status===204?null:res.json();
+}
+async function _ensureGistId(){
+  let id=localStorage.getItem(SYNC_GIST_KEY);
+  if(id) return id;
+  const list=await _gistApi('gists?per_page=100');           // 다른 기기가 이미 만든 gist 탐색(파일명 기준)
+  const found=(list||[]).find(g=>g.files && g.files[SYNC_FILENAME]);
+  if(found){ id=found.id; _origSetItem(SYNC_GIST_KEY, id); return id; }
+  const created=await _gistApi('gists',{ method:'POST', body:JSON.stringify({ description:'JAY Daily OS sync', public:false, files:{ [SYNC_FILENAME]:{ content: JSON.stringify({updated_at:new Date().toISOString(), data:{}}) } } }) });
+  id=created.id; _origSetItem(SYNC_GIST_KEY, id); return id;
+}
+async function _syncPushNow(){
+  if(!_syncToken()){ _setSyncState('local'); return; }
+  if(!navigator.onLine){ _syncPending=true; _setSyncState('offline'); return; }
+  _setSyncState('syncing');
+  try{
+    const id=await _ensureGistId();
+    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:_collectSyncData() });
+    const res=await _gistApi('gists/'+id,{ method:'PATCH', body:JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } }) });
+    const upd=(res && res.updated_at) ? res.updated_at : new Date().toISOString();
+    _origSetItem(SYNC_LAST_KEY, upd);
+    _syncPending=false; _setSyncState('ok');
+  }catch(e){ _handleSyncErr(e); }
+}
+async function _syncPullOnLoad(){
+  if(!_syncToken()){ _setSyncState('local'); return; }
+  if(!navigator.onLine){ _setSyncState('offline'); return; }
+  _setSyncState('syncing');
+  try{
+    const id=await _ensureGistId();
+    const gist=await _gistApi('gists/'+id);
+    const remoteUpdated=gist.updated_at;
+    const lastPush=localStorage.getItem(SYNC_LAST_KEY);
+    const file=gist.files && gist.files[SYNC_FILENAME];
+    if(file && (!lastPush || new Date(remoteUpdated) > new Date(lastPush))){
+      let content=file.content;
+      if(file.truncated && file.raw_url){ content=await (await fetch(file.raw_url)).text(); }
+      const parsed=JSON.parse(content);
+      if(parsed && parsed.data && Object.keys(parsed.data).length){
+        _applySyncData(parsed.data);
+        _origSetItem(SYNC_LAST_KEY, remoteUpdated);
+        location.reload(); return;                             // 적용 후 새로고침
+      }
+    }
+    _setSyncState('ok');
+    if(!localStorage.getItem(SYNC_LAST_KEY)) _syncPushNow();    // 최초 연결 → 로컬 데이터 백업 업로드
+  }catch(e){ _handleSyncErr(e); }
+}
+function _applySyncData(data){
+  _syncApplying=true;
+  const rm=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) rm.push(k); }
+  rm.forEach(k=>localStorage.removeItem(k));                    // 통짜 덮어쓰기(삭제도 전파)
+  Object.keys(data).forEach(k=>{ if(k.startsWith('jay_') && !_syncExcluded(k)) _origSetItem(k, data[k]); });
+  _syncApplying=false;
+}
+function _handleSyncErr(e){
+  if(e && e.code==='unauthorized'){ _setSyncState('error'); showToast('⚠ 동기화 토큰이 만료됐어 — 탭해서 다시 입력해줘'); return; }
+  if(e && e.code==='no_token'){ _setSyncState('local'); return; }
+  _setSyncState('error'); // 오프라인/일시 오류 — 앱은 로컬로 계속 동작
+}
+
+function _setSyncState(s){ _syncState=s; _renderSyncStatus(); }
+function _renderSyncStatus(){
+  const el=document.getElementById('syncStatus'); if(!el) return;
+  const map={ ok:['✓','동기화됨','var(--green)'], syncing:['↑','저장 중…','var(--muted)'], pending:['↑','곧 저장','var(--muted)'], error:['⚠','실패 · 탭하면 재시도','var(--red)'], offline:['⚠','오프라인 · 복귀 시 저장','var(--yellow)'], local:['⤓','동기화 설정하기','var(--muted)'], idle:['','','var(--muted)'] };
+  const v=map[_syncState]||map.idle;
+  el.textContent=v[0]; el.title=v[1]; el.style.color=v[2]; el.style.display=v[0]?'inline-flex':'none';
+}
+function onSyncStatusClick(){ if(_syncState==='error'||_syncState==='offline'){ _syncPushNow(); } else { openSyncModal(); } }
+function openSyncModal(){
+  const inp=document.getElementById('syncTokenInput'); if(inp) inp.value=_syncToken();
+  const info=document.getElementById('syncModalInfo');
+  if(info){ const gid=localStorage.getItem(SYNC_GIST_KEY), last=localStorage.getItem(SYNC_LAST_KEY);
+    info.innerHTML = _syncToken() ? `연결됨${gid?` · Gist ${gid.slice(0,8)}…`:''}${last?` · 마지막 저장 ${new Date(last).toLocaleString('ko-KR')}`:''}` : '아직 토큰 미설정 — 로컬에만 저장 중';
+  }
+  openModal('syncModal');
+}
+function saveSyncToken(){
+  const v=(document.getElementById('syncTokenInput').value||'').trim();
+  _origSetItem(SYNC_TOKEN_KEY, v);
+  if(!v){ _setSyncState('local'); showToast('토큰 삭제됨 — 로컬 모드'); closeModal('syncModal'); return; }
+  showToast('✅ 토큰 저장 — 동기화 시작'); closeModal('syncModal');
+  _syncPullOnLoad(); // 원격 최신이면 받아 새로고침, 아니면 최초 연결 시 로컬 백업 업로드
+}
+function syncNow(){ const v=(document.getElementById('syncTokenInput').value||'').trim(); if(v && v!==_syncToken()) _origSetItem(SYNC_TOKEN_KEY, v); if(!_syncToken()){ showToast('먼저 토큰을 저장해줘'); return; } showToast('↑ 동기화 중…'); _syncPushNow(); }
+function _syncInit(){
+  _renderSyncStatus();
+  window.addEventListener('online', ()=>{ if(_syncPending && _syncToken()) _syncPushNow(); });
+  _syncPullOnLoad();
+}
+
 window.onload = () => {
   init();
+  _syncInit();
   renderRightDumps();
   _renderSearchToggle();
   const sp = document.getElementById('scratchPad');
