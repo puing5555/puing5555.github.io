@@ -769,7 +769,8 @@ body {
           <div class="col-hdr">
             <span class="col-hdr-title">할 일</span>
             <span class="col-hdr-cnt" id="taskCnt">0</span>
-            <button onclick="openAddTask()" style="margin-left:auto;padding:5px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ 추가</button>
+            <button onclick="dedupeTasks()" title="AI로 의미가 겹치는 할일 묶어 정리" style="margin-left:auto;padding:5px 10px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🧹 중복 정리</button>
+            <button onclick="openAddTask()" style="padding:5px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ 추가</button>
           </div>
           <div class="col-body" id="taskList"></div>
         </div>
@@ -1317,7 +1318,11 @@ async function sendDump() {
   const memoryBlock = _buildMemoryBlock();
   const routineLine = _routineStatusLine();
   const pokerLine = _pokerStatusLine();
-  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${routineLine ? '\n' + routineLine : ''}${pokerLine ? '\n' + pokerLine : ''}${memoryBlock ? '\n\n' + memoryBlock : ''}
+  const _incompleteTasks = (day.tasks||[]).filter(t=>!t.done).map(t=>t.text).slice(0,30);
+  const existingTasksBlock = _incompleteTasks.length
+    ? `\n\n[현재 미완료 할일 — 중복 생성 금지]\n${_incompleteTasks.map(t=>'· '+t).join('\n')}\n이미 있는 할일과 의미가 같으면 tasks에 넣지 마. 표현이 달라도 같은 행동이면 중복이다.`
+    : '';
+  const system = `당신은 JAY의 개인 AI 비서. 친한 친구처럼 대화해. JAY는 한국 기업가 태국 거주. ${profileCtx}${routineLine ? '\n' + routineLine : ''}${pokerLine ? '\n' + pokerLine : ''}${memoryBlock ? '\n\n' + memoryBlock : ''}${existingTasksBlock}
 반드시 JSON만 응답:
 {"reply":"...","tasks":[{"text":"할일","priority":2,"urgent":false}],"memo":[{"category":"💡 아이디어","text":"","tags":[]}],"focus":"오늘 딱 하나만"}
 
@@ -1371,14 +1376,11 @@ ${_useSearch ? `
       }
       return false;
     };
-    const existingTasks = (day.tasks||[]).map(t => t.text);
-    let addedTasks = 0, addedMemos = 0;
+    let addedTasks = 0, addedMemos = 0, mergedTasks = 0;
     (parsed.tasks||[]).forEach(t => {
-      if (!existingTasks.some(e => isSimilar(e, t.text))) {
-        day.tasks.push({...t, when:'today', done:false});
-        existingTasks.push(t.text);
-        addedTasks++;
-      }
+      const dup = _findDupTask(t.text, day.tasks); // 미완료 중 의미 중복 찾기
+      if (dup) { dup.mentions = (dup.mentions||1) + 1; mergedTasks++; } // 버리지 말고 카운트+1
+      else { day.tasks.push({...t, when:'today', done:false, mentions:1}); addedTasks++; }
     });
     (parsed.memo||[]).forEach(m => {
       if (!m.text) return;
@@ -1391,10 +1393,10 @@ ${_useSearch ? `
     const undone = (getDay().tasks||[]).filter(t=>!t.done).length;
     const badge = document.getElementById('taskBadge');
     if (badge) { badge.textContent = undone; badge.style.display = undone ? 'inline' : 'none'; }
-    if (addedTasks || addedMemos) {
+    if (addedTasks || addedMemos || mergedTasks) {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
-      meta.textContent = `할일 ${addedTasks}개 · 메모 ${addedMemos}개 저장됨`;
+      meta.textContent = `할일 ${addedTasks}개 · 메모 ${addedMemos}개 저장됨${mergedTasks?` · 중복 ${mergedTasks}건 기존에 합침`:''}`;
       msgs.appendChild(meta);
     }
     msgs.scrollTop = msgs.scrollHeight;
@@ -2737,10 +2739,71 @@ function filterTasks(f, el) {
   if(el) el.classList.add('on');
   renderTasks();
 }
+// ── 할일 중복 판정 (토큰 겹침 60%+) ──
+function _taskTokens(s){
+  return (s||'').toLowerCase().replace(/[^가-힣a-z0-9\s]/g,' ')
+    .replace(/(하기|만들기|챙기기|정하기|읽기|보기|가기|사기|하고|해서|에게|에서|으로|하는|한다|해라|해줘|하자)/g,' ')
+    .split(/\s+/).filter(w=>w.length>=2);
+}
+function _taskOverlap(a,b){
+  const ta=new Set(_taskTokens(a)), tb=new Set(_taskTokens(b));
+  if(!ta.size||!tb.size) return 0;
+  let inter=0; ta.forEach(w=>{ if(tb.has(w)) inter++; });
+  return inter/Math.min(ta.size, tb.size); // 작은 쪽 기준 겹침 비율
+}
+function _findDupTask(text, tasks){
+  const n = s => (s||'').replace(/\s/g,'').toLowerCase();
+  const nt = n(text);
+  for(const t of tasks){
+    if(t.done) continue;
+    const ne = n(t.text);
+    if(ne && nt && (ne===nt || (ne.length>=3 && nt.length>=3 && (ne.includes(nt)||nt.includes(ne))))) return t; // 정규화 동일/포함
+    if(_taskOverlap(text, t.text) >= 0.6) return t; // 토큰 겹침 60%+
+  }
+  return null;
+}
+
+// ── 기존 중복 일괄 정리 (Claude 그룹핑) ──
+async function dedupeTasks(){
+  const day=getDay();
+  const items=day.tasks.filter(t=>!t.done);
+  if(items.length<2){ showToast('정리할 할일이 부족해'); return; }
+  if(!getApiKey()){ showToast('API 키가 필요해 (우상단에서 설정)'); return; }
+  showToast('🧹 중복 분석 중…');
+  try{
+    const list=items.map((t,i)=>`${i}: ${t.text}`).join('\n');
+    const sys='너는 할일 목록에서 의미가 같은 것끼리 그룹핑하는 도우미야. 표현이 달라도 같은 행동이면 같은 그룹. 반드시 JSON만: {"groups":[[0,3],[1],[2,4,5]]} — 각 그룹은 인덱스 배열, 모든 인덱스가 정확히 한 번씩 포함돼야 해.';
+    const raw=await callClaude([{role:'user', content:`할일 목록:\n${list}\n\n의미 단위로 그룹핑해줘.`}], sys);
+    let parsed; try{ parsed=JSON.parse(raw.replace(/```json|```/g,'').trim()); }catch(e){ showToast('분석 실패 — 다시 시도해줘'); return; }
+    const groups=(parsed.groups||[]).filter(g=>Array.isArray(g)&&g.length);
+    if(!groups.length){ showToast('정리할 게 없어'); return; }
+    const keepReps=[], removeItems=[];
+    groups.forEach(g=>{
+      const idxs=g.filter(i=>Number.isInteger(i)&&items[i]).sort((a,b)=>a-b);
+      if(!idxs.length) return;
+      const rep=items[idxs[0]];
+      rep.mentions=Math.max(rep.mentions||1, idxs.length);
+      keepReps.push(rep);
+      idxs.slice(1).forEach(i=>removeItems.push(items[i]));
+    });
+    const removeSet=removeItems.filter(t=>!keepReps.includes(t)); // 대표는 보존
+    if(!removeSet.length){ showToast('중복이 없어 — 깔끔해!'); renderTasks(); return; }
+    const before=items.length, after=before-removeSet.length;
+    if(!confirm(`${before}개 → ${after}개로 정리됩니다. 계속할까?`)) return;
+    const backup=JSON.parse(localStorage.getItem('jay_tasks_backup')||'[]');
+    backup.push({ at:new Date().toISOString(), removed:removeSet.map(t=>({...t})) });
+    localStorage.setItem('jay_tasks_backup', JSON.stringify(backup));
+    day.tasks=day.tasks.filter(t=> !removeSet.includes(t));
+    save(); renderTasks();
+    showToast(`✅ ${before}개 → ${after}개로 정리됨`);
+  }catch(e){ showToast('정리 실패: '+(e.message||e)); }
+}
+
 function renderTasks() {
   if (taskFilter === 'past') { renderPastTasks(); renderSchedule(); updateStat(); return; }
   const day = getDay();
-  const tasks = day.tasks.filter(t => t.when === taskFilter || taskFilter === 'all');
+  const tasks = day.tasks.filter(t => t.when === taskFilter || taskFilter === 'all')
+    .sort((a,b)=>(b.mentions||1)-(a.mentions||1)); // 여러 번 언급된 할일이 위로
   const el = document.getElementById('taskList');
   const priColors = {1:'var(--red)',2:'var(--accent)',3:'var(--yellow)',4:'var(--muted)'};
   if (!tasks.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">할일이 없어</div></div>'; }
@@ -2749,12 +2812,13 @@ function renderTasks() {
     const wi = ['today','tomorrow','week','later'].indexOf(t.when);
     const canPrev = wi > 0, canNext = wi < 3;
     const carried = t.carriedFrom ? `<span title="원래 마감 ${_keyToMD(t.carriedFrom)}" style="flex-shrink:0;font-size:10px;font-weight:700;color:var(--yellow);background:rgba(224,123,0,0.12);border-radius:5px;padding:1px 6px;margin-left:4px">${_keyToMD(t.carriedFrom)}</span>` : '';
+    const mentionBadge = (t.mentions||1) >= 2 ? `<span title="${t.mentions}번 언급됨" style="flex-shrink:0;font-size:10px;font-weight:800;color:var(--accent);background:var(--accent-dim);border-radius:5px;padding:1px 6px;margin-left:4px">×${t.mentions}</span>` : '';
     return `
     <div class="task-card ${t.done?'done':''}">
       <div class="task-pri" style="background:${priColors[t.priority]||'var(--muted)'}"></div>
       <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${ri})">${t.done?'✓':''}</div>
       <div class="task-text">${t.text}</div>
-      ${carried}
+      ${mentionBadge}${carried}
       <div class="task-actions">
         ${canPrev?`<button onclick="moveTask(${ri},-1)" title="앞으로">←</button>`:'<span></span>'}
         ${canNext?`<button onclick="moveTask(${ri},1)" title="뒤로">→</button>`:'<span></span>'}
