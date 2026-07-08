@@ -3500,7 +3500,11 @@ function _pokerStatusLine(){
 // ── 메인 렌더 ──
 function renderPoker(){
   const el=document.getElementById('pokerBody'); if(!el) return;
+  const loadGhost = (pokerCurrent && _hoursSinceCurrent()>=12)
+    ? `<div onclick="openPokerEnd()" style="background:#fff4e0;border:1.5px solid var(--yellow);border-radius:10px;padding:10px 14px;font-size:12px;font-weight:700;color:#8a5a00;cursor:pointer;margin-bottom:14px">⚠️ 어제 세션이 안 닫혔어 (${pokerCurrent.start} 시작) — 정리하기</div>`
+    : '';
   el.innerHTML=`
+    ${loadGhost}
     ${_pokerCardsHtml()}
     <div style="display:flex;gap:10px;margin:16px 0 20px">
       <button onclick="openPokerStart()" style="flex:1;padding:15px;border-radius:14px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">▶ 세션 시작</button>
@@ -3607,10 +3611,12 @@ function _pokerCalDetailHtml(){
   return `<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">${_mdShort(_pokerCalSel)} 요약</div>${rows}</div>`;
 }
 function _sessionSummaryHtml(s){
+  const idx=pokerSessions.indexOf(s);
   const timeColor=_isLateNight(s.end)?'var(--red)':'var(--text)';
   const delta=(typeof s.balance==='number')?_sessionDelta(s):null;
   const tt=s.tiltType&&TILT_TYPES[s.tiltType]?TILT_TYPES[s.tiltType].easy:'';
-  return `<div style="font-size:13px;color:var(--text);line-height:1.7">
+  return `<div style="position:relative;font-size:13px;color:var(--text);line-height:1.7">
+    <button onclick="editPokerSession(${idx})" title="이 세션 수정" style="position:absolute;top:0;right:0;border:1.5px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;padding:3px 8px;border-radius:7px;cursor:pointer;font-family:inherit">✏️</button>
     <div>🕐 <span style="color:${timeColor};font-weight:700">${s.start||'?'}~${s.end||'?'}</span></div>
     <div>💵 잔액 $${_num(s.balance)}${delta!==null?` (<span style="color:${delta>=0?'var(--green)':'var(--red)'}">${delta>=0?'+':''}$${_num(delta)}</span>)`:''}</div>
     <div>🎢 틸트 ${s.tilt||'-'}/5${tt?` · ${tt}`:''}</div>
@@ -3733,17 +3739,63 @@ function startPokerSession(){
 }
 
 // ── 세션 종료 폼 ──
-function openPokerEnd(){ _endDraft={ balance:'', tilt:0, tiltType:null, grade:null, note:'', goalKept:null }; openModal('pokerEndModal'); _renderPokerEnd(); }
+// 진행 중 세션이 시작된 뒤 경과 시간(시간 단위). 유령 세션 감지용.
+function _hoursSinceCurrent(){
+  if(!pokerCurrent||!pokerCurrent.date||!pokerCurrent.start) return 0;
+  const [h,m]=pokerCurrent.start.split(':').map(Number);
+  const st=new Date(pokerCurrent.date+'T00:00:00'); st.setHours(h,m,0,0);
+  return (Date.now()-st.getTime())/3600000;
+}
+function openPokerEnd(){
+  const nowHM=_hhmm(new Date());
+  _endDraft={ date: pokerCurrent?pokerCurrent.date:_todayDS(), start: pokerCurrent?pokerCurrent.start:nowHM, end: nowHM,
+    balance:'', tilt:0, tiltType:null, grade:null, note:'', goalKept:null, editIndex:null, timeEditing:false,
+    goal: pokerCurrent?pokerCurrent.goal:'' };
+  openModal('pokerEndModal'); _renderPokerEnd();
+}
+function editPokerSession(idx){
+  const s=pokerSessions[idx]; if(!s) return;
+  _endDraft={ date:s.date, start:s.start||'', end:s.end||_hhmm(new Date()),
+    balance:(s.balance!=null?s.balance:''), tilt:s.tilt||0, tiltType:s.tiltType||null, grade:s.grade||null,
+    note:s.note||'', goalKept:(s.goalKept===true?true:(s.goalKept===false?false:null)),
+    editIndex:idx, timeEditing:false, goal:s.goal||'' };
+  openModal('pokerEndModal'); _renderPokerEnd();
+}
+function cancelPokerCurrent(){
+  if(!confirm('진행 중 세션을 기록 없이 취소할까?')) return;
+  pokerCurrent=null; savePokerCurrent(); _endDraft=null;
+  closeModal('pokerEndModal'); showToast('세션 취소됨'); renderPoker();
+}
 function _endStore(k,v){ if(_endDraft) _endDraft[k]=v; }
 function _endSet(k,v){ if(!_endDraft) return; _endDraft[k]=v; _renderPokerEnd(); }
 function _endSetTilt(n){ if(!_endDraft) return; _endDraft.tilt=n; if(n<4) _endDraft.tiltType=null; _renderPokerEnd(); }
-function _durText(start,end){ const [sh,sm]=start.split(':').map(Number), [eh,em]=end.split(':').map(Number); let mins=(eh*60+em)-(sh*60+sm); if(mins<0) mins+=1440; return `${Math.floor(mins/60)}시간 ${mins%60}분`; }
+// 종료가 시작보다 이르면 다음날로 해석 (23:00~02:00 = 3시간)
+function _durMins(start,end){ const [sh,sm]=start.split(':').map(Number), [eh,em]=end.split(':').map(Number); let mins=(eh*60+em)-(sh*60+sm); if(mins<0) mins+=1440; return mins; }
+function _durText(start,end){ const mins=_durMins(start,end); return `${Math.floor(mins/60)}시간 ${mins%60}분`; }
 function _endTab(label, on, fn){ return `<button onclick="${fn}" style="flex:1;padding:10px 0;border-radius:10px;border:1.5px solid ${on?'var(--accent)':'var(--border2)'};background:${on?'var(--accent)':'transparent'};color:${on?'#fff':'var(--text2)'};font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">${label}</button>`; }
 function _renderPokerEnd(){
   const el=document.getElementById('pokerEndBody'); const d=_endDraft; if(!d) return;
-  const end=_hhmm(new Date()); const start=pokerCurrent?pokerCurrent.start:null;
-  const dur=start?_durText(start,end):''; const lateColor=_isLateNight(end)?'var(--red)':'var(--text)';
-  const goalBlock=(pokerCurrent&&pokerCurrent.goal)?`<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">오늘 목표: <span style="color:var(--text)">${_esc(pokerCurrent.goal)}</span> — 지켰어?</div><div style="display:flex;gap:8px">${_endTab('지킴',d.goalKept===true,"_endSet('goalKept',true)")}${_endTab('못 지킴',d.goalKept===false,"_endSet('goalKept',false)")}</div></div>`:'';
+  const editing = d.editIndex!=null;
+  const start=d.start||'', end=d.end||'';
+  const overnight = (start&&end)?(_durMins(start,end)!==0 && (end<=start)):false;
+  const dur=(start&&end)?_durText(start,end):''; const lateColor=_isLateNight(end)?'var(--red)':'var(--text)';
+  const inp='box-sizing:border-box;border:1.5px solid var(--border2);border-radius:8px;padding:7px 9px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)';
+  const timeHeader = d.timeEditing
+    ? `<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:6px">
+         <input type="time" value="${start}" onchange="_endSet('start',this.value)" style="${inp}">
+         <span style="color:var(--muted)">~</span>
+         <input type="time" value="${end}" onchange="_endSet('end',this.value)" style="${inp}">
+       </div>
+       <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:16px">${overnight?'다음날로 계산 · ':''}${dur||'시간 입력'}</div>`
+    : `<div onclick="_endSet('timeEditing',true)" title="탭해서 시간 수정" style="text-align:center;font-size:14px;font-weight:700;margin-bottom:16px;cursor:pointer">
+         <span style="color:var(--text)">${start||'?'}</span> ~ <span style="color:${lateColor}">${end||'?'}</span>${dur?`<span style="color:var(--muted)"> · ${overnight?'익일 ':''}${dur}</span>`:''} <span style="font-size:11px;color:var(--muted)">✏️</span>
+       </div>`;
+  // 유령 세션 배너 (신규 종료 & 진행세션 12h+)
+  const ghost = (!editing && pokerCurrent && _hoursSinceCurrent()>=12)
+    ? `<div style="background:#fff4e0;border:1.5px solid var(--yellow);border-radius:12px;padding:12px 14px;font-size:13px;font-weight:600;color:#8a5a00;line-height:1.5;margin-bottom:14px">세션이 ${pokerCurrent.start}에 시작된 채로 열려 있었어. 실제 친 시간으로 수정하거나, 세션을 취소할 수 있어.<button onclick="cancelPokerCurrent()" style="display:block;margin-top:8px;border:1.5px solid var(--yellow);background:var(--surface);color:#8a5a00;font-size:12px;font-weight:800;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit">세션 취소</button></div>`
+    : '';
+  const goalText = editing ? (d.goal||'') : (pokerCurrent&&pokerCurrent.goal?pokerCurrent.goal:'');
+  const goalBlock=goalText?`<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">오늘 목표: <span style="color:var(--text)">${_esc(goalText)}</span> — 지켰어?</div><div style="display:flex;gap:8px">${_endTab('지킴',d.goalKept===true,"_endSet('goalKept',true)")}${_endTab('못 지킴',d.goalKept===false,"_endSet('goalKept',false)")}</div></div>`:'';
   const lastBal=_latestBalance(); let balInfo='';
   if(d.balance!==''&&!isNaN(parseFloat(d.balance))){
     const b=parseFloat(d.balance); const delta=lastBal?b-lastBal.amount:null;
@@ -3756,8 +3808,9 @@ function _renderPokerEnd(){
   if(d.tilt>=4){ typeChips=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">`+Object.keys(TILT_TYPES).map(k=>{ const sel=d.tiltType===k; return `<button onclick="_endSet('tiltType','${k}')" style="padding:9px;border-radius:10px;border:1.5px solid ${sel?'var(--accent)':'var(--border2)'};background:${sel?'var(--accent-dim)':'transparent'};cursor:pointer;font-family:inherit;text-align:left"><div style="font-size:13px;font-weight:800;color:${sel?'var(--accent)':'var(--text)'}">${TILT_TYPES[k].easy}</div><div style="font-size:10px;color:var(--muted)">${TILT_TYPES[k].orig}</div></button>`; }).join('')+`</div>`; }
   const gradeTabs=['A','B','C'].map(g=>`<button onclick="_endSet('grade','${g}')" style="flex:1;padding:11px 0;border-radius:10px;border:2px solid ${d.grade===g?GRADE_FG[g]:'var(--border2)'};background:${d.grade===g?GRADE_BG[g]:'transparent'};color:${d.grade===g?GRADE_FG[g]:'var(--text2)'};font-size:16px;font-weight:800;cursor:pointer;font-family:inherit">${g}</button>`).join('');
   el.innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div class="modal-title" style="margin:0">🃏 세션 종료</div><button onclick="closeModal('pokerEndModal')" style="border:none;background:transparent;font-size:22px;color:var(--muted);cursor:pointer;line-height:1">×</button></div>
-    <div style="text-align:center;font-size:14px;font-weight:700;margin-bottom:16px">${start?`<span style="color:var(--text)">${start}</span> ~ `:''}<span style="color:${lateColor}">${end}</span>${dur?`<span style="color:var(--muted)"> · ${dur}</span>`:''}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div class="modal-title" style="margin:0">🃏 세션 ${editing?'수정':'종료'}</div><button onclick="closeModal('pokerEndModal')" style="border:none;background:transparent;font-size:22px;color:var(--muted);cursor:pointer;line-height:1">×</button></div>
+    ${ghost}
+    ${timeHeader}
     ${goalBlock}
     <div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">잔액 (USD)</div>
       <input id="pokerBalInput" type="number" value="${d.balance}" oninput="_endStore('balance',this.value)" onchange="_endSet('balance',this.value)" placeholder="현재 잔액" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 13px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)">${balInfo}</div>
@@ -3765,7 +3818,7 @@ function _renderPokerEnd(){
     <div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">게임 등급 <span style="color:var(--muted);font-weight:500">— 결과 말고 결정의 질</span></div><div style="display:flex;gap:8px">${gradeTabs}</div></div>
     <div style="margin-bottom:16px"><div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">한 줄 소감 (선택)</div>
       <input id="pokerNoteInput" value="${_esc(d.note)}" oninput="_endStore('note',this.value)" placeholder="오늘 어땠어?" style="width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:10px;padding:11px 13px;font-size:14px;font-family:inherit;outline:none;background:var(--surface);color:var(--text)"></div>
-    <button onclick="savePokerSession()" style="width:100%;padding:13px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">기록하고 종료</button>`;
+    <button onclick="savePokerSession()" style="width:100%;padding:13px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">${editing?'수정 저장':'기록하고 종료'}</button>`;
 }
 function savePokerSession(){
   const d=_endDraft; if(!d) return;
@@ -3773,19 +3826,21 @@ function savePokerSession(){
   if(isNaN(bal)){ showToast('잔액(숫자)을 입력해줘'); return; }
   if(!d.tilt){ showToast('틸트를 선택해줘'); return; }
   if(!d.grade){ showToast('등급을 선택해줘'); return; }
+  const editing = d.editIndex!=null && pokerSessions[d.editIndex];
+  const goalText = editing ? (d.goal||'') : (pokerCurrent&&pokerCurrent.goal?pokerCurrent.goal:'');
   const sess={
-    date: pokerCurrent?pokerCurrent.date:_todayDS(),
-    start: pokerCurrent?pokerCurrent.start:null,
-    end: _hhmm(new Date()), balance: bal, tilt: d.tilt,
-    tiltType: d.tilt>=4?(d.tiltType||null):null, grade: d.grade,
-    goal: pokerCurrent?pokerCurrent.goal:'',
-    goalKept: (pokerCurrent&&pokerCurrent.goal)?(d.goalKept===true?true:(d.goalKept===false?false:null)):null,
+    date: d.date||_todayDS(), start: d.start||null, end: d.end||_hhmm(new Date()),
+    balance: bal, tilt: d.tilt, tiltType: d.tilt>=4?(d.tiltType||null):null, grade: d.grade,
+    goal: goalText,
+    goalKept: goalText?(d.goalKept===true?true:(d.goalKept===false?false:null)):null,
     note: (d.note||'').trim(),
   };
-  pokerSessions.push(sess); savePokerSessions();
+  if(editing) pokerSessions[d.editIndex]=sess; else pokerSessions.push(sess);
+  savePokerSessions();
   upsertBankroll(sess.date, bal, 'checkout');
-  pokerCurrent=null; savePokerCurrent(); _endDraft=null;
-  closeModal('pokerEndModal'); showToast('✅ 세션 기록됨'); renderPoker();
+  if(!editing){ pokerCurrent=null; savePokerCurrent(); }
+  _endDraft=null; closeModal('pokerEndModal');
+  showToast(editing?'✅ 세션 수정됨':'✅ 세션 기록됨'); renderPoker();
 }
 
 function renderGoals() {
