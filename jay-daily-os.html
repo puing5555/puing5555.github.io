@@ -4842,7 +4842,8 @@ function renderCountdown(){
   }
   const days=Math.floor(diff/86400000), hours=Math.floor((diff%86400000)/3600000);
   _cdActive(el);
-  el.innerHTML=`${emoji}${title} <b style="font-size:14px;color:var(--accent);margin:0 4px">D-${days}</b> · ${days}일 ${hours}시간`;
+  const dLabel = days>0 ? `D-${days}` : 'D-DAY'; // 24시간 미만이면 D-DAY
+  el.innerHTML=`${emoji}${title} <b style="font-size:14px;color:var(--accent);margin:0 4px">${dLabel}</b> · ${hours}시간`;
 }
 function openCountdownModal(){
   document.getElementById('cdTitle').value = (countdown&&countdown.title) || '';
