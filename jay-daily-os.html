@@ -3135,6 +3135,33 @@ function renderCal() {
 }
 
 // ── 구글 연동 ──
+// access token을 만료 시각과 함께 로컬 저장(개인 기기 전용). 동기화에서는 제외됨.
+const GCAL_TOKEN_KEY = 'jay_gcal_token', GCAL_TOKEN_EXP_KEY = 'jay_gcal_token_exp';
+function _gcalStoreToken(resp) {
+  _gcalToken = resp.access_token;
+  const secs = Number(resp.expires_in) || 3600;
+  try {
+    localStorage.setItem(GCAL_TOKEN_KEY, resp.access_token);
+    localStorage.setItem(GCAL_TOKEN_EXP_KEY, String(Date.now() + secs * 1000));
+  } catch (_) {}
+}
+function _gcalClearStoredToken() {
+  try { localStorage.removeItem(GCAL_TOKEN_KEY); localStorage.removeItem(GCAL_TOKEN_EXP_KEY); } catch (_) {}
+}
+// 로드 시 복원: 저장 토큰이 5분+ 남았으면 즉시 연결 복원(silent 시도 없이), 아니면 silent
+function _gcalRestore() {
+  if (!_gcalClientId()) return;
+  const tok = localStorage.getItem(GCAL_TOKEN_KEY);
+  const exp = parseInt(localStorage.getItem(GCAL_TOKEN_EXP_KEY) || '0', 10);
+  if (tok && exp && (exp - Date.now() > 5 * 60 * 1000)) {
+    _gcalToken = tok; _gcalState = 'connected'; _gcalErrMsg = '';
+    _renderGoogleBar();
+    fetchGcalEvents(); // 유효하지 않으면 401 흐름이 알아서 갱신/재연결
+    return;
+  }
+  _gcalClearStoredToken();
+  _gcalSilentConnect();
+}
 function _ensureTokenClient() {
   const cid = _gcalClientId();
   if (!cid) return false;
@@ -3193,7 +3220,7 @@ function _onGcalToken(resp) {
     _renderGoogleBar();
     return;
   }
-  _gcalToken = resp.access_token; _gcalState = 'connected'; _gcalErrMsg = '';
+  _gcalStoreToken(resp); _gcalState = 'connected'; _gcalErrMsg = ''; // 만료 시각과 함께 저장
   if (resolve) { resolve(true); return; } // 재시도 흐름 — 호출측이 후속 처리
   const cb = _gcalPendingAfterAuth; _gcalPendingAfterAuth = null;
   fetchGcalEvents();
@@ -3237,7 +3264,7 @@ async function fetchGcalEvents() {
     const res = await _gcalFetch(url); // 401 시 silent 재발급 1회 내장
     if (res._noToken) { _gcalLoading = false; return; }
     if (res.status === 401 || res.status === 403) { // 재발급도 실패 → 재연결 버튼
-      _gcalToken = null; _gcalLoading = false; _gcalState = 'expired';
+      _gcalToken = null; _gcalClearStoredToken(); _gcalLoading = false; _gcalState = 'expired';
       _renderGoogleBar();
       return;
     }
@@ -3336,7 +3363,7 @@ async function saveCalEvent() {
       body: JSON.stringify(body),
     });
     if (res.status === 401 || res.status === 403) { // 재발급도 실패 — 입력값 보존
-      _gcalToken = null; _gcalState = 'expired';
+      _gcalToken = null; _gcalClearStoredToken(); _gcalState = 'expired';
       _calAddError = '토큰이 만료됐어. 위에서 구글 다시 연결 후 저장을 눌러줘';
       renderCalMine(); _renderGoogleBar(); return;
     }
@@ -3358,7 +3385,7 @@ async function deleteCalEvent(id) {
       method: 'DELETE',
     });
     if (res.status === 401 || res.status === 403) { // 재발급도 실패
-      _gcalToken = null; _gcalState = 'expired';
+      _gcalToken = null; _gcalClearStoredToken(); _gcalState = 'expired';
       showToast('토큰이 만료됐어 — 구글 다시 연결'); _renderGoogleBar(); renderCalMine(); return;
     }
     if (!res.ok && res.status !== 410) throw new Error('구글 API ' + res.status); // 410 = 이미 삭제됨
@@ -3412,7 +3439,7 @@ function saveGcalClientId() {
   const v = (document.getElementById('gcalClientInput').value || '').trim();
   if (!v) { showToast('클라이언트 ID를 입력해줘'); return; }
   localStorage.setItem(GCAL_CLIENT_KEY, v);
-  _gcalTokenClient = null; _gcalToken = null; _gcalState = 'idle';
+  _gcalTokenClient = null; _gcalToken = null; _gcalClearStoredToken(); _gcalState = 'idle';
   showToast('✅ 클라이언트 ID 저장됨 — 구글 연결을 눌러줘');
   _renderGoogleBar();
 }
@@ -4785,7 +4812,8 @@ let _syncState='idle', _syncTimer=null, _syncApplying=false, _syncPending=false;
 
 function _syncToken(){ return (localStorage.getItem(SYNC_TOKEN_KEY)||'').trim(); }
 // 비밀키(jay_apiKey)와 동기화 메타(jay_sync_*)는 기기별 로컬 유지 → 동기화 제외
-function _syncExcluded(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_'); }
+// 비밀키·동기화 메타·기기별 구글 토큰은 기기 로컬 전용 → 동기화 제외
+function _syncExcluded(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_') || k==='jay_gcal_token' || k==='jay_gcal_token_exp'; }
 function _collectSyncData(){ const o={}; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) o[k]=localStorage.getItem(k); } return o; }
 
 // 앱 저장을 가로채 30초 디바운스 자동 푸시
@@ -4899,7 +4927,7 @@ function _syncInit(){
 window.onload = () => {
   init();
   _syncInit();
-  _gcalSilentConnect(); // 저장된 클라이언트 ID 있으면 팝업 없이 자동 재연결 시도
+  _gcalRestore(); // 저장 토큰이 유효하면 즉시 복원, 아니면 silent 재연결 시도
   renderRightDumps();
   _renderSearchToggle();
   const sp = document.getElementById('scratchPad');
