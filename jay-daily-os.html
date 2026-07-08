@@ -673,6 +673,7 @@ body {
   <div class="main-header">
     <div class="main-header-title" id="mainTitle">🧠 브레인덤프</div>
     <div class="main-header-sub" id="mainSub"></div>
+    <span id="countdownWidget" onclick="openCountdownModal()" title="카운트다운 편집" style="display:none;align-items:center;font-size:12px;font-weight:700;color:var(--text2);cursor:pointer;padding:3px 11px;border-radius:8px;background:var(--surface2);white-space:nowrap"></span>
     <span id="syncStatus" onclick="onSyncStatusClick()" title="동기화" style="display:none;align-items:center;font-size:15px;cursor:pointer;padding:2px 8px"></span>
   </div>
 
@@ -1029,6 +1030,20 @@ body {
     </div>
   </div>
 </div>
+<!-- 카운트다운 -->
+<div class="modal-overlay" id="countdownModal">
+  <div class="modal-box" style="width:400px">
+    <div class="modal-title">⏳ 카운트다운</div>
+    <div class="form-group"><label class="form-label">제목</label><input class="form-input" id="cdTitle" placeholder="예: 베트남 토너"></div>
+    <div class="form-group"><label class="form-label">목표 일시</label><input class="form-input" type="datetime-local" id="cdTarget"></div>
+    <div class="form-group"><label class="form-label">이모지 (선택)</label><input class="form-input" id="cdEmoji" placeholder="🇻🇳" maxlength="8"></div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="deleteCountdown()" style="color:var(--red)">삭제</button>
+      <button class="btn-secondary" onclick="closeModal('countdownModal')">취소</button>
+      <button class="btn-primary" onclick="saveCountdown()">저장</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal-overlay" id="addGoalModal">
   <div class="modal-box">
@@ -1161,6 +1176,8 @@ let bankroll = JSON.parse(localStorage.getItem('jay_bankroll')||'[]'); // [{date
 let pokerLeak = JSON.parse(localStorage.getItem('jay_poker_leak')||'null'); // {text, since, quitRule}
 let pokerLearn = JSON.parse(localStorage.getItem('jay_poker_learn')||'[]'); // [{date, text}]
 let pokerCurrent = JSON.parse(localStorage.getItem('jay_poker_current')||'null'); // {date, start, goal} | null
+let countdown = JSON.parse(localStorage.getItem('jay_countdown')||'null'); // {title, emoji, target(ms)} | null
+function saveCountdownData(){ localStorage.setItem('jay_countdown', JSON.stringify(countdown)); }
 function savePokerSessions(){ localStorage.setItem('jay_poker_sessions', JSON.stringify(pokerSessions)); }
 function saveBankroll(){ localStorage.setItem('jay_bankroll', JSON.stringify(bankroll)); }
 function savePokerLeak(){ localStorage.setItem('jay_poker_leak', JSON.stringify(pokerLeak)); }
@@ -4806,6 +4823,47 @@ function resizerDown(e) {
   };
 }
 
+// ═══════════ 카운트다운 위젯 (1개 전용) ═══════════
+function _cdPad2(n){ return String(n).padStart(2,'0'); }
+function _cdToLocalInput(ms){ const d=new Date(ms); return `${d.getFullYear()}-${_cdPad2(d.getMonth()+1)}-${_cdPad2(d.getDate())}T${_cdPad2(d.getHours())}:${_cdPad2(d.getMinutes())}`; }
+function renderCountdown(){
+  const el=document.getElementById('countdownWidget'); if(!el) return;
+  if(!countdown || !countdown.target){ el.style.display='none'; return; } // 미설정 → 숨김
+  const now=Date.now(), diff=countdown.target-now;
+  const title=(countdown.title||'').replace(/</g,'&lt;');
+  const emoji=countdown.emoji?countdown.emoji+' ':'';
+  if(diff<=0){
+    if(now-countdown.target > 7*86400000){ el.style.display='none'; return; } // 지난 지 7일+ → 자동 숨김
+    el.style.display='inline-flex';
+    el.innerHTML=`🎉 ${emoji}${title} 시작!`;
+    return;
+  }
+  const days=Math.floor(diff/86400000), hours=Math.floor((diff%86400000)/3600000);
+  el.style.display='inline-flex';
+  el.innerHTML=`${emoji}${title} <b style="font-size:14px;color:var(--accent);margin:0 4px">D-${days}</b> · ${days}일 ${hours}시간`;
+}
+function openCountdownModal(){
+  document.getElementById('cdTitle').value = (countdown&&countdown.title) || '';
+  document.getElementById('cdEmoji').value = (countdown&&countdown.emoji) || '';
+  document.getElementById('cdTarget').value = (countdown&&countdown.target) ? _cdToLocalInput(countdown.target) : '';
+  openModal('countdownModal');
+  setTimeout(()=>{ const i=document.getElementById('cdTitle'); if(i) i.focus(); }, 30);
+}
+function saveCountdown(){
+  const title=(document.getElementById('cdTitle').value||'').trim();
+  const targetStr=document.getElementById('cdTarget').value;
+  const emoji=(document.getElementById('cdEmoji').value||'').trim();
+  if(!title){ showToast('제목을 입력해줘'); return; }
+  if(!targetStr){ showToast('목표 일시를 정해줘'); return; }
+  const ms=new Date(targetStr).getTime();
+  if(isNaN(ms)){ showToast('일시가 올바르지 않아'); return; }
+  countdown={ title, emoji, target: ms };
+  saveCountdownData(); closeModal('countdownModal'); renderCountdown(); showToast('✅ 카운트다운 저장됨');
+}
+function deleteCountdown(){
+  countdown=null; saveCountdownData(); closeModal('countdownModal'); renderCountdown(); showToast('카운트다운 삭제됨');
+}
+
 // ═══════════ 기기 간 동기화 (GitHub Gist, last-write-wins) ═══════════
 const SYNC_TOKEN_KEY='jay_sync_token', SYNC_GIST_KEY='jay_sync_gist_id', SYNC_LAST_KEY='jay_sync_last_push', SYNC_FILENAME='jay-daily-os-data.json';
 let _syncState='idle', _syncTimer=null, _syncApplying=false, _syncPending=false;
@@ -4928,6 +4986,8 @@ window.onload = () => {
   init();
   _syncInit();
   _gcalRestore(); // 저장 토큰이 유효하면 즉시 복원, 아니면 silent 재연결 시도
+  renderCountdown();
+  setInterval(renderCountdown, 60000); // 1분마다 갱신(초 단위 표시 안 함)
   renderRightDumps();
   _renderSearchToggle();
   const sp = document.getElementById('scratchPad');
