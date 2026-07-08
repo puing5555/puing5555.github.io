@@ -769,7 +769,7 @@ body {
           <div class="col-hdr">
             <span class="col-hdr-title">할 일</span>
             <span class="col-hdr-cnt" id="taskCnt">0</span>
-            <button onclick="dedupeTasks()" title="AI로 의미가 겹치는 할일 묶어 정리" style="margin-left:auto;padding:5px 10px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🧹 중복 정리</button>
+            <button id="dedupeBtn" onclick="dedupeTasks()" title="AI로 의미가 겹치는 할일 묶어 정리" style="margin-left:auto;padding:5px 10px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🧹 중복 정리</button>
             <button onclick="openAddTask()" style="padding:5px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ 추가</button>
           </div>
           <div class="col-body" id="taskList"></div>
@@ -1217,8 +1217,8 @@ function switchPanel(name, el) {
 }
 
 // ── API ──
-async function callClaude(messages, system, useSearch = false) {
-  const body = { model: 'claude-sonnet-4-6', max_tokens: useSearch ? 8000 : 4000, system, messages };
+async function callClaude(messages, system, useSearch = false, maxTokens = null) {
+  const body = { model: 'claude-sonnet-4-6', max_tokens: maxTokens || (useSearch ? 8000 : 4000), system, messages };
   // 웹 검색은 옵트인. 기본 대화·정형 응답은 tools 없이 예전처럼 빠르게.
   if (useSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2763,25 +2763,40 @@ function _findDupTask(text, tasks){
   return null;
 }
 
+// 응답에서 JSON 추출 — 마크다운 펜스 제거 후 첫 '{'~마지막 '}'만 잘라 파싱
+function _extractJson(raw){
+  const cleaned=(raw||'').replace(/```json|```/g,'').trim();
+  try{ return JSON.parse(cleaned); }catch(_){}
+  const s=cleaned.indexOf('{'), e=cleaned.lastIndexOf('}');
+  if(s!==-1 && e!==-1 && e>s){ return JSON.parse(cleaned.slice(s, e+1)); } // 앞뒤 설명 텍스트 제거
+  throw new Error('JSON 추출 실패');
+}
+
 // ── 기존 중복 일괄 정리 (Claude 그룹핑) ──
 async function dedupeTasks(){
   const day=getDay();
   const items=day.tasks.filter(t=>!t.done);
   if(items.length<2){ showToast('정리할 할일이 부족해'); return; }
   if(!getApiKey()){ showToast('API 키가 필요해 (우상단에서 설정)'); return; }
-  showToast('🧹 중복 분석 중…');
+  const btn=document.getElementById('dedupeBtn');
+  const btnLabel = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='⏳ 정리 중…'; btn.style.opacity='0.6'; }
+  let raw='';
   try{
-    const list=items.map((t,i)=>`${i}: ${t.text}`).join('\n');
-    const sys='너는 할일 목록에서 의미가 같은 것끼리 그룹핑하는 도우미야. 표현이 달라도 같은 행동이면 같은 그룹. 반드시 JSON만: {"groups":[[0,3],[1],[2,4,5]]} — 각 그룹은 인덱스 배열, 모든 인덱스가 정확히 한 번씩 포함돼야 해.';
-    const raw=await callClaude([{role:'user', content:`할일 목록:\n${list}\n\n의미 단위로 그룹핑해줘.`}], sys);
-    let parsed; try{ parsed=JSON.parse(raw.replace(/```json|```/g,'').trim()); }catch(e){ showToast('분석 실패 — 다시 시도해줘'); return; }
-    const groups=(parsed.groups||[]).filter(g=>Array.isArray(g)&&g.length);
-    if(!groups.length){ showToast('정리할 게 없어'); return; }
+    // 텍스트의 개행 제거(인덱스 줄 어긋남 방지). 요청 바디는 JSON.stringify로 이스케이프되므로 따옴표는 안전.
+    const list=items.map((t,i)=>`${i}: ${(t.text||'').replace(/\s+/g,' ').trim()}`).join('\n');
+    const sys='너는 할일 목록에서 의미가 같은 것끼리 묶는 도우미야. 표현이 달라도 같은 행동이면 같은 그룹. 텍스트는 절대 다시 쓰지 말고 인덱스 숫자만 사용해. 반드시 JSON 하나만 출력(설명·마크다운 금지): {"groups":[[0,3,7],[1,4],[2]]} — 각 그룹은 인덱스 배열이고 모든 인덱스가 정확히 한 번씩만 들어가야 해.';
+    raw=await callClaude([{role:'user', content:`할일 목록(인덱스: 내용):\n${list}\n\n의미 단위로 그룹핑해서 groups만 반환해줘.`}], sys, false, 4000);
+    let parsed;
+    try{ parsed=_extractJson(raw); }
+    catch(pe){ console.error('dedupeTasks JSON 파싱 실패:', pe, '\nraw:', raw); showToast('정리 실패: JSON 파싱 실패'); return; }
+    let groups=(parsed.groups||parsed.result||(Array.isArray(parsed)?parsed:[])).filter(g=>Array.isArray(g)&&g.length);
+    if(!groups.length){ console.warn('dedupeTasks: groups 없음, raw:', raw); showToast('묶을 그룹을 못 찾았어 — 다시 시도해줘'); return; }
     const keepReps=[], removeItems=[];
     groups.forEach(g=>{
       const idxs=g.filter(i=>Number.isInteger(i)&&items[i]).sort((a,b)=>a-b);
       if(!idxs.length) return;
-      const rep=items[idxs[0]];
+      const rep=items[idxs[0]];                 // 대표 = 그룹 첫 인덱스(코드에서 결정, LLM 재작성 안 함)
       rep.mentions=Math.max(rep.mentions||1, idxs.length);
       keepReps.push(rep);
       idxs.slice(1).forEach(i=>removeItems.push(items[i]));
@@ -2790,13 +2805,18 @@ async function dedupeTasks(){
     if(!removeSet.length){ showToast('중복이 없어 — 깔끔해!'); renderTasks(); return; }
     const before=items.length, after=before-removeSet.length;
     if(!confirm(`${before}개 → ${after}개로 정리됩니다. 계속할까?`)) return;
-    const backup=JSON.parse(localStorage.getItem('jay_tasks_backup')||'[]');
+    const backup=JSON.parse(localStorage.getItem('jay_tasks_backup')||'[]'); // 삭제분 항상 백업
     backup.push({ at:new Date().toISOString(), removed:removeSet.map(t=>({...t})) });
     localStorage.setItem('jay_tasks_backup', JSON.stringify(backup));
     day.tasks=day.tasks.filter(t=> !removeSet.includes(t));
     save(); renderTasks();
     showToast(`✅ ${before}개 → ${after}개로 정리됨`);
-  }catch(e){ showToast('정리 실패: '+(e.message||e)); }
+  }catch(e){
+    console.error('dedupeTasks 실패:', e, '\nraw:', raw);
+    showToast('정리 실패: '+((e&&e.message)||e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent=btnLabel||'🧹 중복 정리'; btn.style.opacity='1'; }
+  }
 }
 
 function renderTasks() {
