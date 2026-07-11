@@ -1418,6 +1418,7 @@ ${_useSearch ? `
     }
     msgs.scrollTop = msgs.scrollHeight;
     updateStat();
+    renderTasks(); // 대화에서 생성된 할일을 "오늘" 탭에 즉시 반영
     renderRightDumps();
     // 매 턴 노드 추출 폐지 — 트리는 "지금까지 나온 생각" 요약 카드 생성 시점에만 갱신(showThoughtSummaryCard)
   } catch(e) {
@@ -2028,6 +2029,19 @@ function _mmVisibleIds() {
   return visible;
 }
 
+// 마인드맵 상태를 내구 저장(노드 있으면 저장, 없으면 제거). 대화 세션 유무와 무관.
+function _doSaveMMState() {
+  try {
+    if (mmNodes.length > 0) {
+      localStorage.setItem('jay_mmState', JSON.stringify({
+        nodes: mmNodes, edges: mmEdges, rootId: mmRootId,
+        depthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit
+      }));
+    } else {
+      localStorage.removeItem('jay_mmState');
+    }
+  } catch(_) {}
+}
 function renderMMCanvas() {
   recalcMMDepths();
   const canvas = document.getElementById('mmCanvas');
@@ -2035,13 +2049,8 @@ function renderMMCanvas() {
   const _mmVisible = _mmVisibleIds();
   clearTimeout(_mmSaveTimer);
   _mmSaveTimer = setTimeout(() => {
-    if (_currentSessionMsgs.length > 0) {
-      upsertLiveSession();
-      localStorage.setItem('jay_mmState', JSON.stringify({
-        nodes: mmNodes, edges: mmEdges, rootId: mmRootId,
-        depthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit
-      }));
-    }
+    if (_currentSessionMsgs.length > 0) upsertLiveSession(); // 라이브 세션 스냅샷은 대화 있을 때만
+    _doSaveMMState(); // 마인드맵은 노드 있으면 항상 저장 (변경 시마다)
   }, 1000);
   updateMMDepthLabel();
   const ctx = canvas.getContext('2d');
@@ -4262,6 +4271,7 @@ async function analyzeSessionAndSave(session) {
     if (si !== -1) sessionHistory[si].analyzed = true;
     save();
     localStorage.setItem('jay_sessions', JSON.stringify(sessionHistory));
+    if (addedTask) renderTasks(); // 분석으로 추가된 할일 즉시 반영
     if (addedMemo || addedTask) {
       renderRightDumps();
       showToast(`📝 메모 ${addedMemo}개 · 할일 ${addedTask}개 자동 저장됨`);
@@ -4868,7 +4878,7 @@ function deleteCountdown(){
 }
 
 // ═══════════ 기기 간 동기화 (GitHub Gist, last-write-wins) ═══════════
-const SYNC_TOKEN_KEY='jay_sync_token', SYNC_GIST_KEY='jay_sync_gist_id', SYNC_LAST_KEY='jay_sync_last_push', SYNC_FILENAME='jay-daily-os-data.json';
+const SYNC_TOKEN_KEY='jay_sync_token', SYNC_GIST_KEY='jay_sync_gist_id', SYNC_LAST_KEY='jay_sync_last_push', SYNC_DIRTY_KEY='jay_sync_dirty', SYNC_FILENAME='jay-daily-os-data.json';
 let _syncState='idle', _syncTimer=null, _syncApplying=false, _syncPending=false;
 
 function _syncToken(){ return (localStorage.getItem(SYNC_TOKEN_KEY)||'').trim(); }
@@ -4884,6 +4894,7 @@ localStorage.setItem = function(k, v){ _origSetItem(k, v); if(typeof k==='string
 function _scheduleSyncPush(){
   if(_syncApplying || !_syncToken()) return;
   _syncPending=true;
+  _origSetItem(SYNC_DIRTY_KEY, '1'); // 미푸시 로컬 변경 마커(재로드 넘어 유지) — 역류 방지 가드용
   if(_syncState!=='syncing') _setSyncState('pending');
   if(_syncTimer) clearTimeout(_syncTimer);
   _syncTimer=setTimeout(()=>{ _syncTimer=null; _syncPushNow(); }, 30000);
@@ -4915,6 +4926,7 @@ async function _syncPushNow(){
     const res=await _gistApi('gists/'+id,{ method:'PATCH', body:JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } }) });
     const upd=(res && res.updated_at) ? res.updated_at : new Date().toISOString();
     _origSetItem(SYNC_LAST_KEY, upd);
+    localStorage.removeItem(SYNC_DIRTY_KEY); // 푸시 완료 → 미푸시 마커 해제
     _syncPending=false; _setSyncState('ok');
   }catch(e){ _handleSyncErr(e); }
 }
@@ -4929,6 +4941,11 @@ async function _syncPullOnLoad(){
     const lastPush=localStorage.getItem(SYNC_LAST_KEY);
     const file=gist.files && gist.files[SYNC_FILENAME];
     if(file && (!lastPush || new Date(remoteUpdated) > new Date(lastPush))){
+      // 보험 가드: 이전에 동기화한 적 있고(lastPush) 미푸시 로컬 변경이 남아 있으면
+      // 원격으로 덮어쓰지 말고 로컬 우선 → 로컬을 즉시 푸시. (역류로 인한 데이터 소실 방지)
+      if(lastPush && localStorage.getItem(SYNC_DIRTY_KEY)==='1'){
+        _setSyncState('ok'); _syncPushNow(); return;
+      }
       let content=file.content;
       if(file.truncated && file.raw_url){ content=await (await fetch(file.raw_url)).text(); }
       const parsed=JSON.parse(content);
@@ -4939,8 +4956,23 @@ async function _syncPullOnLoad(){
       }
     }
     _setSyncState('ok');
-    if(!localStorage.getItem(SYNC_LAST_KEY)) _syncPushNow();    // 최초 연결 → 로컬 데이터 백업 업로드
+    if(!localStorage.getItem(SYNC_LAST_KEY)) { _syncPushNow(); return; } // 최초 연결 → 로컬 백업 업로드
+    if(localStorage.getItem(SYNC_DIRTY_KEY)==='1') _syncPushNow();       // 미푸시 로컬 변경 플러시
   }catch(e){ _handleSyncErr(e); }
+}
+// beforeunload 강제 푸시 — keepalive fetch로 언로드 중에도 전송 (미푸시 변경 있을 때만)
+function _syncFlushOnUnload(){
+  try{
+    if(!_syncToken() || localStorage.getItem(SYNC_DIRTY_KEY)!=='1') return;
+    const id=localStorage.getItem(SYNC_GIST_KEY); if(!id) return;
+    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:_collectSyncData() });
+    fetch('https://api.github.com/gists/'+id, {
+      method:'PATCH', keepalive:true,
+      headers:{ 'Authorization':'Bearer '+_syncToken(), 'Accept':'application/vnd.github+json', 'Content-Type':'application/json' },
+      body: JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } })
+    });
+    // 응답을 못 받으니 lastPush은 갱신하지 않음 → 다음 로드에서 dirty 가드가 로컬을 다시 푸시하며 정리
+  }catch(_){}
 }
 function _applySyncData(data){
   _syncApplying=true;
@@ -4995,9 +5027,8 @@ window.onload = () => {
   _renderSearchToggle();
   const sp = document.getElementById('scratchPad');
   if (sp) sp.value = localStorage.getItem('jay_scratchpad') || '';
-  const savedMM = localStorage.getItem('jay_mmState');
-  localStorage.removeItem('jay_mmState');
-  if (savedMM && _currentSessionMsgs.length > 0) {
+  const savedMM = localStorage.getItem('jay_mmState'); // 내구 저장 — 로드 시 지우지 않음
+  if (savedMM) {
     try {
       const mm = JSON.parse(savedMM);
       if (mm.nodes && mm.nodes.length) {
@@ -5038,17 +5069,10 @@ window.onload = () => {
 };
 
 window.addEventListener('beforeunload', () => {
-  if (mmNodes.length > 0 && _currentSessionMsgs.length > 0) {
-    localStorage.setItem('jay_mmState', JSON.stringify({
-      nodes: mmNodes, edges: mmEdges, rootId: mmRootId,
-      depthLimit: _mmDepthLimit === Infinity ? null : _mmDepthLimit
-    }));
-  } else {
-    localStorage.removeItem('jay_mmState');
-  }
-  if (_currentSessionMsgs.length >= 2) {
-    saveCurrentSession();
-  }
+  // 새로고침은 활성 대화 유지 — 아카이브(saveCurrentSession)는 New 버튼에서만.
+  // 대화(jay_currentSession)는 recordSessionMsg가 이미 실시간 저장 중이라 여기서 할 일 없음.
+  _doSaveMMState();       // 마인드맵 최종 동기 저장
+  _syncFlushOnUnload();   // 미푸시 로컬 변경이 있으면 keepalive로 강제 푸시
 });
 </script>
 </body>
