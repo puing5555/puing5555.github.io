@@ -1023,6 +1023,14 @@ body {
       <input class="form-input" id="syncTokenInput" placeholder="ghp_... 또는 github_pat_..." autocomplete="off">
     </div>
     <div id="syncModalInfo" style="font-size:12px;color:var(--text2);margin-bottom:6px"></div>
+    <div style="border-top:1px solid var(--border);margin:14px 0 10px;padding-top:12px">
+      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:8px">📁 파일 백업 (수동 · 최후 보루)<br>모든 데이터를 JSON 파일로 내려받거나 되살려. 자동 백업은 매일 이 기기에 따로 저장돼.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-secondary" style="flex:1" onclick="exportData()">⤓ JSON 내보내기</button>
+        <button class="btn-secondary" style="flex:1" onclick="importData()">⤒ 가져오기</button>
+      </div>
+      <input type="file" id="importFileInput" accept="application/json,.json" style="display:none" onchange="_onImportFile(event)">
+    </div>
     <div class="modal-btns">
       <button class="btn-secondary" onclick="closeModal('syncModal')">닫기</button>
       <button class="btn-secondary" onclick="syncNow()">지금 동기화</button>
@@ -4899,6 +4907,90 @@ function deleteCountdown(){
   countdown=null; saveCountdownData(); closeModal('countdownModal'); renderCountdown(); showToast('카운트다운 삭제됨');
 }
 
+// ═══════════ 로컬 자동 백업 (IndexedDB 스냅샷, 최근 7일) + 파일 내보내기/가져오기 ═══════════
+// 마커 키는 'jay_' 프리픽스를 피해(‘jaybk_’) Gist 동기화 대상에서 제외 → 기기별 독립 유지.
+const _BK_MARKER='jaybk_last_date', _BK_MAX=7, _IDB_NAME='jay_backup', _IDB_STORE='snapshots';
+// 진짜 사용자 데이터가 담기는 키들 — 이게 다 비면 "빈 상태"로 판단(복원 안내 트리거)
+const _CONTENT_KEYS=['jay_allData','jay_goals','jay_memoData','jay_docsData','jay_sessions','jay_currentSession','jay_mmState','jay_routine','jay_poker_sessions','jay_bankroll','jay_poker_learn','jay_countdown','jay_scratchpad','jay_profile'];
+// 기기 전용 키 — 복원/가져오기 시 현재 기기 값을 보존(옛 토큰/키로 덮어쓰지 않음)
+function _bkDeviceKey(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_') || k.startsWith('jay_gcal'); }
+function _bkTodayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function _bkValHasContent(v){ if(v==null) return false; const s=String(v).trim(); return s!=='' && s!=='{}' && s!=='[]' && s!=='null' && s!=='undefined'; }
+function _bkDataHasContent(o){ return !!o && _CONTENT_KEYS.some(k=>_bkValHasContent(o[k])); }
+function _bkLocalLooksEmpty(){ return !_CONTENT_KEYS.some(k=>_bkValHasContent(localStorage.getItem(k))); }
+function _collectAllJay(){ const o={}; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_')) o[k]=localStorage.getItem(k); } return o; }
+
+function _idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open(_IDB_NAME,1); r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(_IDB_STORE)) db.createObjectStore(_IDB_STORE,{keyPath:'id'}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function _idbPut(rec){ return _idbOpen().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(_IDB_STORE,'readwrite'); tx.objectStore(_IDB_STORE).put(rec); tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();rej(tx.error);}; })); }
+function _idbAll(){ return _idbOpen().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(_IDB_STORE,'readonly'); const rq=tx.objectStore(_IDB_STORE).getAll(); rq.onsuccess=()=>{db.close();res(rq.result||[]);}; rq.onerror=()=>{db.close();rej(rq.error);}; })); }
+function _idbDelete(id){ return _idbOpen().then(db=>new Promise((res,rej)=>{ const tx=db.transaction(_IDB_STORE,'readwrite'); tx.objectStore(_IDB_STORE).delete(id); tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();rej(tx.error);}; })); }
+async function _idbLatestSnapshot(){ const all=await _idbAll(); if(!all.length) return null; all.sort((a,b)=>b.at-a.at); return all[0]; }
+
+// 하루 1회 스냅샷 저장 + 7일치만 보관. 빈 데이터는 저장 안 함(복원 소스 오염 방지).
+async function _idbDailySnapshot(){
+  const today=_bkTodayStr();
+  if(localStorage.getItem(_BK_MARKER)===today) return;
+  const data=_collectAllJay();
+  if(!_bkDataHasContent(data)){ _origSetItem(_BK_MARKER, today); return; }
+  await _idbPut({ id:today, at:Date.now(), data });
+  const all=await _idbAll();
+  if(all.length>_BK_MAX){ all.sort((a,b)=>a.at-b.at); for(const r of all.slice(0, all.length-_BK_MAX)) await _idbDelete(r.id); }
+  _origSetItem(_BK_MARKER, today);
+}
+// 현재 jay_ 데이터를 스냅샷으로 교체. 기기 전용 키는 현재 값 보존.
+function _restoreJayData(data){
+  const rm=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_bkDeviceKey(k)) rm.push(k); }
+  rm.forEach(k=>localStorage.removeItem(k));
+  Object.keys(data).forEach(k=>{ if(k.startsWith('jay_') && !_bkDeviceKey(k)) _origSetItem(k, data[k]); });
+}
+// onload 최초에 호출. wasEmpty=로컬이 비어있던 상태(초기화 전 캡처).
+async function _localBackupBoot(wasEmpty){
+  try{
+    if(wasEmpty){
+      const snap=await _idbLatestSnapshot();
+      if(snap && _bkDataHasContent(snap.data)){
+        if(confirm(`⚠ 저장된 데이터가 비어 있어요.\n\n${new Date(snap.at).toLocaleString('ko-KR')} 자동 백업이 있어요.\n여기서 복원할까요?`)){
+          _restoreJayData(snap.data);
+          location.reload(); return;
+        }
+      }
+    }
+    await _idbDailySnapshot();
+  }catch(e){ console.warn('local backup boot failed', e); }
+}
+
+// ── 파일 내보내기 / 가져오기 (수동 최후 보루) ──
+function exportData(){
+  try{
+    const payload={ app:'jay-daily-os', exported_at:new Date().toISOString(), data:_collectAllJay() };
+    const blob=new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=`jay-backup-${_bkTodayStr()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    showToast('⤓ JSON 내보내기 완료');
+  }catch(e){ console.warn(e); showToast('⚠ 내보내기 실패'); }
+}
+function importData(){ const el=document.getElementById('importFileInput'); if(el) el.click(); }
+function _onImportFile(ev){
+  const f=ev.target.files && ev.target.files[0]; if(!f){ return; }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const parsed=JSON.parse(reader.result);
+      const data=(parsed && parsed.data && typeof parsed.data==='object') ? parsed.data : parsed;
+      const keys=Object.keys(data||{}).filter(k=>k.startsWith('jay_') && !_bkDeviceKey(k));
+      if(!keys.length){ showToast('⚠ 가져올 데이터가 없어'); return; }
+      if(!confirm(`${keys.length}개 항목을 가져와서 현재 데이터를 덮어쓸까요?\n(지금 이 기기의 데이터는 사라져요)`)) return;
+      _restoreJayData(data);
+      showToast('✅ 가져오기 완료 — 새로고침');
+      setTimeout(()=>location.reload(), 700);
+    }catch(e){ console.warn(e); showToast('⚠ 파일을 읽을 수 없어'); }
+    finally{ ev.target.value=''; }
+  };
+  reader.readAsText(f);
+}
+
 // ═══════════ 기기 간 동기화 (GitHub Gist, last-write-wins) ═══════════
 const SYNC_TOKEN_KEY='jay_sync_token', SYNC_GIST_KEY='jay_sync_gist_id', SYNC_LAST_KEY='jay_sync_last_push', SYNC_DIRTY_KEY='jay_sync_dirty', SYNC_FILENAME='jay-daily-os-data.json';
 let _syncState='idle', _syncTimer=null, _syncApplying=false, _syncPending=false;
@@ -5040,6 +5132,8 @@ function _syncInit(){
 }
 
 window.onload = () => {
+  const _wasEmpty = _bkLocalLooksEmpty();   // init()가 데이터를 쓰기 전에 빈 상태 캡처
+  _localBackupBoot(_wasEmpty);              // 비어있고 자동 백업 있으면 복원 안내, 아니면 하루 1회 스냅샷
   init();
   _syncInit();
   _gcalRestore(); // 저장 토큰이 유효하면 즉시 복원, 아니면 silent 재연결 시도
