@@ -4913,7 +4913,8 @@ const _BK_MARKER='jaybk_last_date', _BK_MAX=7, _IDB_NAME='jay_backup', _IDB_STOR
 // 진짜 사용자 데이터가 담기는 키들 — 이게 다 비면 "빈 상태"로 판단(복원 안내 트리거)
 const _CONTENT_KEYS=['jay_allData','jay_goals','jay_memoData','jay_docsData','jay_sessions','jay_currentSession','jay_mmState','jay_routine','jay_poker_sessions','jay_bankroll','jay_poker_learn','jay_countdown','jay_scratchpad','jay_profile'];
 // 기기 전용 키 — 복원/가져오기 시 현재 기기 값을 보존(옛 토큰/키로 덮어쓰지 않음)
-function _bkDeviceKey(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_') || k.startsWith('jay_gcal'); }
+// jay_gcal_client_id는 비밀값이 아닌 공개 OAuth 식별자 → 백업/복원 대상에 포함
+function _bkDeviceKey(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_') || k.startsWith('jay_gcal_token'); }
 function _bkTodayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function _bkValHasContent(v){ if(v==null) return false; const s=String(v).trim(); return s!=='' && s!=='{}' && s!=='[]' && s!=='null' && s!=='undefined'; }
 function _bkDataHasContent(o){ return !!o && _CONTENT_KEYS.some(k=>_bkValHasContent(o[k])); }
@@ -4996,8 +4997,8 @@ const SYNC_TOKEN_KEY='jay_sync_token', SYNC_GIST_KEY='jay_sync_gist_id', SYNC_LA
 let _syncState='idle', _syncTimer=null, _syncApplying=false, _syncPending=false;
 
 function _syncToken(){ return (localStorage.getItem(SYNC_TOKEN_KEY)||'').trim(); }
-// 비밀키(jay_apiKey)와 동기화 메타(jay_sync_*)는 기기별 로컬 유지 → 동기화 제외
-// 비밀키·동기화 메타·기기별 구글 토큰은 기기 로컬 전용 → 동기화 제외
+// 비밀키(jay_apiKey)·동기화 메타(jay_sync_*)·기기별 구글 액세스 토큰은 기기 로컬 전용 → 동기화 제외
+// jay_gcal_client_id는 공개 OAuth 식별자라 제외하지 않음(동기화 포함)
 function _syncExcluded(k){ return k==='jay_apiKey' || k.startsWith('jay_sync_') || k==='jay_gcal_token' || k==='jay_gcal_token_exp'; }
 function _collectSyncData(){ const o={}; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) o[k]=localStorage.getItem(k); } return o; }
 
