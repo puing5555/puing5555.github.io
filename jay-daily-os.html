@@ -648,6 +648,7 @@ body {
       <span class="nav-badge" id="coachBadge" style="display:none">0</span>
     </button>
 <!-- TONY-COACH-TAB:END -->
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -836,6 +837,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
     <div id="panel-docs" class="panel" style="padding:20px 24px">
       <div id="docSectionChips" class="chip-row" style="margin-bottom:16px"></div>
       <div id="docList" style="overflow-y:auto;flex:1"></div>
@@ -5208,6 +5210,199 @@ window.addEventListener('beforeunload', () => {
   _syncFlushOnUnload();   // 미푸시 로컬 변경이 있으면 keepalive로 강제 푸시
 });
 </script>
+
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  /* 앱의 동기화 계층이 없으면 얹을 것도 없다 */
+  if(typeof _syncPushNow !== 'function' || typeof _collectSyncData !== 'function'){
+    console.warn('[보호] 앱 동기화 함수를 못 찾았다 — 3중 장치 미설치');
+    return;
+  }
+
+  const SEED_KEY   = 'jay_sync_seeded';         /* 이 기기가 원격 시딩을 마쳤는가 */
+  const SNAP_KEY   = 'jay_sync_last_snapshot';  /* 마지막 스냅샷 날짜 YYYYMMDD */
+  const GUARD_RATIO = 0.5;                      /* 원격 대비 이 비율 미만이면 차단 */
+  const SNAP_KEEP  = 7;
+  /* jay_sync_* 는 앱이 동기화에서 제외하는 접두사 → 기기 로컬 전용이고 푸시를 유발하지 않는다 */
+  const setLocal = (typeof _origSetItem === 'function')
+      ? _origSetItem : localStorage.setItem.bind(localStorage);
+  const gistKey  = (typeof SYNC_GIST_KEY === 'string') ? SYNC_GIST_KEY : 'jay_sync_gist_id';
+  const appFile  = (typeof SYNC_FILENAME === 'string') ? SYNC_FILENAME : 'jay-daily-os-data.json';
+  const toast    = m => { try { showToast(m); } catch(_){} };
+
+  /* ── 데이터 무게 — 문자열 길이가 아니라 '항목 수'를 센다 ───────────────────
+     한 항목이 길어진 것과 여러 항목이 사라진 것을 구분해야 하기 때문이다. */
+  function count(v, d){
+    d = d || 0;
+    if(v == null || d > 3) return 0;
+    if(Array.isArray(v)){ let n = v.length; for(const x of v) n += count(x, d+1); return n; }
+    if(typeof v === 'object'){ const ks = Object.keys(v); let n = ks.length;
+      for(const k of ks) n += count(v[k], d+1); return n; }
+    return 0;
+  }
+  function weigh(data){
+    let n = 0;
+    for(const k of Object.keys(data || {})){
+      n += 1;
+      try { n += count(JSON.parse(data[k]), 0); } catch(_){}
+    }
+    return n;
+  }
+
+  async function remoteData(){
+    const id = localStorage.getItem(gistKey);
+    if(!id) return null;
+    let g = null;
+    try { g = await _gistApi('gists/'+id); } catch(_){ return null; }
+    const f = g && g.files && g.files[appFile];
+    if(!f) return null;
+    let txt = f.content;
+    if(f.truncated && f.raw_url){
+      try { txt = await (await fetch(f.raw_url)).text(); } catch(_){ return null; }
+    }
+    try { const p = JSON.parse(txt || '{}'); return (p && p.data) || {}; } catch(_){ return null; }
+  }
+
+  let _pullInFlight = false;   /* pull 내부의 '최초 연결 업로드'는 통과시킨다 */
+  let _overrideOnce = false;   /* JAY가 확인한 1회용 통행증 */
+  let _blocked      = null;    /* {lw, rw, why} — 차단 상태 */
+
+  async function precheck(){
+    if(!_syncToken()) return { ok:true };
+
+    /* ② 시딩 전에는 절대 푸시하지 않는다. 대신 원격을 먼저 받아온다. */
+    if(!_pullInFlight && localStorage.getItem(SEED_KEY) !== '1'){
+      console.warn('[보호] 원격 시딩 전 — 푸시 대신 pull 먼저');
+      return { ok:false, pull:true };
+    }
+    if(_overrideOnce) return { ok:true };
+
+    /* ① 로컬이 비었으면 원격을 읽을 것도 없이 차단.
+          원격 조회가 실패해도 이 검사만은 살아 있어야 한다. */
+    const local = _collectSyncData(), lw = weigh(local);
+    if(lw === 0) return { ok:false, block:{ lw:0, rw:null, why:'이 기기의 데이터가 비어 있다' } };
+
+    const rd = await remoteData();
+    if(!rd) return { ok:true };   /* 원격을 못 읽었다 — 저장 자체를 막으면 그게 더 큰 손실 */
+    const rw = weigh(rd);
+    if(rw > 0 && lw < rw * GUARD_RATIO)
+      return { ok:false, block:{ lw, rw, why:'이 기기 데이터가 원격의 절반 미만' } };
+    return { ok:true };
+  }
+
+  const _origPush = _syncPushNow;
+  _syncPushNow = async function(){
+    let v;
+    try { v = await precheck(); }
+    catch(e){ console.warn('[보호] 가드 판단 실패 — 그대로 진행', e); v = { ok:true }; }
+
+    if(v.pull) return _syncPullOnLoad();
+    if(v.block){
+      _blocked = v.block;
+      try { _setSyncState('error'); } catch(_){}
+      toast('⚠ 원격을 덮어쓸 뻔했어 — 동기화 아이콘을 눌러 확인해줘');
+      console.warn(`[보호] 푸시 차단 — ${v.block.why} (로컬 ${v.block.lw} / 원격 ${v.block.rw})`);
+      return;
+    }
+    if(!v.ok) return;
+
+    _overrideOnce = false;
+    _blocked = null;
+    const r = await _origPush.apply(this, arguments);
+    maybeSnapshot().catch(e => console.warn('[보호] 스냅샷 실패', e));
+    return r;
+  };
+
+  /* ── 확인 창: 동기화 아이콘을 누르면 차단을 풀 수 있다 ─────────────────── */
+  const _origClick = (typeof onSyncStatusClick === 'function') ? onSyncStatusClick : null;
+  onSyncStatusClick = function(){
+    if(_blocked){
+      const { lw, rw, why } = _blocked;
+      const msg = '원격을 덮어쓰려 함 — 정말?\n\n' + why + '\n\n'
+        + '이 기기: ' + lw + '개 항목\n'
+        + '원격   : ' + (rw == null ? '(읽지 못함)' : rw + '개 항목') + '\n\n'
+        + '계속하면 원격 데이터가 이 기기 것으로 교체된다.\n'
+        + '취소하면 원격은 그대로 남는다.';
+      if(confirm(msg)){ _overrideOnce = true; _blocked = null; _syncPushNow(); }
+      else { toast('푸시를 취소했어 — 원격 데이터는 그대로야'); }
+      return;
+    }
+    if(_origClick) return _origClick.apply(this, arguments);
+  };
+
+  /* ── ② 시딩 표시 ─────────────────────────────────────────────────────────
+     pull이 실제로 성공했을 때만 표시한다. 네트워크 실패로 시딩됐다고 치면
+     다음 푸시가 빈 로컬로 원격을 덮어쓸 수 있다. */
+  const _origPull = _syncPullOnLoad;
+  _syncPullOnLoad = async function(){
+    _pullInFlight = true;
+    try { return await _origPull.apply(this, arguments); }
+    finally {
+      _pullInFlight = false;
+      try { if(_syncState === 'ok') setLocal(SEED_KEY, '1'); } catch(_){}
+    }
+  };
+  /* 원격을 로컬에 적용하는 순간이 곧 시딩 완료다 (이 경로는 곧바로 reload된다) */
+  if(typeof _applySyncData === 'function'){
+    const _origApply = _applySyncData;
+    _applySyncData = function(){ setLocal(SEED_KEY, '1'); return _origApply.apply(this, arguments); };
+  }
+  /* 언로드 중에는 확인을 받을 수 없다 — 차단 상태거나 시딩 전이면 보내지 않는다 */
+  if(typeof _syncFlushOnUnload === 'function'){
+    const _origFlush = _syncFlushOnUnload;
+    _syncFlushOnUnload = function(){
+      if(_blocked || localStorage.getItem(SEED_KEY) !== '1') return;
+      return _origFlush.apply(this, arguments);
+    };
+  }
+
+  /* ── ③ 일일 스냅샷 ──────────────────────────────────────────────────────
+     같은 Gist에 backup-YYYYMMDD.json 으로 하루 1개. 최근 7개만 남긴다.
+     coach-*.json 과 앱 파일은 건드리지 않는다 — PATCH는 이름 붙인 파일만 바꾼다. */
+  function stamp(){
+    const d = new Date();
+    return '' + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+  }
+  async function maybeSnapshot(){
+    const today = stamp();
+    if(localStorage.getItem(SNAP_KEY) === today) return;
+    const id = localStorage.getItem(gistKey);
+    if(!id) return;
+
+    const name = 'backup-' + today + '.json';
+    const files = { [name]: { content: JSON.stringify({
+      updated_at: new Date().toISOString(), data: _collectSyncData() }) } };
+
+    const g = await _gistApi('gists/'+id);
+    const olds = Object.keys((g && g.files) || {})
+      .filter(n => /^backup-\d{8}\.json$/.test(n) && n !== name).sort();
+    const drop = Math.max(0, olds.length - (SNAP_KEEP - 1));   /* 오늘 것 포함 7개 */
+    olds.slice(0, drop).forEach(n => { files[n] = null; });      /* null = 삭제 */
+
+    await _gistApi('gists/'+id, {
+      method:'PATCH', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ files })
+    });
+    setLocal(SNAP_KEY, today);
+    console.log(`[보호] 일일 스냅샷 ${name}${drop ? ` · 오래된 ${drop}개 삭제` : ''}`);
+  }
+
+  /* 콘솔에서 손으로 부를 수 있게 열어둔다 */
+  window.dataGuard = {
+    weigh, snapshot: maybeSnapshot,
+    status(){ return {
+      seeded: localStorage.getItem(SEED_KEY) === '1',
+      lastSnapshot: localStorage.getItem(SNAP_KEY),
+      blocked: _blocked,
+      localWeight: weigh(_collectSyncData())
+    }; },
+    async resetSeed(){ localStorage.removeItem(SEED_KEY); return '시딩 표시를 지웠다 — 다음 푸시 전에 pull이 먼저 돈다'; }
+  };
+  console.log('[보호] 데이터 3중 장치 설치됨 (푸시 가드 · pull-first · 일일 스냅샷)');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 /* ── 토니 코치 탭 (읽기 전용) ─────────────────────────────────────────────
@@ -5227,15 +5422,83 @@ function coEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&a
 function coAvg(a){ return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
 function coRound(n){ return n==null ? '—' : (Math.round(n*10)/10).toFixed(1); }
 
-async function coachFetch(){
-  const token = localStorage.getItem('jay_sync_token');
-  const gid   = localStorage.getItem('jay_sync_gist_id');
-  if(!token || !gid) throw new Error('먼저 동기화 설정에서 토큰과 Gist를 연결해줘.');
-  const res = await fetch('https://api.github.com/gists/'+gid, {
+/* ── 자격증명: 앱 것을 그대로 쓴다 ────────────────────────────────────────
+   별도 설정 입력을 받지 않는다. 앱의 접근자(_syncToken/_ensureGistId)와 키 상수를
+   먼저 쓰고, 없을 때만 같은 이름의 리터럴로 떨어진다.
+
+   앱은 Gist ID를 **지연 해석**한다 — 토큰만 저장돼 있고 아직 푸시가 없으면
+   jay_sync_gist_id가 비어 있을 수 있다. 예전 코치 탭은 그 값이 이미 있다고
+   가정해서 바로 '연결 안 됨'을 띄웠다. 이제는 앱과 같은 방식으로 직접 찾는다. */
+const COACH_GIST_CACHE = 'jay_sync_coach_gist_id';  /* jay_sync_ 접두사 = 기기 로컬 전용(동기화 제외) */
+
+function coachToken(){
+  try { if(typeof _syncToken === 'function') return _syncToken(); } catch(_){}
+  const k = (typeof SYNC_TOKEN_KEY === 'string') ? SYNC_TOKEN_KEY : 'jay_sync_token';
+  return (localStorage.getItem(k) || '').trim();
+}
+function coachGistKey(){ return (typeof SYNC_GIST_KEY === 'string') ? SYNC_GIST_KEY : 'jay_sync_gist_id'; }
+function coachAppFile(){ return (typeof SYNC_FILENAME === 'string') ? SYNC_FILENAME : 'jay-daily-os-data.json'; }
+function coachRemember(id){
+  /* jay_sync_* 는 앱이 동기화에서 제외하는 접두사라 setItem 훅이 푸시를 걸지 않는다 */
+  try { localStorage.setItem(COACH_GIST_CACHE, id); } catch(_){}
+}
+
+async function coachApi(path, token){
+  const res = await fetch('https://api.github.com/'+path, {
     headers:{ Authorization:'Bearer '+token, Accept:'application/vnd.github+json' }
   });
+  if(res.status === 401 || res.status === 403){
+    const e = new Error('앱 동기화 토큰이 만료됐거나 권한이 없어 — 동기화 설정에서 다시 넣어줘.');
+    e.coachAuth = true;  /* 인증 실패는 절대 삼키지 않는다 — '봇이 안 올림'으로 오진된다 */
+    throw e;
+  }
   if(!res.ok) throw new Error('Gist 읽기 실패 ('+res.status+')');
-  const files = (await res.json()).files || {};
+  return res.json();
+}
+/* 탐색 중 실패는 다음 후보로 넘어가되, 인증 실패만은 즉시 올린다 */
+async function coachTry(path, token){
+  try { return await coachApi(path, token); }
+  catch(e){ if(e && e.coachAuth) throw e; return null; }
+}
+function coachHasFiles(gist){
+  const f = (gist && gist.files) || {};
+  return !!(f[COACH_LOG_FILE] || f[COACH_MAP_FILE]);
+}
+
+/* 코치 파일이 있는 Gist를 찾는다. 만들지는 않는다 — 쓰는 쪽은 봇 하나뿐이다. */
+async function coachResolve(token){
+  const tried = [];
+  for(const id of [localStorage.getItem(COACH_GIST_CACHE), localStorage.getItem(coachGistKey())])
+    if(id && !tried.includes(id)) tried.push(id);
+
+  /* 앱이 아직 Gist를 해석하지 않았으면 앱의 로직으로 해석시킨다 */
+  if(!tried.length && typeof _ensureGistId === 'function'){
+    try { const id = await _ensureGistId(); if(id) tried.push(id); } catch(_){}
+  }
+
+  for(const id of tried){
+    const g = await coachTry('gists/'+id, token);
+    if(coachHasFiles(g)) return { id, gist:g };
+  }
+  /* 앱 Gist에 코치 파일이 없다 → 계정 전체에서 찾는다(목록 응답에 파일명이 들어 있다) */
+  const list = await coachTry('gists?per_page=100', token);
+  const hit = (list||[]).find(coachHasFiles);
+  if(hit){ coachRemember(hit.id); return { id:hit.id, gist: await coachApi('gists/'+hit.id, token) }; }
+
+  /* 앱 Gist는 찾았는데 봇이 아직 안 올린 경우 — '연결 안 됨'과 구분해서 알린다 */
+  const appGist = (list||[]).find(g => g.files && g.files[coachAppFile()]);
+  if(appGist || tried.length) throw new Error(
+    '연결은 됐는데 Gist에 coach-map.json / coach-log.json 이 아직 없어. 봇을 한 번 돌려줘 (python bot.py).');
+  throw new Error('앱 Gist를 못 찾았어. 우측 상단 동기화 아이콘에서 한 번 저장하면 같이 연결돼.');
+}
+
+async function coachFetch(){
+  const token = coachToken();
+  if(!token) throw new Error(
+    '앱 동기화 토큰이 아직 없어. 우측 상단 동기화 아이콘에서 토큰을 넣으면 코치 탭도 같이 연결돼.');
+  const { id, gist } = await coachResolve(token);
+  coachRemember(id);
+  const files = (gist && gist.files) || {};
   const grab = async name => {
     const f = files[name]; if(!f) return null;
     const txt = f.truncated && f.raw_url ? await (await fetch(f.raw_url)).text() : f.content;
@@ -5627,7 +5890,15 @@ async function renderCoach(force){
   if(!_coachCache || force){
     status.textContent = '불러오는 중…';
     try { _coachCache = await coachFetch(); }
-    catch(e){ status.textContent = ''; body.innerHTML = coCard('연결 안 됨', coEmpty(coEsc(e.message))); return; }
+    catch(e){
+      status.textContent = '';
+      /* 앱 토큰이 비동기로 늦게 붙는 경우가 있어 다시 시도를 붙여둔다 (새로고침 불필요) */
+      body.innerHTML = coCard('연결 안 됨', coEmpty(coEsc(e.message))
+        + `<button onclick="renderCoach(true)" style="margin-top:8px;background:var(--surface2);
+            border:1px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:12px;
+            font-family:inherit;cursor:pointer;color:var(--text2)">다시 시도</button>`);
+      return;
+    }
   }
   const { map, log } = _coachCache;
   if(!map && !log){ status.textContent=''; body.innerHTML = coCard('데이터 없음', coEmpty('봇이 아직 아무것도 쓰지 않았어.')); return; }
