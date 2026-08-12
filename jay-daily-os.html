@@ -642,6 +642,12 @@ body {
     <button class="nav-btn" onclick="switchPanel('docs',this)">
       <span class="nav-icon">📄</span> 문서
     </button>
+<!-- TONY-COACH-TAB:BEGIN -->
+    <button class="nav-btn" onclick="switchPanel('coach',this)">
+      <span class="nav-icon">🏋️</span> 코치
+      <span class="nav-badge" id="coachBadge" style="display:none">0</span>
+    </button>
+<!-- TONY-COACH-TAB:END -->
   </div>
 
   <!-- 스크래치패드 -->
@@ -821,6 +827,15 @@ body {
     </div>
 
     <!-- 문서 패널 -->
+<!-- TONY-COACH-TAB:BEGIN -->
+    <div id="panel-coach" class="panel" style="padding:20px 24px;overflow-y:auto">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <div id="coachStatus" style="font-size:12px;color:var(--muted)">불러오는 중…</div>
+        <button onclick="renderCoach(true)" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:4px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text2)">새로고침</button>
+      </div>
+      <div id="coachBody"></div>
+    </div>
+<!-- TONY-COACH-TAB:END -->
     <div id="panel-docs" class="panel" style="padding:20px 24px">
       <div id="docSectionChips" class="chip-row" style="margin-bottom:16px"></div>
       <div id="docList" style="overflow-y:auto;flex:1"></div>
@@ -1230,7 +1245,7 @@ function switchPanel(name, el) {
     }
   }
   currentPanel = name;
-  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', cal:'📅 달력', goals:'🎯 목표', poker:'🃏 포커', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서' };
+  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', cal:'📅 달력', goals:'🎯 목표', poker:'🃏 포커', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서', coach:'🏋️ 코치' };
   document.getElementById('mainTitle').textContent = titles[name] || name;
   if (name === 'today') renderTasks();
   if (name === 'cal') renderCal();
@@ -1238,6 +1253,7 @@ function switchPanel(name, el) {
   if (name === 'goals') renderGoals();
   if (name === 'routine') renderRoutine();
   if (name === 'memo') renderMemo();
+  if (name === 'coach') renderCoach();
   if (name === 'docs') renderDocs();
 }
 
@@ -5192,5 +5208,438 @@ window.addEventListener('beforeunload', () => {
   _syncFlushOnUnload();   // 미푸시 로컬 변경이 있으면 keepalive로 강제 푸시
 });
 </script>
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+/* ── 토니 코치 탭 (읽기 전용) ─────────────────────────────────────────────
+   봇이 Gist에 쓴 coach-map.json / coach-log.json 을 읽어 렌더한다.
+   Daily OS 앱은 jay-daily-os-data.json 만 쓰므로 서로 건드리지 않는다.       */
+
+const COACH_MAP_FILE = 'coach-map.json', COACH_LOG_FILE = 'coach-log.json';
+let _coachCache = null;
+
+const CO_TAGS = ['수면','몸','일','사람','모름'];
+const CO_DOW  = ['월','화','수','목','금','토','일'];
+/* 2계열 팔레트 — CVD 분리 ΔE 28.5(protan) 검증됨. 대비 보정으로 모든 막대에 값 직접 표기. */
+const CO_C1 = '#ff6f0f';  /* 처방 전 */
+const CO_C2 = '#2277dd';  /* 처방 후 */
+
+function coEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function coAvg(a){ return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
+function coRound(n){ return n==null ? '—' : (Math.round(n*10)/10).toFixed(1); }
+
+async function coachFetch(){
+  const token = localStorage.getItem('jay_sync_token');
+  const gid   = localStorage.getItem('jay_sync_gist_id');
+  if(!token || !gid) throw new Error('먼저 동기화 설정에서 토큰과 Gist를 연결해줘.');
+  const res = await fetch('https://api.github.com/gists/'+gid, {
+    headers:{ Authorization:'Bearer '+token, Accept:'application/vnd.github+json' }
+  });
+  if(!res.ok) throw new Error('Gist 읽기 실패 ('+res.status+')');
+  const files = (await res.json()).files || {};
+  const grab = async name => {
+    const f = files[name]; if(!f) return null;
+    const txt = f.truncated && f.raw_url ? await (await fetch(f.raw_url)).text() : f.content;
+    try { return JSON.parse(txt||'{}'); } catch(e){ return null; }
+  };
+  return { map: await grab(COACH_MAP_FILE), log: await grab(COACH_LOG_FILE) };
+}
+
+/* ── 카드 ───────────────────────────────────────────────────────────── */
+function coCard(title, inner, note){
+  return `<div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:16px 18px;margin-bottom:14px">
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:var(--text)">${title}</div>
+      ${note?`<div style="font-size:11px;color:var(--muted)">${note}</div>`:''}
+    </div>${inner}</div>`;
+}
+function coPill(text, color, dim){
+  return `<span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;
+    background:${dim||'var(--surface2)'};color:${color||'var(--text2)'};margin:0 5px 5px 0">${coEsc(text)}</span>`;
+}
+function coEmpty(t){ return `<div style="font-size:12px;color:var(--muted);padding:6px 0">${t}</div>`; }
+
+/* ── 1. 커리큘럼 보드 ───────────────────────────────────────────────── */
+const CO_MODULE_NAMES = {
+  M1:'결단', M2:'고통·쾌락 지렛대', M3:'NAC 습관 교체', M4:'질문의 힘', M5:'어휘 변환',
+  M6:'감정=행동 신호', M7:'가치 서열', M8:'숨은 규칙', M9:'정체성', M10:'끌어당기는 미래',
+  M11:'신념', M12:'상태 관리', M13:'인생 은유', M14:'10일 정신 도전', M15:'마스터 시스템',
+  M16:'참조 경험', M17:'행동 강령',
+  D1:'감정의 운명', D2:'신체의 운명', D3:'관계의 운명', D4:'재정의 운명',
+  D6:'시간 지배', D7:'휴식과 놀이',
+  S1:'목표→시스템', S2:'에너지 최우선', S3:'실패=자원', S4:'재능 스택',
+  S5:'접는 법', S6:'결정 vs 소망', S7:'연상 프로그래밍', S8:'행복 공식'
+};
+function coModule(id, tone){
+  const name = CO_MODULE_NAMES[id] || '';
+  const c = tone==='active' ? CO_C1 : tone==='done' ? 'var(--green)' : 'var(--text2)';
+  const bg = tone==='active' ? 'var(--accent-dim)' : 'var(--surface2)';
+  return `<span style="display:inline-flex;align-items:baseline;gap:5px;padding:5px 10px;border-radius:8px;
+    background:${bg};margin:0 6px 6px 0;font-size:12px">
+    <b style="color:${c};font-weight:700">${id}</b><span style="color:var(--text2)">${coEsc(name)}</span></span>`;
+}
+function coBoard(map){
+  const st = (map && map.module_state) || {};
+  const row = (label, ids, tone) => `<div style="margin-bottom:10px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:5px">${label}</div>
+      ${(ids&&ids.length) ? ids.map(i=>coModule(i,tone)).join('') : coEmpty('없음')}</div>`;
+  const cond = (st.active||[]).filter(m=>['M1','M3','M4','M5','M6','M10','M13','M14','S2'].includes(m) && !['M17','S2'].includes(m)).length;
+  const sess = (st.active||[]).filter(m=>['M1','M7','M8','M9','M11'].includes(m)).length;
+  return coCard('커리큘럼 보드',
+    row('진행 중', st.active, 'active') + row('대기 큐', st.queue, 'queue') + row('완료', st.done, 'done'),
+    `컨디셔닝 ${cond}/2 · 세션 ${sess}/1`);
+}
+
+/* ── 2. 비전 지도 ───────────────────────────────────────────────────── */
+function coVision(map){
+  if(!map) return coCard('비전 지도', coEmpty('아직 데이터가 없어.'));
+  const d = map.dream||{}, s = map.standards||{};
+  const kv = (k,v) => `<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+    <div style="width:88px;flex-shrink:0;font-size:11px;color:var(--muted);padding-top:1px">${k}</div>
+    <div style="flex:1;font-size:12px;color:var(--text);line-height:1.7">${v}</div></div>`;
+  const list = a => (a&&a.length) ? a.map(x=>coPill(typeof x==='string'?x:(x.statement||x.text||JSON.stringify(x)))).join('') : '<span style="color:var(--muted);font-size:12px">—</span>';
+  const rules = (map.hidden_rules||[]).map(r =>
+    `<div style="font-size:12px;margin-bottom:4px"><b>${coEsc(r.emotion||'')}</b> — ${coEsc(r.rule||'')}${r.revised?` <span style="color:var(--green)">→ ${coEsc(r.revised)}</span>`:''}</div>`).join('') || '<span style="color:var(--muted);font-size:12px">—</span>';
+  const vocab = Object.entries(map.vocab_swap||{}).map(([a,b])=>coPill(a+' → '+b, CO_C1, 'var(--accent-dim)')).join('') || '<span style="color:var(--muted);font-size:12px">—</span>';
+  const coc = ((map.code_of_conduct||{}).states)||[];
+  const cocHtml = coc.length ? coc.map(x=>coPill(typeof x==='string'?x:(x.name||''), 'var(--green)', 'rgba(0,170,102,0.10)')).join('') : '<span style="color:var(--muted);font-size:12px">—</span>';
+  return coCard('비전 지도',
+    kv('꿈', (d.text?coEsc(d.text):'<span style="color:var(--muted)">미작성</span>') + ` ${coPill(d.status||'미구체화', CO_C1, 'var(--accent-dim)')}`)
+    + kv('정체성', list(map.identity))
+    + kv('지향 가치', list(s.values_ranked))
+    + kv('회피 가치', list(s.avoid_values))
+    + kv('숨은 규칙', rules)
+    + kv('치환 사전', vocab)
+    + kv('행동 강령', cocHtml));
+}
+
+/* ── 3. 에너지 차트 ─────────────────────────────────────────────────── */
+/* 척도 1~10 (JAY 결정). 눈금은 양 끝을 포함해 3등분 — 10줄은 너무 촘촘하다.
+   4는 원인 태그 임계, 7은 그 위 구간이라 읽는 데도 쓸모가 있다. */
+const CO_SMIN=1, CO_SMAX=10, CO_TICKS=[1,4,7,10];
+const coFrac = v => (v-CO_SMIN)/(CO_SMAX-CO_SMIN);
+function coEnergyRows(log){
+  return (log && log.energy || []).filter(e => typeof e.score === 'number');
+}
+/* 추이 — 단일 시리즈이므로 범례 없음(제목이 시리즈를 지시). 값은 직접 표기. */
+function coTrend(rows){
+  const byDate = {};
+  rows.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e.score); });
+  const dates = Object.keys(byDate).sort().slice(-14);
+  if(dates.length < 2) return coEmpty('추이를 그리려면 이틀 이상 기록이 필요해.');
+  const vals = dates.map(d => coAvg(byDate[d]));
+  const W=720,H=180,L=30,R=14,T=14,B=26, pw=W-L-R, ph=H-T-B;
+  const x = i => L + (dates.length===1 ? pw/2 : i*pw/(dates.length-1));
+  const y = v => T + ph - coFrac(v)*ph;
+  let g='';
+  for(const s of CO_TICKS){
+    g += `<line x1="${L}" y1="${y(s)}" x2="${W-R}" y2="${y(s)}" stroke="var(--border2)" stroke-width="1"/>`
+       + `<text x="${L-7}" y="${y(s)+4}" text-anchor="end" font-size="10" fill="var(--muted)">${s}</text>`;
+  }
+  const pts = vals.map((v,i)=>`${x(i)},${y(v)}`).join(' ');
+  let marks='';
+  vals.forEach((v,i)=>{
+    marks += `<circle cx="${x(i)}" cy="${y(v)}" r="4.5" fill="var(--surface)" stroke="${CO_C1}" stroke-width="2"
+       tabindex="0" role="img" aria-label="${dates[i]} 평균 ${coRound(v)}점"><title>${dates[i]} · 평균 ${coRound(v)}점</title></circle>`;
+  });
+  const last = vals.length-1;
+  marks += `<text x="${x(last)}" y="${y(vals[last])-11}" text-anchor="end" font-size="11" font-weight="700" fill="var(--text)">${coRound(vals[last])}</text>`;
+  const labs = dates.map((d,i)=> (i===0||i===dates.length-1||dates.length<=7||i%2===0)
+      ? `<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--muted)">${d.slice(5)}</text>` : '').join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="일자별 평균 에너지 추이">
+    ${g}<polyline points="${pts}" fill="none" stroke="${CO_C1}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${marks}${labs}</svg>`;
+}
+/* 태그별 — 2계열(처방 전/후) 그룹 막대. 범례 + 값 직접 표기. */
+function coByTag(rows){
+  const before={}, after={};
+  CO_TAGS.forEach(t=>{ before[t]=[]; after[t]=[]; });
+  rows.forEach(e=>{
+    const t = CO_TAGS.includes(e.tag) ? e.tag : null; if(!t) return;
+    (String(e.anchor||'').includes('재확인') ? after : before)[t].push(e.score);
+  });
+  const used = CO_TAGS.filter(t=>before[t].length||after[t].length);
+  if(!used.length) return coEmpty('아직 태그 기록이 없어.');
+  const rowH=36, W=720, L=54, R=44, pw=W-L-R, H=used.length*rowH+26;
+  const x = v => coFrac(v)*pw;
+  let out='';
+  used.forEach((t,i)=>{
+    const yb = 8+i*rowH, b=coAvg(before[t]), a=coAvg(after[t]);
+    out += `<text x="${L-9}" y="${yb+16}" text-anchor="end" font-size="11" fill="var(--text2)">${t}</text>`;
+    if(b!=null){ const w=Math.max(x(b),2);
+      out += `<rect x="${L}" y="${yb}" width="${w}" height="12" rx="4" fill="${CO_C1}"><title>${t} 처방 전 평균 ${coRound(b)}점 (${before[t].length}회)</title></rect>`
+           + `<text x="${L+w+6}" y="${yb+10}" font-size="10" font-weight="700" fill="var(--text)">${coRound(b)}</text>`; }
+    if(a!=null){ const w=Math.max(x(a),2), y2=yb+14; /* 2px 간격 */
+      out += `<rect x="${L}" y="${y2}" width="${w}" height="12" rx="4" fill="${CO_C2}"><title>${t} 처방 후 평균 ${coRound(a)}점 (${after[t].length}회)</title></rect>`
+           + `<text x="${L+w+6}" y="${y2+10}" font-size="10" font-weight="700" fill="var(--text)">${coRound(a)}</text>`; }
+  });
+  const legend = `<div style="display:flex;gap:14px;font-size:11px;color:var(--text2);margin-bottom:8px">
+    <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${CO_C1};margin-right:5px"></span>처방 전</span>
+    <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${CO_C2};margin-right:5px"></span>처방 후(30분)</span></div>`;
+  return legend + `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="원인 태그별 평균 에너지">${out}</svg>`;
+}
+/* 요일별 — 단일 시리즈. 값 직접 표기. */
+function coByDow(rows){
+  const buckets = CO_DOW.map(()=>[]);
+  rows.filter(e=>!String(e.anchor||'').includes('재확인')).forEach(e=>{
+    const d = new Date(e.date+'T00:00:00'); if(isNaN(d)) return;
+    buckets[(d.getDay()+6)%7].push(e.score);
+  });
+  if(!buckets.some(b=>b.length)) return coEmpty('아직 기록이 없어.');
+  const W=720,H=160,L=30,R=14,T=16,B=26, pw=W-L-R, ph=H-T-B, bw=Math.min(48, pw/7-10);
+  const cx = i => L + pw/7*(i+0.5);
+  let g='';
+  for(const s of CO_TICKS){ const yy=T+ph-coFrac(s)*ph;
+    g += `<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="var(--border2)" stroke-width="1"/>`
+       + `<text x="${L-7}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${s}</text>`; }
+  let out='';
+  buckets.forEach((b,i)=>{
+    const v=coAvg(b);
+    out += `<text x="${cx(i)}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--muted)">${CO_DOW[i]}</text>`;
+    if(v==null) return;
+    const h=Math.max(coFrac(v)*ph,2), yy=T+ph-h;
+    out += `<rect x="${cx(i)-bw/2}" y="${yy}" width="${bw}" height="${h}" rx="4" fill="${CO_C1}"><title>${CO_DOW[i]}요일 평균 ${coRound(v)}점 (${b.length}회)</title></rect>`
+         + `<text x="${cx(i)}" y="${yy-5}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--text)">${coRound(v)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="요일별 평균 에너지">${g}${out}</svg>`;
+}
+function coEnergy(log){
+  const rows = coEnergyRows(log);
+  if(!rows.length) return coCard('에너지', coEmpty('아직 에너지 기록이 없어.'));
+  const base = rows.filter(e=>!String(e.anchor||'').includes('재확인'));
+  const note = `${base.length}회 측정 · 평균 ${coRound(coAvg(base.map(e=>e.score)))}점`;
+  return coCard('에너지 추이', coTrend(rows), note)
+       + coCard('원인 태그별', coByTag(rows), '처방 전후 비교')
+       + coCard('요일별', coByDow(rows));
+}
+
+/* ── 4. 처방 플레이북 ───────────────────────────────────────────────── */
+function coPlaybook(log){
+  const byTag = {};
+  Object.entries((log&&log.anchors)||{}).forEach(([date, anchors])=>{
+    Object.entries(anchors||{}).forEach(([anchor, a])=>{
+      if(!a || a.score==null || a.recheck_score==null) return;
+      const t = a.tag || '모름';
+      (byTag[t] = byTag[t] || []).push({ date, anchor, delta: a.recheck_score - a.score,
+        before: a.score, after: a.recheck_score, text: a.prescription || '' });
+    });
+  });
+  const tags = Object.keys(byTag);
+  if(!tags.length) return coCard('처방 플레이북', coEmpty('처방 전/후 쌍이 아직 없어. 저점 → 처방 → 30분 재확인이 한 번은 돌아야 채워져.'));
+  let out='';
+  tags.sort((a,b)=>coAvg(byTag[b].map(x=>x.delta))-coAvg(byTag[a].map(x=>x.delta))).forEach(t=>{
+    const items = byTag[t], avg = coAvg(items.map(x=>x.delta)), n = items.length;
+    const verified = n>=2 && avg>0;
+    const col = avg>0 ? 'var(--green)' : avg<0 ? 'var(--red)' : 'var(--text2)';
+    out += `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
+        <b style="font-size:12px;color:var(--text)">${coEsc(t)}</b>
+        <span style="font-size:11px;font-weight:700;color:${col}">평균 ${avg>0?'+':''}${coRound(avg)}점</span>
+        <span style="font-size:11px;color:var(--muted)">${n}회</span>
+        ${verified?coPill('검증됨','var(--green)','rgba(0,170,102,0.10)'):coPill('실험 중')}
+      </div>
+      ${items.slice(-3).reverse().map(x=>`<div style="font-size:11px;color:var(--text2);line-height:1.7;padding-left:2px">
+        <span style="color:var(--muted)">${x.date} ${coEsc(x.anchor)}</span> ${x.before}→${x.after}
+        ${x.text?`<div style="color:var(--text2);opacity:.85;margin:2px 0 4px">${coEsc(x.text).slice(0,160)}</div>`:''}</div>`).join('')}
+    </div>`;
+  });
+  return coCard('처방 플레이북', out, '2회 이상 + 평균 상승이면 검증됨');
+}
+
+/* ── 5. 미해결 질문 큐 ──────────────────────────────────────────────── */
+function coQuestions(map){
+  const qs = (map && map.open_questions) || [];
+  if(!qs.length) return coCard('미해결 질문 큐', coEmpty('비어 있음.'));
+  return coCard('미해결 질문 큐',
+    qs.slice().reverse().map(q=>`<div style="font-size:12px;color:var(--text);line-height:1.8;padding:6px 0;border-bottom:1px solid var(--border)">${coEsc(q)}</div>`).join(''),
+    `${qs.length}개`);
+}
+
+/* ── 노트 / 일정 제안 (코치 탭 안) ──────────────────────────────────── */
+const CO_KIND_COLOR = { '통찰':'var(--purple)', '결정':CO_C1, '아이디어':'var(--blue)' };
+
+function coNotes(log){
+  const ns = (log && log.notes) || [];
+  if(!ns.length) return coCard('코치 노트', coEmpty('아직 분류된 노트가 없어.'));
+  return coCard('코치 노트',
+    ns.slice().reverse().slice(0,20).map(n=>`<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:baseline;gap:7px;margin-bottom:3px">
+        ${coPill(n.kind, CO_KIND_COLOR[n.kind]||'var(--text2)', 'var(--surface2)')}
+        <span style="font-size:10px;color:var(--muted)">${n.date||''}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text);line-height:1.7">${coEsc(n.text)}</div>
+      <div style="margin-top:4px">${(n.tags||[]).map(t=>coPill('#'+t)).join('')}</div>
+    </div>`).join(''), `${ns.length}개 · 메모 탭에도 함께 보인다`);
+}
+
+function coEventsCard(log){
+  const es = coPendingEvents(log);
+  if(!es.length) return coCard('일정 제안', coEmpty('대기 중인 제안이 없어.'));
+  return coCard('일정 제안',
+    es.map(e=>`<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text)">
+      <b>${e.date}</b>${e.time?' '+e.time:''} · ${coEsc(e.title)}
+      <span style="color:var(--muted);font-size:11px"> ← "${coEsc(e.raw||'')}"</span></div>`).join(''),
+    '승인/거절은 달력 탭에서');
+}
+
+/* ── 승인 상태 (앱 소유 데이터) ─────────────────────────────────────────
+   봇은 제안만 쌓고, 승인/거절 기록과 실제 등록은 **앱 코드**가 한다.
+   jay_ 로 시작하는 키라 앱의 기존 동기화가 알아서 실어 나른다.            */
+const COACH_DEC_KEY = 'jay_coachDecisions';
+function coachDecisions(){ try { return JSON.parse(localStorage.getItem(COACH_DEC_KEY)||'{}'); } catch(e){ return {}; } }
+function coachSetDecision(id, verdict){
+  const d = coachDecisions(); d[id] = { verdict, at: new Date().toISOString() };
+  localStorage.setItem(COACH_DEC_KEY, JSON.stringify(d));   // setItem 후킹 → 자동 푸시
+}
+function coPendingEvents(log){
+  const dec = coachDecisions();
+  return ((log && log.events) || []).filter(e => !dec[e.id]);
+}
+
+/* ── 데이터 로더 (메모·달력 패널이 공유) ────────────────────────────── */
+let _coachLoading = null;
+function coachEnsure(then){
+  if(_coachCache){ then && then(_coachCache); return; }
+  if(!_coachLoading) _coachLoading = coachFetch().then(d=>{ _coachCache=d; _coachLoading=null; return d; })
+                                                .catch(()=>{ _coachLoading=null; return null; });
+  _coachLoading.then(d=>{ if(d && then) then(d); });
+}
+
+/* ── ② 메모 탭 병합 (읽기 전용) ─────────────────────────────────────── */
+function coachNoteCard(n){
+  return `<div class="memo-card" style="border-left:3px solid ${CO_KIND_COLOR[n.kind]||'var(--accent)'};cursor:default">
+    <div style="position:absolute;top:8px;right:10px;font-size:9px;font-weight:700;color:${CO_C1};
+      background:var(--accent-dim);border-radius:999px;padding:2px 7px">🏋️ 코치</div>
+    <div class="memo-cat">${coEsc(n.kind)}</div>
+    <div class="memo-text">${coEsc(n.text)}</div>
+    <div class="memo-tags">${(n.tags||[]).map(t=>`<span class="memo-tag">${coEsc(t)}</span>`).join('')}</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px;opacity:.6">${n.date||''} · 읽기 전용</div>
+  </div>`;
+}
+function coachAppendNotes(cat){
+  const grid = document.getElementById('memoGrid'); if(!grid) return;
+  coachEnsure(d=>{
+    const notes = ((d.log||{}).notes)||[];
+    const show = notes.filter(n => cat==='전체' || n.kind===cat);
+    if(!show.length) return;
+    const empty = grid.querySelector('.empty');
+    if(empty) empty.remove();   // 앱 메모가 0개여도 코치 노트는 보여준다
+    grid.insertAdjacentHTML('beforeend',
+      show.slice().reverse().map(coachNoteCard).join(''));
+  });
+}
+function coachAppendMemoChips(){
+  const el = document.getElementById('memoCatChips'); if(!el) return;
+  coachEnsure(d=>{
+    const kinds = [...new Set((((d.log||{}).notes)||[]).map(n=>n.kind))];
+    kinds.forEach(k=>{
+      if([...el.querySelectorAll('.chip')].some(c=>c.textContent.trim()===k)) return;
+      el.insertAdjacentHTML('beforeend',
+        `<button class="chip" onclick="filterMemo('${k}',this)">${k} <span style="color:${CO_C1}">·</span></button>`);
+    });
+  });
+}
+
+/* ── ③ 달력 탭: 제안 표시 + 승인/거절 ───────────────────────────────── */
+function coachApprove(id){
+  coachEnsure(d=>{
+    const ev = (((d.log||{}).events)||[]).find(e=>e.id===id); if(!ev) return;
+    const key = ev.date.replace(/-/g,'');
+    if(!allData[key]) allData[key] = { tasks:[], schedule:[], dumps:[], diary:'', report:'' };
+    const bucket = allData[key];
+    if(ev.time){
+      if(!bucket.schedule.some(s=>s.time===ev.time && s.task===ev.title))
+        bucket.schedule.push({ time: ev.time, task: ev.title, note: '코치 제안' });
+    } else {
+      if(!bucket.tasks.some(t=>t.text===ev.title))
+        bucket.tasks.push({ text: ev.title, priority:2, when:'today', urgent:false, done:false });
+    }
+    save();                       // ← 앱이 자기 데이터에 정식 등록
+    coachSetDecision(id,'approved');
+    showToast(`✅ ${ev.date}${ev.time?' '+ev.time:''} 등록됨`);
+    renderCal(); if(typeof renderTasks==='function') renderTasks();
+  });
+}
+function coachReject(id){
+  coachSetDecision(id,'rejected');
+  showToast('제안 지움');
+  renderCal();
+}
+function coachProposalsHtml(log){
+  const es = coPendingEvents(log);
+  if(!es.length) return '';
+  return `<div style="max-width:520px;margin:0 auto 12px;background:var(--surface);border:1px solid var(--border2);
+    border-radius:12px;padding:12px 14px">
+    <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">
+      🏋️ 코치 일정 제안 <span style="font-size:11px;font-weight:400;color:var(--muted)">승인하면 내 달력에 등록된다</span></div>
+    ${es.map(e=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:var(--text)"><b>${e.date}</b>${e.time?' '+e.time:''} · ${coEsc(e.title)}</div>
+        ${e.raw?`<div style="font-size:10px;color:var(--muted);margin-top:1px">"${coEsc(e.raw)}"</div>`:''}
+      </div>
+      <button onclick="coachApprove('${e.id}')" style="background:${CO_C1};color:#fff;border:none;border-radius:7px;
+        padding:5px 11px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer">승인</button>
+      <button onclick="coachReject('${e.id}')" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);
+        border-radius:7px;padding:5px 9px;font-size:11px;font-family:inherit;cursor:pointer">거절</button>
+    </div>`).join('')}
+  </div>`;
+}
+function coachDecorateCal(){
+  const host = document.getElementById('calMine'); if(!host) return;
+  coachEnsure(d=>{
+    const log = d.log||{};
+    document.getElementById('coachProposals')?.remove();
+    const html = coachProposalsHtml(log);
+    if(html) host.insertAdjacentHTML('afterbegin', `<div id="coachProposals">${html}</div>`);
+    // 날짜 칸에 제안 표식
+    const pend = coPendingEvents(log);
+    if(!pend.length) return;
+    const byDate = {}; pend.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
+    host.querySelectorAll('[onclick^="selectCalDate("]').forEach(cell=>{
+      const m = /selectCalDate\('([\d-]+)'\)/.exec(cell.getAttribute('onclick')||''); if(!m) return;
+      const evs = byDate[m[1]]; if(!evs) return;
+      cell.insertAdjacentHTML('beforeend',
+        `<div title="코치 제안 ${evs.length}건" style="position:absolute;bottom:3px;right:4px;font-size:9px;
+          font-weight:800;color:${CO_C1};background:var(--accent-dim);border-radius:999px;padding:1px 5px">🏋️${evs.length}</div>`);
+    });
+  });
+}
+
+/* ── 기존 렌더 함수 감싸기 (원본 수정 없음) ─────────────────────────── */
+(function(){
+  if(typeof renderMemoGrid === 'function'){
+    const _o = renderMemoGrid;
+    renderMemoGrid = function(cat){ _o.apply(this, arguments); coachAppendNotes(cat); };
+  }
+  if(typeof renderMemo === 'function'){
+    const _o = renderMemo;
+    renderMemo = function(){ _o.apply(this, arguments); coachAppendMemoChips(); };
+  }
+  if(typeof renderCalMine === 'function'){
+    const _o = renderCalMine;
+    renderCalMine = function(){ _o.apply(this, arguments); coachDecorateCal(); };
+  }
+})();
+
+/* ── 렌더 ───────────────────────────────────────────────────────────── */
+async function renderCoach(force){
+  const body = document.getElementById('coachBody');
+  const status = document.getElementById('coachStatus');
+  if(!body) return;
+  if(!_coachCache || force){
+    status.textContent = '불러오는 중…';
+    try { _coachCache = await coachFetch(); }
+    catch(e){ status.textContent = ''; body.innerHTML = coCard('연결 안 됨', coEmpty(coEsc(e.message))); return; }
+  }
+  const { map, log } = _coachCache;
+  if(!map && !log){ status.textContent=''; body.innerHTML = coCard('데이터 없음', coEmpty('봇이 아직 아무것도 쓰지 않았어.')); return; }
+  const rows = coEnergyRows(log);
+  status.textContent = `읽기 전용 · 에너지 ${rows.length}건 · ${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})} 기준`;
+  body.innerHTML = coBoard(map) + coVision(map) + coEnergy(log)
+                 + coPlaybook(log) + coNotes(log) + coEventsCard(log) + coQuestions(map);
+  const badge = document.getElementById('coachBadge');
+  const n = ((map&&map.open_questions)||[]).length;
+  if(badge){ badge.style.display = n ? '' : 'none'; badge.textContent = n; }
+}
+</script>
+<!-- TONY-COACH-TAB:END -->
 </body>
 </html>
