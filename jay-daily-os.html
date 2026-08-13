@@ -614,6 +614,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -874,6 +877,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1062,6 +1066,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5479,6 +5484,13 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -6314,7 +6326,8 @@ function coChannels(map, log){
         <div style="font-size:13px;font-weight:600;color:var(--text);
           overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${coEsc(c.title)}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">
-          ${c.added || ''} 등록 · 카드 ${mine.length}개</div>
+          ${c.handle ? coEsc(c.handle) + ' · ' : ''}${c.added || ''} 등록 · 카드 ${mine.length}개
+          ${c.via ? `<span style="opacity:.7">(${coEsc(c.via)})</span>` : ''}</div>
       </div>
       <button onclick="coachRemoveChannel('${coEsc(c.channel_id)}', this.dataset.t)"
         data-t="${coEsc(c.title)}" aria-label="구독 해제"
