@@ -649,6 +649,7 @@ body {
     </button>
 <!-- TONY-COACH-TAB:END -->
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -837,6 +838,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
     <div id="panel-docs" class="panel" style="padding:20px 24px">
       <div id="docSectionChips" class="chip-row" style="margin-bottom:16px"></div>
@@ -5211,6 +5213,8 @@ window.addEventListener('beforeunload', () => {
 });
 </script>
 
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -5565,8 +5569,24 @@ function coVision(map){
   const vocab = Object.entries(map.vocab_swap||{}).map(([a,b])=>coPill(a+' → '+b, CO_C1, 'var(--accent-dim)')).join('') || '<span style="color:var(--muted);font-size:12px">—</span>';
   const coc = ((map.code_of_conduct||{}).states)||[];
   const cocHtml = coc.length ? coc.map(x=>coPill(typeof x==='string'?x:(x.name||''), 'var(--green)', 'rgba(0,170,102,0.10)')).join('') : '<span style="color:var(--muted);font-size:12px">—</span>';
+  /* 확정 사실 — 지도의 본체. 롤링 요약이 아니라 여기가 기억이다. */
+  const CO_FK = ['목표','기한','결정','루틴','원칙','답변'];
+  const facts = (map.facts||[]).slice().sort((a,b)=>
+    (CO_FK.indexOf(a.kind)-CO_FK.indexOf(b.kind)) || String(a.key||'').localeCompare(String(b.key||'')));
+  const factHtml = facts.length ? CO_FK.map(k=>{
+    const rows = facts.filter(f=>f.kind===k);
+    if(!rows.length) return '';
+    return `<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--muted);margin-bottom:3px">${k}</div>`
+      + rows.map(f=>`<div style="font-size:12px;color:var(--text);line-height:1.65;padding-left:8px;border-left:2px solid ${CO_C1};margin-bottom:4px">
+          ${coEsc(f.text||'')}${f.deadline?` <span style="color:${CO_C1};font-weight:600">${coEsc(f.deadline)}</span>`:''}
+          ${f.note?`<div style="font-size:11px;color:var(--muted)">※ ${coEsc(f.note)}</div>`:''}
+          ${f.revised_from?`<div style="font-size:11px;color:var(--muted)">이전: ${coEsc(f.revised_from)}</div>`:''}
+        </div>`).join('') + '</div>';
+  }).join('') : '<span style="color:var(--muted);font-size:12px">아직 확정된 사실이 없어.</span>';
+
   return coCard('비전 지도',
-    kv('꿈', (d.text?coEsc(d.text):'<span style="color:var(--muted)">미작성</span>') + ` ${coPill(d.status||'미구체화', CO_C1, 'var(--accent-dim)')}`)
+    kv('확정 사실', factHtml)
+    + kv('꿈', (d.text?coEsc(d.text):'<span style="color:var(--muted)">미작성</span>') + ` ${coPill(d.status||'미구체화', CO_C1, 'var(--accent-dim)')}`)
     + kv('정체성', list(map.identity))
     + kv('지향 가치', list(s.values_ranked))
     + kv('회피 가치', list(s.avoid_values))
@@ -5882,6 +5902,38 @@ function coachDecorateCal(){
   }
 })();
 
+/* ── 6. 운영 다이제스트 (P2) ────────────────────────────────────────── */
+function coDigest(log){
+  const dg = (log && log.digest) || {};
+  const dates = Object.keys(dg).sort().slice(-7);
+  if(!dates.length) return '';
+  const cols = [['calls','호출'],['cost_usd','비용$'],['truncated','잘림'],
+                ['continued','이어'],['requestioned','재질문'],['extract_fail','추출실패'],
+                ['frustration','답답'],['notes','노트']];
+  const sum = {}; cols.forEach(([k])=>sum[k]=0);
+  const body = dates.map(d=>{
+    const m = dg[d]||{};
+    cols.forEach(([k])=>sum[k]+=(m[k]||0));
+    return `<tr>${[`<td style="padding:4px 8px;color:var(--text2)">${d.slice(5)}</td>`]
+      .concat(cols.map(([k])=>{
+        const v = m[k]||0;
+        /* 0이 아닌 문제 지표만 색을 준다 — 전부 칠하면 아무것도 안 보인다 */
+        const bad = ['truncated','requestioned','extract_fail','frustration'].includes(k) && v>0;
+        const s = k==='cost_usd' ? v.toFixed(3) : v;
+        return `<td style="padding:4px 8px;text-align:right;color:${bad?CO_C1:'var(--text)'};
+          font-weight:${bad?700:400}">${s}</td>`;
+      })).join('')}</tr>`;
+  }).join('');
+  const head = `<tr>${['<th style="padding:4px 8px;text-align:left;font-weight:600;color:var(--muted);font-size:11px">날짜</th>']
+    .concat(cols.map(([,l])=>`<th style="padding:4px 8px;text-align:right;font-weight:600;color:var(--muted);font-size:11px">${l}</th>`)).join('')}</tr>`;
+  const foot = `<tr style="border-top:1px solid var(--border2)">${['<td style="padding:4px 8px;color:var(--muted)">합계</td>']
+    .concat(cols.map(([k])=>`<td style="padding:4px 8px;text-align:right;color:var(--text2)">${k==='cost_usd'?sum[k].toFixed(3):sum[k]}</td>`)).join('')}</tr>`;
+  return coCard('운영 다이제스트',
+    `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      ${head}${body}${foot}</table></div>`,
+    '최근 7일 · 주황은 손볼 것');
+}
+
 /* ── 렌더 ───────────────────────────────────────────────────────────── */
 async function renderCoach(force){
   const body = document.getElementById('coachBody');
@@ -5905,7 +5957,8 @@ async function renderCoach(force){
   const rows = coEnergyRows(log);
   status.textContent = `읽기 전용 · 에너지 ${rows.length}건 · ${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})} 기준`;
   body.innerHTML = coBoard(map) + coVision(map) + coEnergy(log)
-                 + coPlaybook(log) + coNotes(log) + coEventsCard(log) + coQuestions(map);
+                 + coPlaybook(log) + coNotes(log) + coEventsCard(log) + coQuestions(map)
+                 + coDigest(log);
   const badge = document.getElementById('coachBadge');
   const n = ((map&&map.open_questions)||[]).length;
   if(badge){ badge.style.display = n ? '' : 'none'; badge.textContent = n; }
