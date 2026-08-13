@@ -603,6 +603,8 @@ body {
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
 
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -750,6 +752,63 @@ body {
 .modal-box { position: relative; }
 </style>
 <!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<style>
+.pl-creed {
+  background: var(--accent-dim); border: 1.5px solid var(--accent);
+  border-radius: 12px; padding: 10px 14px; margin-bottom: 12px;
+  font-size: 13px; font-weight: 800; color: var(--accent); line-height: 1.45;
+}
+.pl-card {
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 14px; padding: 14px; margin-bottom: 12px;
+}
+.pl-big {
+  width: 100%; min-height: 56px; border-radius: 14px; border: none;
+  background: var(--accent); color: #fff; font-size: 16px; font-weight: 800;
+  cursor: pointer; font-family: inherit; touch-action: manipulation;
+}
+.pl-big.ghost { background: var(--surface); color: var(--text); border: 1.5px solid var(--border2); }
+.pl-big:active { filter: brightness(.94); }
+.pl-tags { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.pl-tag {
+  min-height: 64px; border-radius: 14px; border: 1.5px solid var(--border2);
+  background: var(--surface2); color: var(--text); font-size: 16px; font-weight: 800;
+  cursor: pointer; font-family: inherit; touch-action: manipulation;
+}
+.pl-tag:active { background: var(--accent-dim); border-color: var(--accent); }
+.pl-num {
+  min-width: 44px; min-height: 48px; flex: 1; border-radius: 11px;
+  border: 1.5px solid var(--border2); background: var(--surface);
+  color: var(--text2); font-size: 15px; font-weight: 700; cursor: pointer;
+  font-family: inherit; touch-action: manipulation;
+}
+.pl-num.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pl-row { display: flex; gap: 6px; }
+.pl-block {
+  display: flex; align-items: center; gap: 8px; padding: 9px 0;
+  border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.pl-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; background: var(--surface2); color: var(--text2);
+}
+/* 세션 중에는 신조가 스크롤을 따라와야 '상시 표시'다 */
+#plHost.live .pl-creed {
+  position: sticky; top: 0; z-index: 21;
+  background: #fdefe2; backdrop-filter: blur(6px);
+}
+/* 세션 중에는 [+실수]가 항상 손 닿는 곳에 있어야 한다 */
+#plDock {
+  position: sticky; bottom: 0; z-index: 20;
+  padding: 10px 0 4px; background: linear-gradient(to top, var(--bg) 72%, transparent);
+}
+@media (max-width: 768px) {
+  .pl-tags { grid-template-columns: repeat(2, 1fr); }
+  .pl-creed { font-size: 12.5px; }
+}
+</style>
+<!-- TONY-COACH-TAB:END -->
 </head>
 <body>
 
@@ -797,6 +856,7 @@ body {
       <span class="nav-badge" id="coachBadge" style="display:none">0</span>
     </button>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -990,6 +1050,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5380,6 +5441,11 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -6418,6 +6484,407 @@ async function renderCoach(force){
   });
 
   window.overlays = { stack, top: () => overlayTop() };
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  const KEY = 'jay_pokerLive';
+  const TAGS = ['프리플랍', '콜다운', '블러프', '틸트', '기타'];
+  const CREED = '결과가 아니라 결정이 틀린 것만 실수다.';
+
+  /* ── 저장소 ───────────────────────────────────────────────────────────── */
+  function load(){
+    try { const d = JSON.parse(localStorage.getItem(KEY) || '{}');
+          return { active: d.active || null, history: d.history || [] }; }
+    catch(_){ return { active: null, history: [] }; }
+  }
+  function save(d){ localStorage.setItem(KEY, JSON.stringify(d)); }  /* jay_ → 동기화 대상 */
+  let PL = load();
+
+  /* ── 시간 블록 ────────────────────────────────────────────────────────── */
+  const pad = n => String(n).padStart(2, '0');
+  const h12 = h => pad(((h % 12) === 0) ? 12 : (h % 12));
+  /** 11시대 → "11-12", 12시대 → "12-01". 시계 정시에 맞춰 끊는다. */
+  function blockKeyAt(d){ return h12(d.getHours()) + '-' + h12((d.getHours() + 1) % 24); }
+  function blockOf(d){
+    const s = new Date(d); s.setMinutes(0, 0, 0);
+    const e = new Date(s); e.setHours(s.getHours() + 1);
+    return { key: blockKeyAt(d), from: s.toISOString(), to: e.toISOString() };
+  }
+  /** 세션 시작부터 지금까지의 블록을 빠짐없이 채운다 (앱을 껐다 켜도 복구된다). */
+  function syncBlocks(a){
+    const now = new Date(), cur = new Date(a.startedAt);
+    cur.setMinutes(0, 0, 0);
+    let added = 0;
+    while(cur <= now){
+      const b = blockOf(cur);
+      if(!a.blocks.some(x => x.from === b.from)){
+        a.blocks.push({ ...b, mistakes: [], eval: null }); added++;
+      }
+      cur.setHours(cur.getHours() + 1);
+    }
+    if(added) save(PL);
+    return a.blocks;
+  }
+  function currentBlock(a){
+    syncBlocks(a);
+    const now = new Date().toISOString();
+    return a.blocks.find(b => b.from <= now && now < b.to) || a.blocks[a.blocks.length - 1];
+  }
+  const uid = p => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  /* ── 세션 ─────────────────────────────────────────────────────────────── */
+  window.plStart = function(type){
+    if(PL.active){ showToast('이미 세션이 돌고 있어'); return; }
+    const now = new Date();
+    PL.active = {
+      id: uid('pls'), type: (type === 'online' ? 'online' : 'live'),
+      startedAt: now.toISOString(), blocks: []
+    };
+    syncBlocks(PL.active); save(PL); plRender();
+    showToast('▶ ' + (type === 'online' ? '온라인' : '라이브') + ' 세션 시작');
+  };
+
+  window.plEnd = function(){
+    const a = PL.active; if(!a) return;
+    if(!confirm('세션을 끝낼까? 요약이 만들어지고 기록에 남아.')) return;
+    a.endedAt = new Date().toISOString();
+    a.summary = summarize(a);
+    PL.history.unshift(a); PL.history = PL.history.slice(0, 60);
+    PL.active = null; save(PL); plRender();
+    plShowSummary(PL.history[0]);
+  };
+
+  /* 시트도 화면을 덮는다 — 오버레이 닫기 체계(✕·스크림·뒤로가기)에 태운다 */
+  function sheetOpen(id, close){
+    const el = document.getElementById(id); if(!el) return;
+    el.classList.add('open');
+    if(typeof overlayOpen === 'function') overlayOpen(id, () => el.classList.remove('open'));
+  }
+  function sheetClose(id){
+    if(typeof overlayClose === 'function' && overlayClose(id)) return;
+    const el = document.getElementById(id); if(el) el.classList.remove('open');
+  }
+
+  /* ── ② 실수 기록 — 2탭 ───────────────────────────────────────────────── */
+  let _pendingMode = '즉시';
+  window.plOpenMistake = function(mode){
+    if(!PL.active){ showToast('세션을 먼저 시작해줘'); return; }
+    _pendingMode = mode || '즉시';
+    sheetOpen('plTagSheet', plCloseMistake);
+    document.getElementById('plTagTitle').textContent =
+      _pendingMode === '즉시' ? '뭐가 틀렸어?' : '회고로 추가 — 뭐가 틀렸어?';
+  };
+  window.plCloseMistake = function(){ sheetClose('plTagSheet'); };
+  /** 2탭째. 여기서 바로 저장한다 — 확인 창도 저장 버튼도 없다. */
+  window.plTag = function(tag, blockKey){
+    const a = PL.active; if(!a) return;
+    const b = blockKey ? a.blocks.find(x => x.key === blockKey) : currentBlock(a);
+    if(!b) return;
+    b.mistakes.push({
+      id: uid('m'), tag, at: new Date().toISOString(),
+      mode: _pendingMode            /* 즉시 | 회고 — 언제 적었는지가 데이터다 */
+    });
+    save(PL); plCloseMistake(); plRender();
+    showToast('기록됨 · ' + tag + ' (' + b.key + ')');
+  };
+  window.plUndoMistake = function(bk, id){
+    const a = PL.active; if(!a) return;
+    const b = a.blocks.find(x => x.key === bk); if(!b) return;
+    b.mistakes = b.mistakes.filter(m => m.id !== id);
+    save(PL); plRender(); showToast('취소됨');
+  };
+
+  /* ── ③ 매시 1분 평가 ─────────────────────────────────────────────────── */
+  let _evalDraft = null;
+  window.plOpenEval = function(bk){
+    const a = PL.active; if(!a) return;
+    const b = a.blocks.find(x => x.key === bk) || currentBlock(a);
+    _evalDraft = { key: b.key, focus: (b.eval && b.eval.focus) || null,
+                   memo: (b.eval && b.eval.memo) || null,
+                   reset: !!(b.eval && b.eval.reset) };
+    plRenderEval();
+    sheetOpen('plEvalSheet', plCloseEval);
+  };
+  window.plCloseEval = function(){ sheetClose('plEvalSheet'); };
+  window.plSetFocus = function(n){ _evalDraft.focus = n; plRenderEval(); };
+  window.plSetMemo  = function(n){ _evalDraft.memo = n; plRenderEval(); };
+  window.plToggleReset = function(){ _evalDraft.reset = !_evalDraft.reset; plRenderEval(); };
+  window.plSaveEval = function(){
+    const a = PL.active; if(!a || !_evalDraft) return;
+    if(_evalDraft.focus == null){ showToast('집중도만 눌러줘'); return; }
+    const b = a.blocks.find(x => x.key === _evalDraft.key); if(!b) return;
+    b.eval = { focus: _evalDraft.focus, memo: _evalDraft.memo,
+               reset: _evalDraft.reset, at: new Date().toISOString() };
+    save(PL); plCloseEval(); plRender(); showToast('평가 저장 · ' + b.key);
+  };
+
+  /* ── ④ 요약 ──────────────────────────────────────────────────────────── */
+  function summarize(a){
+    const ms = a.blocks.flatMap(b => b.mistakes);
+    const byTag = {}; TAGS.forEach(t => byTag[t] = 0);
+    ms.forEach(m => { byTag[m.tag] = (byTag[m.tag] || 0) + 1; });
+    const now = ms.filter(m => m.mode === '즉시').length;
+    const evals = a.blocks.filter(b => b.eval);
+    const memos = evals.map(b => b.eval.memo).filter(n => typeof n === 'number');
+    return {
+      mistakes: ms.length, byTag,
+      immediate: now, retro: ms.length - now,
+      focusCurve: a.blocks.map(b => ({ key: b.key, focus: b.eval ? b.eval.focus : null,
+                                       mistakes: b.mistakes.length })),
+      memoAvg: memos.length ? +(memos.reduce((x, y) => x + y, 0) / memos.length).toFixed(1) : null,
+      resetDone: evals.filter(b => b.eval.reset).length,
+      resetOf: a.blocks.length,
+      blocks: a.blocks.length,
+      minutes: Math.round((new Date(a.endedAt) - new Date(a.startedAt)) / 60000)
+    };
+  }
+
+  /* 집중 곡선 — 인라인 SVG. 실수가 있던 블록은 점을 키워 같이 읽히게 한다. */
+  function focusSvg(curve){
+    const pts = curve.filter(p => p.focus != null);
+    if(pts.length < 2) return '<div style="font-size:12px;color:var(--muted)">평가가 2개 이상이면 곡선이 그려져.</div>';
+    const W = 320, H = 120, L = 24, R = 10, T = 10, B = 22, pw = W - L - R, ph = H - T - B;
+    const x = i => L + (pts.length === 1 ? pw / 2 : i * pw / (pts.length - 1));
+    const y = v => T + ph - (v - 1) / 9 * ph;
+    let g = '';
+    [1, 4, 7, 10].forEach(s => {
+      g += `<line x1="${L}" y1="${y(s)}" x2="${W - R}" y2="${y(s)}" stroke="var(--border2)" stroke-width="1"/>`
+         + `<text x="${L - 5}" y="${y(s) + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${s}</text>`;
+    });
+    const line = pts.map((p, i) => `${x(i)},${y(p.focus)}`).join(' ');
+    const dots = pts.map((p, i) =>
+      `<circle cx="${x(i)}" cy="${y(p.focus)}" r="${p.mistakes ? 6 : 4}" fill="var(--surface)"
+         stroke="var(--accent)" stroke-width="2"><title>${p.key} · 집중 ${p.focus} · 실수 ${p.mistakes}</title></circle>`).join('');
+    const labs = pts.map((p, i) => (i === 0 || i === pts.length - 1 || pts.length <= 6)
+      ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--muted)">${p.key}</text>` : '').join('');
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="시간별 집중 곡선">
+      ${g}<polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"
+      stroke-linejoin="round"/>${dots}${labs}</svg>`;
+  }
+
+  window.plShowSummary = function(sess){
+    const s = sess.summary || summarize(sess);
+    const tagRows = TAGS.filter(t => s.byTag[t]).map(t =>
+      `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0">
+         <span>${t}</span><b>${s.byTag[t]}</b></div>`).join('') ||
+      '<div style="font-size:12px;color:var(--muted)">기록된 실수 없음</div>';
+    const started = new Date(sess.startedAt);
+    document.getElementById('plSummaryBody').innerHTML = `
+      <div class="pl-creed">${CREED}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+        ${sess.type === 'online' ? '온라인' : '라이브'} ·
+        ${pad(started.getHours())}:${pad(started.getMinutes())} 시작 ·
+        ${s.minutes}분 · 블록 ${s.blocks}개</div>
+      <div class="pl-card">
+        <div style="font-weight:800;margin-bottom:8px">실수 ${s.mistakes}건</div>
+        ${tagRows}
+        <div style="margin-top:8px;font-size:12px;color:var(--text2)">
+          즉시 ${s.immediate} : 회고 ${s.retro}
+          ${s.mistakes ? `(즉시 ${Math.round(s.immediate / s.mistakes * 100)}%)` : ''}</div>
+      </div>
+      <div class="pl-card">
+        <div style="font-weight:800;margin-bottom:8px">시간별 집중</div>
+        ${focusSvg(s.focusCurve)}
+      </div>
+      <div class="pl-card">
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0">
+          <span>메모 품질 평균</span><b>${s.memoAvg == null ? '—' : s.memoAvg + ' / 5'}</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0">
+          <span>리셋(명상 10분) 이행</span>
+          <b>${s.resetDone}/${s.resetOf}${s.resetOf ? ` (${Math.round(s.resetDone / s.resetOf * 100)}%)` : ''}</b></div>
+      </div>`;
+    openModal('plSummaryModal');
+  };
+
+  /* ── 렌더 ─────────────────────────────────────────────────────────────── */
+  function elapsed(a){
+    /* 기기 시계가 어긋나도 음수는 내보내지 않는다 */
+    const m = Math.max(0, Math.round((Date.now() - new Date(a.startedAt)) / 60000));
+    return m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`;
+  }
+
+  function activeHtml(){
+    const a = PL.active;
+    const blocks = syncBlocks(a);
+    const cur = currentBlock(a);
+    const total = blocks.reduce((n, b) => n + b.mistakes.length, 0);
+    const pending = blocks.filter(b => !b.eval && b.to <= new Date().toISOString());
+
+    const rows = blocks.slice().reverse().map(b => {
+      const isCur = b.key === cur.key;
+      const ev = b.eval;
+      return `<div class="pl-block">
+        <b style="min-width:52px;${isCur ? 'color:var(--accent)' : ''}">${b.key}</b>
+        <span class="pl-pill">${b.mistakes.length}건</span>
+        ${ev ? `<span class="pl-pill">집중 ${ev.focus}</span>
+                ${ev.memo ? `<span class="pl-pill">메모 ${ev.memo}</span>` : ''}
+                ${ev.reset ? '<span class="pl-pill">리셋✓</span>' : ''}`
+             : '<span class="pl-pill" style="color:var(--yellow)">평가 대기</span>'}
+        <button onclick="plOpenEval('${b.key}')" style="margin-left:auto;min-width:44px;min-height:44px;
+          border:none;background:transparent;color:var(--text2);font-size:15px;cursor:pointer">📝</button>
+      </div>
+      ${b.mistakes.length ? `<div style="padding:0 0 6px 52px;display:flex;flex-wrap:wrap;gap:5px">
+        ${b.mistakes.map(m => `<span class="pl-pill" style="background:var(--accent-dim);color:var(--accent)">
+          ${m.tag}<span style="opacity:.65"> ${m.mode}</span>
+          <button onclick="plUndoMistake('${b.key}','${m.id}')" aria-label="취소"
+            style="border:none;background:transparent;color:inherit;cursor:pointer;padding:0 0 0 4px">✕</button>
+        </span>`).join('')}</div>` : ''}`;
+    }).join('');
+
+    return `
+      <div class="pl-card" style="border-color:var(--accent)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <b style="font-size:15px">🔴 ${a.type === 'online' ? '온라인' : '라이브'} 세션</b>
+          <span class="pl-pill">${elapsed(a)}</span>
+          <span class="pl-pill">실수 ${total}</span>
+          <button onclick="plEnd()" style="margin-left:auto;min-height:44px;padding:0 14px;border-radius:11px;
+            border:1.5px solid var(--border2);background:var(--surface);color:var(--text);
+            font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">■ 종료</button>
+        </div>
+        ${pending.length ? `<button class="pl-big ghost" onclick="plOpenEval('${pending[0].key}')"
+          style="margin-bottom:10px;border-color:var(--yellow);color:var(--yellow)">
+          ⏱ ${pending[0].key} 평가 밀렸어 — 1분이면 돼</button>` : ''}
+        <div>${rows}</div>
+      </div>
+      <div id="plDock">
+        <button class="pl-big" onclick="plOpenMistake('즉시')">+ 실수</button>
+      </div>`;
+  }
+
+  function idleHtml(){
+    const last = PL.history[0];
+    return `
+      <div class="pl-card">
+        <div style="font-weight:800;margin-bottom:10px">라이브 세션 모드</div>
+        <div class="pl-row" style="gap:10px">
+          <button class="pl-big" onclick="plStart('live')">▶ 라이브 시작</button>
+          <button class="pl-big ghost" onclick="plStart('online')">▶ 온라인 시작</button>
+        </div>
+      </div>
+      ${last ? `<div class="pl-card">
+        <div style="display:flex;align-items:center;gap:8px">
+          <b style="font-size:13px">지난 세션</b>
+          <span class="pl-pill">${new Date(last.startedAt).toLocaleDateString('ko-KR', {month:'numeric', day:'numeric'})}</span>
+          <span class="pl-pill">실수 ${last.summary.mistakes}</span>
+          <button onclick="plShowSummary(JSON.parse(this.dataset.s))" data-s='${JSON.stringify(last).replace(/'/g, '&#39;')}'
+            style="margin-left:auto;min-height:44px;padding:0 12px;border-radius:10px;border:1.5px solid var(--border2);
+            background:transparent;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit">요약</button>
+        </div></div>` : ''}`;
+  }
+
+  function sheets(){
+    return `
+      <div id="plTagSheet" class="modal-overlay" style="align-items:flex-end">
+        <div class="modal-box" style="width:100%;max-width:520px;border-radius:20px 20px 0 0">
+          <div class="modal-title" id="plTagTitle" style="margin-bottom:12px">뭐가 틀렸어?</div>
+          <div class="pl-tags">
+            ${TAGS.map(t => `<button class="pl-tag" onclick="plTag('${t}')">${t}</button>`).join('')}
+          </div>
+          <button class="pl-big ghost" style="margin-top:12px" onclick="plCloseMistake()">취소</button>
+        </div>
+      </div>
+      <div id="plEvalSheet" class="modal-overlay" style="align-items:flex-end">
+        <div class="modal-box" style="width:100%;max-width:520px;border-radius:20px 20px 0 0">
+          <div id="plEvalBody"></div>
+        </div>
+      </div>
+      <div class="modal-overlay" id="plSummaryModal">
+        <div class="modal-box">
+          <div class="modal-title" style="margin-bottom:12px">세션 요약</div>
+          <div id="plSummaryBody"></div>
+          <button class="pl-big ghost" style="margin-top:12px" onclick="closeModal('plSummaryModal')">닫기</button>
+        </div>
+      </div>`;
+  }
+
+  function plRenderEval(){
+    const d = _evalDraft; if(!d) return;
+    const a = PL.active;
+    const b = a && a.blocks.find(x => x.key === d.key);
+    const ms = b ? b.mistakes : [];
+    const el = document.getElementById('plEvalBody'); if(!el) return;
+    el.innerHTML = `
+      <div class="modal-title" style="margin-bottom:4px">${d.key} 평가</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">1분이면 끝나. 숫자만 눌러.</div>
+
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">집중도 <span style="color:var(--muted);font-weight:400">1~10</span></div>
+      <div class="pl-row" style="margin-bottom:6px">
+        ${[1,2,3,4,5].map(n => `<button class="pl-num ${d.focus===n?'on':''}" onclick="plSetFocus(${n})">${n}</button>`).join('')}
+      </div>
+      <div class="pl-row" style="margin-bottom:14px">
+        ${[6,7,8,9,10].map(n => `<button class="pl-num ${d.focus===n?'on':''}" onclick="plSetFocus(${n})">${n}</button>`).join('')}
+      </div>
+
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">메모 품질 <span style="color:var(--muted);font-weight:400">1~5</span></div>
+      <div class="pl-row" style="margin-bottom:14px">
+        ${[1,2,3,4,5].map(n => `<button class="pl-num ${d.memo===n?'on':''}" onclick="plSetMemo(${n})">${n}</button>`).join('')}
+      </div>
+
+      <button class="pl-big ${d.reset?'':'ghost'}" style="margin-bottom:14px" onclick="plToggleReset()">
+        ${d.reset ? '✓ 리셋(명상 10분) 했다' : '리셋(명상 10분) 했다면 탭'}
+      </button>
+
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">이 블록 실수 ${ms.length}건</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
+        ${ms.length ? ms.map(m => `<span class="pl-pill">${m.tag} <span style="opacity:.6">${m.mode}</span></span>`).join('')
+                    : '<span style="font-size:12px;color:var(--muted)">없음</span>'}
+      </div>
+      <button class="pl-big ghost" style="margin-bottom:12px" onclick="plOpenMistake('회고')">+ 회고로 추가</button>
+
+      <div class="pl-row">
+        <button class="pl-big ghost" onclick="plCloseEval()">닫기</button>
+        <button class="pl-big" onclick="plSaveEval()">저장</button>
+      </div>`;
+  }
+
+  window.plRender = function(){
+    const host = document.getElementById('plHost'); if(!host) return;
+    PL = load();
+    host.className = PL.active ? 'live' : '';
+    host.innerHTML = `<div class="pl-creed">${CREED}</div>`
+                   + (PL.active ? activeHtml() : idleHtml());
+  };
+
+  /* 기존 renderPoker를 감싸 맨 위에 자리를 만든다. 원본은 고치지 않는다. */
+  function hook(){
+    if(typeof renderPoker !== 'function') return;
+    const _orig = renderPoker;
+    renderPoker = function(){
+      const r = _orig.apply(this, arguments);
+      const body = document.getElementById('pokerBody');
+      if(body && !document.getElementById('plHost')){
+        body.insertAdjacentHTML('afterbegin', '<div id="plHost"></div>');
+      }
+      plRender();
+      return r;
+    };
+  }
+
+  function boot(){
+    hook();
+    if(!document.getElementById('plTagSheet'))
+      document.body.insertAdjacentHTML('beforeend', sheets());
+    /* 시트는 화면을 덮으므로 오버레이 닫기 체계에 태운다 */
+    ['plTagSheet','plEvalSheet'].forEach(id => {
+      const el = document.getElementById(id); if(!el) return;
+      el.addEventListener('click', e => {
+        if(e.target !== el) return;
+        (id === 'plTagSheet' ? plCloseMistake : plCloseEval)();
+      });
+    });
+    /* 분이 바뀔 때만 다시 그린다 — 경과 시간과 '평가 밀림' 배지가 살아 있게 */
+    setInterval(() => {
+      if(PL.active && document.getElementById('plHost') &&
+         document.getElementById('panel-poker').classList.contains('active')) plRender();
+    }, 60000);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+
+  window.pokerLive = { load, TAGS, summarize };
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
