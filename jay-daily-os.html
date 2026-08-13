@@ -601,6 +601,80 @@ body {
 }
 </style>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- TONY-COACH-TAB:BEGIN -->
+<style>
+/* ── 모바일 (≤768px) ─────────────────────────────────────────────────────
+   데스크톱에는 아무 영향이 없다. 이 블록 밖에는 규칙을 두지 않는다. */
+@media (max-width: 768px) {
+  body { font-size: 15px; }
+
+  /* ① 사이드바를 서랍으로 */
+  #sidebar {
+    position: fixed; top: 0; left: 0; z-index: 900;
+    width: 82vw; max-width: 320px; height: 100vh;
+    transform: translateX(-100%);
+    transition: transform .22s ease;
+    box-shadow: 0 0 40px rgba(0,0,0,.18);
+  }
+  body.nav-open #sidebar { transform: translateX(0); }
+  #navScrim {
+    position: fixed; inset: 0; z-index: 890;
+    background: rgba(0,0,0,.38); opacity: 0; pointer-events: none;
+    transition: opacity .22s ease;
+  }
+  body.nav-open #navScrim { opacity: 1; pointer-events: auto; }
+
+  #main { width: 100%; }
+  .main-content { padding: 14px 14px 28px; }
+  .main-header { padding: 10px 12px; gap: 8px; }
+  .main-header-title { font-size: 16px; }
+  .main-header-sub { display: none; }   /* 좁은 폭에서 제목을 밀어낸다 */
+
+  #navToggle {
+    display: flex !important;
+    align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px; margin-left: -6px;
+    border: none; background: transparent; color: var(--text);
+    font-size: 20px; cursor: pointer; border-radius: 10px;
+  }
+  #navToggle:active { background: var(--surface2); }
+
+  /* 서랍 안 항목도 터치 타겟 확보 */
+  .nav-btn { min-height: 44px; font-size: 14px; padding: 11px 12px; }
+  .sidebar-nav { flex: 1 1 auto; }
+
+  /* ② 카드 1열 + 줄바꿈 */
+  .memo-grid { grid-template-columns: 1fr !important; gap: 10px; }
+  .memo-card { padding: 14px 14px 12px; }
+  .memo-text, .memo-card, #coachBody, #coachBody div {
+    overflow-wrap: anywhere; word-break: break-word;
+  }
+  .memo-text { font-size: 14px; line-height: 1.65; }
+
+  /* ③ 호버 의존 제거 — 액션은 항상 보인다 */
+  .memo-card-actions { opacity: 1 !important; position: static;
+    display: flex; justify-content: flex-end; gap: 2px; margin: -4px -4px 4px 0; }
+  .memo-card-btn { min-width: 44px; min-height: 44px; width: auto; height: auto;
+    font-size: 15px; background: transparent; }
+  .memo-card-btn:active { background: var(--surface2); }
+  button, .chip, .nav-btn { touch-action: manipulation; }
+  .chip { min-height: 36px; padding: 7px 13px; font-size: 13px; }
+
+  /* ④ 코치 탭 — 폭에 맞춰 축소, 가로 스크롤은 표에만 */
+  #panel-coach { padding: 14px 12px 28px !important; }
+  #coachBody svg { width: 100%; height: auto; display: block; }
+  #coachBody table { font-size: 11px; }
+  #coachBody { overflow-x: hidden; }
+
+  /* ⑤ 모달이 화면을 넘지 않게 */
+  .modal, .modal-box, .modal-content { max-width: 94vw; }
+}
+
+/* 데스크톱에서는 햄버거·스크림이 존재하지 않는 것처럼 둔다 */
+#navToggle { display: none; }
+@media (min-width: 769px) { #navScrim { display: none; } }
+</style>
+<!-- TONY-COACH-TAB:END -->
 </head>
 <body>
 
@@ -648,6 +722,7 @@ body {
       <span class="nav-badge" id="coachBadge" style="display:none">0</span>
     </button>
 <!-- TONY-COACH-TAB:END -->
+
 
 
   </div>
@@ -838,6 +913,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
     <div id="panel-docs" class="panel" style="padding:20px 24px">
@@ -5215,6 +5291,8 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -5272,6 +5350,26 @@ window.addEventListener('beforeunload', () => {
   let _overrideOnce = false;   /* JAY가 확인한 1회용 통행증 */
   let _blocked      = null;    /* {lw, rw, why} — 차단 상태 */
 
+  /* ── 승인된 삭제 집계 ────────────────────────────────────────────────────
+     JAY가 confirm까지 눌러 지운 건 정당한 감소다. 그만큼을 가드 계산에 되돌려
+     주지 않으면 삭제할 때마다 "원격을 덮어쓰려 함"이 뜬다. 가드는 그대로 두고,
+     승인된 감소분만 예외로 인정한다. 푸시가 성공하면 장부를 0으로 지운다. */
+  const ALLOW_KEY = 'jay_sync_delete_allowance';
+  const allowance = () => Number(localStorage.getItem(ALLOW_KEY) || 0) || 0;
+  const setAllowance = v => setLocal(ALLOW_KEY, String(Math.max(0, v)));
+
+  /** 삭제를 수행하는 함수를 감싸서, 줄어든 무게만큼 통행 허용량을 적립한다. */
+  function approvedDelete(mutate){
+    const before = weigh(_collectSyncData());
+    const r = mutate();
+    const after = weigh(_collectSyncData());
+    if(after < before){
+      setAllowance(allowance() + (before - after));
+      console.log(`[보호] 승인된 삭제 ${before - after} 항목 — 가드 예외로 집계`);
+    }
+    return r;
+  }
+
   async function precheck(){
     if(!_syncToken()) return { ok:true };
 
@@ -5290,7 +5388,9 @@ window.addEventListener('beforeunload', () => {
     const rd = await remoteData();
     if(!rd) return { ok:true };   /* 원격을 못 읽었다 — 저장 자체를 막으면 그게 더 큰 손실 */
     const rw = weigh(rd);
-    if(rw > 0 && lw < rw * GUARD_RATIO)
+    /* 승인된 삭제분은 정당한 감소로 되돌려 계산한다 — 가드 자체는 그대로다 */
+    const effective = lw + allowance();
+    if(rw > 0 && effective < rw * GUARD_RATIO)
       return { ok:false, block:{ lw, rw, why:'이 기기 데이터가 원격의 절반 미만' } };
     return { ok:true };
   }
@@ -5314,6 +5414,7 @@ window.addEventListener('beforeunload', () => {
     _overrideOnce = false;
     _blocked = null;
     const r = await _origPush.apply(this, arguments);
+    setAllowance(0);   /* 푸시가 나갔으면 삭제 장부는 청산됐다 */
     maybeSnapshot().catch(e => console.warn('[보호] 스냅샷 실패', e));
     return r;
   };
@@ -5394,12 +5495,13 @@ window.addEventListener('beforeunload', () => {
 
   /* 콘솔에서 손으로 부를 수 있게 열어둔다 */
   window.dataGuard = {
-    weigh, snapshot: maybeSnapshot,
+    weigh, snapshot: maybeSnapshot, approvedDelete,
     status(){ return {
       seeded: localStorage.getItem(SEED_KEY) === '1',
       lastSnapshot: localStorage.getItem(SNAP_KEY),
       blocked: _blocked,
-      localWeight: weigh(_collectSyncData())
+      localWeight: weigh(_collectSyncData()),
+      deleteAllowance: allowance()
     }; },
     async resetSeed(){ localStorage.removeItem(SEED_KEY); return '시딩 표시를 지웠다 — 다음 푸시 전에 pull이 먼저 돈다'; }
   };
@@ -5739,8 +5841,13 @@ function coQuestions(map){
 /* ── 노트 / 일정 제안 (코치 탭 안) ──────────────────────────────────── */
 const CO_KIND_COLOR = { '통찰':'var(--purple)', '결정':CO_C1, '아이디어':'var(--blue)' };
 
-function coNotes(log){
+/* 삭제 표식이 있는 노트는 전부 걸러낸다. 봇이 실제 제거하기 전까지의 공백을 메운다. */
+function coLiveNotes(log){
   const ns = (log && log.notes) || [];
+  return (typeof coachIsDeleted === 'function') ? ns.filter(n => !coachIsDeleted(n.id)) : ns;
+}
+function coNotes(log){
+  const ns = coLiveNotes(log);
   if(!ns.length) return coCard('코치 노트', coEmpty('아직 분류된 노트가 없어.'));
   return coCard('코치 노트',
     ns.slice().reverse().slice(0,20).map(n=>`<div style="padding:8px 0;border-bottom:1px solid var(--border)">
@@ -5789,18 +5896,25 @@ function coachEnsure(then){
 /* ── ② 메모 탭 병합 (읽기 전용) ─────────────────────────────────────── */
 function coachNoteCard(n){
   return `<div class="memo-card" style="border-left:3px solid ${CO_KIND_COLOR[n.kind]||'var(--accent)'};cursor:default">
-    <div style="position:absolute;top:8px;right:10px;font-size:9px;font-weight:700;color:${CO_C1};
-      background:var(--accent-dim);border-radius:999px;padding:2px 7px">🏋️ 코치</div>
+    <div style="position:absolute;top:8px;right:10px;display:flex;align-items:center;gap:6px">
+      <span style="font-size:9px;font-weight:700;color:${CO_C1};
+        background:var(--accent-dim);border-radius:999px;padding:2px 7px">🏋️ 코치</span>
+      <button onclick="event.stopPropagation();coachDeleteNote('${n.id}', this.dataset.p)"
+        data-p="${coEsc(String(n.text||'').slice(0,80))}" title="삭제" aria-label="코치 노트 삭제"
+        style="min-width:44px;min-height:44px;border:none;background:transparent;color:var(--red);
+        font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+        margin:-10px -8px -10px 0">✕</button>
+    </div>
     <div class="memo-cat">${coEsc(n.kind)}</div>
     <div class="memo-text">${coEsc(n.text)}</div>
     <div class="memo-tags">${(n.tags||[]).map(t=>`<span class="memo-tag">${coEsc(t)}</span>`).join('')}</div>
-    <div style="font-size:9px;color:var(--muted);margin-top:6px;opacity:.6">${n.date||''} · 읽기 전용</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px;opacity:.6">${n.date||''} · 읽기 전용 (삭제만 가능)</div>
   </div>`;
 }
 function coachAppendNotes(cat){
   const grid = document.getElementById('memoGrid'); if(!grid) return;
   coachEnsure(d=>{
-    const notes = ((d.log||{}).notes)||[];
+    const notes = coLiveNotes(d.log);
     const show = notes.filter(n => cat==='전체' || n.kind===cat);
     if(!show.length) return;
     const empty = grid.querySelector('.empty');
@@ -5812,7 +5926,7 @@ function coachAppendNotes(cat){
 function coachAppendMemoChips(){
   const el = document.getElementById('memoCatChips'); if(!el) return;
   coachEnsure(d=>{
-    const kinds = [...new Set((((d.log||{}).notes)||[]).map(n=>n.kind))];
+    const kinds = [...new Set(coLiveNotes(d.log).map(n=>n.kind))];
     kinds.forEach(k=>{
       if([...el.querySelectorAll('.chip')].some(c=>c.textContent.trim()===k)) return;
       el.insertAdjacentHTML('beforeend',
@@ -5963,6 +6077,103 @@ async function renderCoach(force){
   const n = ((map&&map.open_questions)||[]).length;
   if(badge){ badge.style.display = n ? '' : 'none'; badge.textContent = n; }
 }
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  const DEL_KEY = 'jay_coachDeletedNotes';   /* 동기화됨 — 기기 간에 삭제가 전파된다 */
+
+  function delMap(){
+    try { return JSON.parse(localStorage.getItem(DEL_KEY) || '{}'); } catch(_){ return {}; }
+  }
+  window.coachIsDeleted = id => !!delMap()[id];
+
+  /* 승인된 삭제로 감싼다 — 없으면 그냥 실행한다(가드 미설치 환경 대비) */
+  function guarded(fn){
+    const g = window.dataGuard;
+    if(g && typeof g.approvedDelete === 'function') return g.approvedDelete(fn);
+    return fn();   /* 가드가 없는 환경(미리보기 등)에서도 삭제는 되어야 한다 */
+  }
+
+  /* ── 코치 노트 삭제 (표식만 남긴다) ─────────────────────────────────────── */
+  window.coachDeleteNote = function(id, preview){
+    if(!confirm('이 코치 노트를 지울까?\n\n' + (preview || '') +
+                '\n\n지우면 코치 기록에서도 없어져. 되돌릴 수 없어.')) return;
+    guarded(() => {
+      const m = delMap();
+      m[id] = { at: new Date().toISOString() };
+      localStorage.setItem(DEL_KEY, JSON.stringify(m));
+    });
+    if(typeof renderMemo === 'function') renderMemo();
+    if(typeof renderCoach === 'function') renderCoach(true);
+    try { showToast('삭제됨 — 봇이 다음 실행에서 기록도 지운다'); } catch(_){}
+  };
+
+  /* ── 앱 메모 삭제에 confirm 1회 + 가드 집계 ─────────────────────────────── */
+  if(typeof deleteMemoCard === 'function'){
+    const _orig = deleteMemoCard;
+    deleteMemoCard = function(i){
+      const m = (typeof memoData !== 'undefined' && memoData[i]) || null;
+      const preview = m ? String(m.text || '').slice(0, 80) : '';
+      if(!confirm('이 메모를 지울까?\n\n' + preview + '\n\n되돌릴 수 없어.')) return;
+      return guarded(() => _orig.call(this, i));
+    };
+  }
+  if(typeof deleteMemoView === 'function'){
+    const _orig = deleteMemoView;
+    deleteMemoView = function(){
+      if(!confirm('이 메모를 지울까? 되돌릴 수 없어.')) return;
+      return guarded(() => _orig.apply(this, arguments));
+    };
+  }
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  /* 햄버거 버튼과 스크림을 만들어 붙인다. 네비게이션 자체는 기존 사이드바를
+     그대로 쓴다 — 하단 탭바를 새로 만들면 nav 상태를 두 벌 관리하게 된다. */
+  function mount(){
+    const header = document.querySelector('.main-header');
+    if(header && !document.getElementById('navToggle')){
+      const b = document.createElement('button');
+      b.id = 'navToggle'; b.type = 'button';
+      b.setAttribute('aria-label', '메뉴 열기');
+      b.setAttribute('aria-expanded', 'false');
+      b.textContent = '☰';
+      b.onclick = () => setNav(!document.body.classList.contains('nav-open'));
+      header.insertBefore(b, header.firstChild);
+    }
+    if(!document.getElementById('navScrim')){
+      const s = document.createElement('div');
+      s.id = 'navScrim';
+      s.onclick = () => setNav(false);
+      document.body.appendChild(s);
+    }
+  }
+  function setNav(open){
+    document.body.classList.toggle('nav-open', open);
+    const b = document.getElementById('navToggle');
+    if(b) b.setAttribute('aria-expanded', String(open));
+  }
+  window.closeMobileNav = () => setNav(false);
+
+  /* 패널을 고르면 서랍이 닫힌다 — 안 닫으면 고른 화면이 서랍에 가린다 */
+  function hookNav(){
+    if(typeof switchPanel !== 'function') return;
+    const _orig = switchPanel;
+    switchPanel = function(){ const r = _orig.apply(this, arguments); setNav(false); return r; };
+  }
+
+  if(document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', () => { mount(); hookNav(); });
+  else { mount(); hookNav(); }
+
+  /* 데스크톱으로 넓어지면 서랍 상태를 푼다 (기기 회전·창 크기 변경) */
+  addEventListener('resize', () => { if(innerWidth > 768) setNav(false); });
+})();
 </script>
 <!-- TONY-COACH-TAB:END -->
 </body>
