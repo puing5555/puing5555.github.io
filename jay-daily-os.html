@@ -608,6 +608,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -866,6 +869,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1054,6 +1058,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5457,6 +5462,12 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -6258,7 +6269,52 @@ function coDigest(log){
     '최근 7일 · 주황은 손볼 것');
 }
 
-/* ── 7. 학습 아카이브 ───────────────────────────────────────────────
+/* ── 7. 구독 채널 ────────────────────────────────────────────────────
+   앱은 coach-map.json을 못 쓴다. 그래서 해제는 표식만 남기고 봇이 다음 틱에
+   실제로 뺀다 — 코치 노트 삭제와 똑같은 패턴이다. 화면에서는 즉시 사라진다. */
+const CHAN_KEY = 'jay_coachChannelRemovals';
+function chanRemoved(){
+  try { return JSON.parse(localStorage.getItem(CHAN_KEY) || '{}'); } catch(_){ return {}; }
+}
+function coLiveChannels(map){
+  const gone = chanRemoved();
+  return (((map && map.youtube) || {}).channels || []).filter(c => !gone[c.channel_id]);
+}
+window.coachRemoveChannel = function(cid, title){
+  if(!confirm('구독을 해제할까?\n\n' + title
+              + '\n\n새 영상 카드가 더 이상 오지 않아. 이미 받은 카드는 남아.')) return;
+  const g = chanRemoved();
+  g[cid] = { at: new Date().toISOString(), title };
+  localStorage.setItem(CHAN_KEY, JSON.stringify(g));   /* jay_ → 동기화됨 */
+  renderCoach(true);
+  try { showToast('해제됨 — 봇이 다음 확인 때 반영한다'); } catch(_){}
+};
+
+function coChannels(map, log){
+  const chans = coLiveChannels(map);
+  const all = coStudy(log);
+  if(!chans.length) return coCard('구독 채널',
+    coEmpty('등록된 채널이 없어. 텔레그램으로 유튜브 링크를 보내면 등록돼.'));
+  const rows = chans.map(c => {
+    const mine = all.filter(x => x.channel === c.title);
+    return `<div style="display:flex;align-items:center;gap:9px;padding:9px 0;
+        border-bottom:1px solid var(--border)">
+      <div style="min-width:0;flex:1">
+        <div style="font-size:13px;font-weight:600;color:var(--text);
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${coEsc(c.title)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">
+          ${c.added || ''} 등록 · 카드 ${mine.length}개</div>
+      </div>
+      <button onclick="coachRemoveChannel('${coEsc(c.channel_id)}', this.dataset.t)"
+        data-t="${coEsc(c.title)}" aria-label="구독 해제"
+        style="min-width:44px;min-height:44px;border:none;background:transparent;
+        color:var(--red);font-size:15px;cursor:pointer">✕</button>
+    </div>`;
+  }).join('');
+  return coCard('구독 채널', rows, `${chans.length}개 · 1시간마다 새 영상 확인`);
+}
+
+/* ── 8. 학습 아카이브 ───────────────────────────────────────────────
    전체 카드가 여기 남는다. 메모함에는 반응한 것만 올라간다. */
 function coStudyCard(log){
   const all = coStudy(log);
@@ -6306,7 +6362,7 @@ async function renderCoach(force){
   status.textContent = `읽기 전용 · 에너지 ${rows.length}건 · ${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})} 기준`;
   body.innerHTML = coBoard(map) + coVision(map) + coEnergy(log)
                  + coPlaybook(log) + coNotes(log) + coEventsCard(log) + coQuestions(map)
-                 + coStudyCard(log) + coDigest(log);
+                 + coChannels(map, log) + coStudyCard(log) + coDigest(log);
   const badge = document.getElementById('coachBadge');
   const n = ((map&&map.open_questions)||[]).length;
   if(badge){ badge.style.display = n ? '' : 'none'; badge.textContent = n; }
