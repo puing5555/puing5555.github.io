@@ -605,6 +605,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -862,6 +865,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1050,6 +1054,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5446,6 +5451,12 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -6064,6 +6075,39 @@ function coachNoteCard(n){
     <div style="font-size:9px;color:var(--muted);margin-top:6px;opacity:.6">${n.date||''} · 읽기 전용 (삭제만 가능)</div>
   </div>`;
 }
+/* 학습 아카이브. 예전 키(learn)도 같이 읽는다. */
+function coStudy(log){
+  const s = ((log && log.study) || []).concat((log && log.learn) || []);
+  return (typeof coachIsDeleted === 'function') ? s.filter(x => !coachIsDeleted(x.id)) : s;
+}
+/* JAY가 반응한 카드만 메모함에 올라온다. 반응 없이 지나간 건 아카이브에만 남는다. */
+function coPromoted(log){ return coStudy(log).filter(x => x.promoted); }
+
+function coachStudyCard(x){
+  return `<div class="memo-card" style="border-left:3px solid var(--blue);cursor:default">
+    <div style="position:absolute;top:8px;right:10px;display:flex;align-items:center;gap:6px">
+      <span style="font-size:9px;font-weight:700;color:var(--blue);
+        background:rgba(34,119,221,.10);border-radius:999px;padding:2px 7px">📚 학습</span>
+      <button onclick="event.stopPropagation();coachDeleteNote('${x.id}', this.dataset.p)"
+        data-p="${coEsc(String(x.title||'').slice(0,80))}" title="삭제" aria-label="학습 메모 삭제"
+        style="min-width:44px;min-height:44px;border:none;background:transparent;color:var(--red);
+        font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+        margin:-10px -8px -10px 0">✕</button>
+    </div>
+    <div class="memo-cat">${coEsc(x.channel||'')}</div>
+    <div class="memo-text" style="font-weight:600">${coEsc(x.title||'')}</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.65;margin-top:6px">
+      ${coEsc(x.conclusion||'')}</div>
+    ${x.comment ? `<div style="font-size:11px;color:var(--text2);margin-top:8px;
+      padding-left:8px;border-left:2px solid var(--border2)">내 반응: ${coEsc(x.comment)}</div>` : ''}
+    <div class="memo-tags">${(x.tags||[]).map(t=>`<span class="memo-tag">${coEsc(t)}</span>`).join('')}</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px;opacity:.75">
+      ${x.date||''} · ${(x.signals||[]).join(', ')||'반응'} ·
+      <a href="${coEsc(x.url||'#')}" target="_blank" rel="noopener"
+         style="color:var(--blue)">영상 열기</a></div>
+  </div>`;
+}
+
 function coachAppendNotes(cat){
   const grid = document.getElementById('memoGrid'); if(!grid) return;
   coachEnsure(d=>{
@@ -6076,10 +6120,23 @@ function coachAppendNotes(cat){
       show.slice().reverse().map(coachNoteCard).join(''));
   });
 }
+/* 승격된 학습 카드를 메모함에 함께 보여준다 (전체 또는 '학습' 필터에서만) */
+function coachAppendStudy(cat){
+  const grid = document.getElementById('memoGrid'); if(!grid) return;
+  if(cat !== '전체' && cat !== '학습') return;
+  coachEnsure(d=>{
+    const show = coPromoted(d.log);
+    if(!show.length) return;
+    const empty = grid.querySelector('.empty');
+    if(empty) empty.remove();
+    grid.insertAdjacentHTML('beforeend', show.slice().reverse().map(coachStudyCard).join(''));
+  });
+}
 function coachAppendMemoChips(){
   const el = document.getElementById('memoCatChips'); if(!el) return;
   coachEnsure(d=>{
     const kinds = [...new Set(coLiveNotes(d.log).map(n=>n.kind))];
+    if(coPromoted(d.log).length && !kinds.includes('학습')) kinds.push('학습');
     kinds.forEach(k=>{
       if([...el.querySelectorAll('.chip')].some(c=>c.textContent.trim()===k)) return;
       el.insertAdjacentHTML('beforeend',
@@ -6157,7 +6214,7 @@ function coachDecorateCal(){
 (function(){
   if(typeof renderMemoGrid === 'function'){
     const _o = renderMemoGrid;
-    renderMemoGrid = function(cat){ _o.apply(this, arguments); coachAppendNotes(cat); };
+    renderMemoGrid = function(cat){ _o.apply(this, arguments); coachAppendNotes(cat); coachAppendStudy(cat); };
   }
   if(typeof renderMemo === 'function'){
     const _o = renderMemo;
@@ -6201,6 +6258,30 @@ function coDigest(log){
     '최근 7일 · 주황은 손볼 것');
 }
 
+/* ── 7. 학습 아카이브 ───────────────────────────────────────────────
+   전체 카드가 여기 남는다. 메모함에는 반응한 것만 올라간다. */
+function coStudyCard(log){
+  const all = coStudy(log);
+  if(!all.length) return '';
+  const hot = all.filter(x=>x.promoted).length;
+  const rows = all.slice().reverse().slice(0,30).map(x=>`
+    <div style="padding:9px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:baseline;gap:7px;margin-bottom:3px">
+        ${x.promoted ? coPill('★ 반응함', CO_C1, 'var(--accent-dim)') : ''}
+        <span style="font-size:11px;color:var(--text2);font-weight:600">${coEsc(x.channel||'')}</span>
+        <span style="font-size:10px;color:var(--muted)">${x.date||''}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text);line-height:1.65">${coEsc(x.conclusion||x.title||'')}</div>
+      <div style="margin-top:4px">
+        ${(x.tags||[]).map(t=>coPill('#'+t)).join('')}
+        <a href="${coEsc(x.url||'#')}" target="_blank" rel="noopener"
+           style="font-size:11px;color:var(--blue);margin-left:4px">영상</a>
+      </div>
+    </div>`).join('');
+  return coCard('학습 아카이브', rows,
+    `${all.length}개 · 반응한 ${hot}개만 메모함에 올라간다`);
+}
+
 /* ── 렌더 ───────────────────────────────────────────────────────────── */
 async function renderCoach(force){
   const body = document.getElementById('coachBody');
@@ -6225,7 +6306,7 @@ async function renderCoach(force){
   status.textContent = `읽기 전용 · 에너지 ${rows.length}건 · ${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})} 기준`;
   body.innerHTML = coBoard(map) + coVision(map) + coEnergy(log)
                  + coPlaybook(log) + coNotes(log) + coEventsCard(log) + coQuestions(map)
-                 + coDigest(log);
+                 + coStudyCard(log) + coDigest(log);
   const badge = document.getElementById('coachBadge');
   const n = ((map&&map.open_questions)||[]).length;
   if(badge){ badge.style.display = n ? '' : 'none'; badge.textContent = n; }
