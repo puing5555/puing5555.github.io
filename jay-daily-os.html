@@ -620,6 +620,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -882,6 +885,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1070,6 +1074,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5491,6 +5496,14 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -7053,67 +7066,181 @@ async function renderCoach(force){
 <script>
 (function(){
   if(typeof _gcalRestore !== 'function'){
-    console.warn('[gcal] 구글 캘린더 계층을 못 찾았다 — 자동 로그인 차단 미설치');
+    console.warn('[gcal] 구글 캘린더 계층을 못 찾았다 — 토큰 갱신 조각 미설치');
     return;
   }
 
-  /* 사용자가 버튼을 눌러 시작한 인증인지. 이 창이 열려 있을 때만 OAuth를 허용한다. */
-  let _byUser = false;
-  const allow = fn => { _byUser = true; try { return fn(); } finally { setTimeout(()=>{ _byUser = false; }, 15000); } };
-
   const TOK = (typeof GCAL_TOKEN_KEY === 'string') ? GCAL_TOKEN_KEY : 'jay_gcal_token';
   const EXP = (typeof GCAL_TOKEN_EXP_KEY === 'string') ? GCAL_TOKEN_EXP_KEY : 'jay_gcal_token_exp';
+  const BLOCKED = 'jay_gcal_silent_blocked';   /* 이 기기에서 silent가 escalate했다 */
+  const SKEW_MS      = 60 * 1000;              /* ① 만료 60초 전에 만료로 친다 */
+  const MIN_GAP_MS   = 5 * 60 * 1000;          /* ⑤ silent 최소 재시도 간격 */
 
-  /* ① 로드 시 복원 — 유효 토큰이 있을 때만. silent 재연결은 하지 않는다. */
+  let _silentTriedThisLoad = false;
+  let _lastSilentAt = 0;
+  let _inFlight = null;
+
+  const now = () => Date.now();
+  const getExp = () => parseInt(localStorage.getItem(EXP) || '0', 10);
+  const blocked = () => { try { return localStorage.getItem(BLOCKED) === '1'; } catch(_) { return false; } };
+  const setBlocked = v => {
+    try { v ? localStorage.setItem(BLOCKED, '1') : localStorage.removeItem(BLOCKED); } catch(_){}
+  };
+
+  /* ① 저장 — expires_at 에 60초 여유를 미리 빼서 넣는다.
+        읽는 쪽이 매번 여유를 계산할 필요가 없다. */
+  if(typeof _gcalStoreToken === 'function'){
+    _gcalStoreToken = function(resp){
+      _gcalToken = resp.access_token;
+      const secs = Number(resp.expires_in) || 3600;
+      const at = now() + Math.max(0, secs * 1000 - SKEW_MS);
+      try {
+        localStorage.setItem(TOK, resp.access_token);
+        localStorage.setItem(EXP, String(at));
+      } catch(_){}
+      setBlocked(false);            /* 발급에 성공했다 = 이 기기에서 silent가 살아 있다 */
+      _lastSilentAt = 0;
+    };
+  }
+
+  function clearToken(){
+    try { localStorage.removeItem(TOK); localStorage.removeItem(EXP); } catch(_){}
+    _gcalToken = null;
+  }
+
+  const tokenValid = () => {
+    const t = localStorage.getItem(TOK);
+    return !!(t && getExp() > now());
+  };
+
+  /* ② silent 재발급 한 번. 성공하면 true.
+        앱 원본의 _gcalReauthSilent(프로미스 + _gcalSilentResolve 배선)를 그대로 쓴다. */
+  const _origReauth = (typeof _gcalReauthSilent === 'function') ? _gcalReauthSilent : null;
+
+  async function trySilent(reason){
+    if(!_origReauth) return false;
+    if(_inFlight) return _inFlight;                       /* 동시 호출 합치기 */
+    if(blocked()){
+      console.log('[gcal] silent 건너뜀 — 이 기기에서 전에 실패했다 (' + reason + ')');
+      return false;
+    }
+    if(now() - _lastSilentAt < MIN_GAP_MS){
+      console.log('[gcal] silent 건너뜀 — 최소 간격 미달 (' + reason + ')');
+      return false;
+    }
+    _lastSilentAt = now();
+    console.log('[gcal] 조용히 토큰 재발급 시도 — ' + reason);
+
+    _inFlight = (async () => {
+      let ok = false;
+      try { ok = await _origReauth(); } catch(_) { ok = false; }
+      if(ok && tokenValid()){
+        _gcalState = 'connected'; _gcalErrMsg = '';
+        setBlocked(false);
+        console.log('[gcal] 조용히 갱신됨 — 사용자 개입 없음');
+      } else {
+        /* ⑤ 여기가 예전 루프의 진입점이었다. 표시를 남기고 자동 시도를 끊는다. */
+        setBlocked(true);
+        clearToken();
+        _gcalState = 'expired';
+        _gcalErrMsg = '구글 재연결이 필요해';
+        console.log('[gcal] 조용한 갱신 실패 — 이 기기는 이제 버튼으로만 연결한다');
+      }
+      if(typeof _renderGoogleBar === 'function') _renderGoogleBar();
+      _inFlight = null;
+      return ok;
+    })();
+    return _inFlight;
+  }
+
+  /* 캘린더 API를 부르기 전에 항상 지난다. 유효하면 그냥 통과. */
+  async function ensureToken(reason){
+    if(tokenValid()){
+      if(!_gcalToken) _gcalToken = localStorage.getItem(TOK);
+      return true;
+    }
+    const had = !!localStorage.getItem(TOK) || !!getExp();
+    if(!had) return false;                       /* 한 번도 연동 안 함 → 버튼 안내 */
+    return await trySilent(reason);
+  }
+  window._gcalEnsureToken = ensureToken;
+
+  /* ② 캘린더 호출 경로 — _gcal_fetch 앞에서 만료를 먼저 처리한다.
+        (401이 난 뒤에 고치는 것보다, 만료를 알고 미리 갱신하는 쪽이 조용하다) */
+  if(typeof _gcal_fetch === 'function'){
+    const _origFetch = _gcal_fetch;
+    _gcal_fetch = async function(url, opts){
+      await ensureToken('API 호출 전 만료');
+      return _origFetch.apply(this, arguments);
+    };
+  }
+
+  /* ③ 페이지 로드 — 유효하면 바로 복원, 만료면 조용히 한 번 시도.
+        성공하면 배너도 버튼도 안 보인다. */
   _gcalRestore = function(){
     if(typeof _gcalClientId === 'function' && !_gcalClientId()) return;
-    const tok = localStorage.getItem(TOK);
-    const exp = parseInt(localStorage.getItem(EXP) || '0', 10);
 
-    if(tok && exp && (exp - Date.now() > 5 * 60 * 1000)){
-      _gcalToken = tok; _gcalState = 'connected'; _gcalErrMsg = '';
-      _renderGoogleBar();
+    if(tokenValid()){
+      _gcalToken = localStorage.getItem(TOK);
+      _gcalState = 'connected'; _gcalErrMsg = '';
+      if(typeof _renderGoogleBar === 'function') _renderGoogleBar();
       if(typeof fetchGcalEvents === 'function') fetchGcalEvents();
       return;
     }
-    /* ② 여기서 예전에는 _gcalSilentConnect()가 돌았다. 그게 로그인 화면의 원인이다. */
-    const had = !!tok;                       /* 한 번이라도 연동했었나 */
-    try { localStorage.removeItem(TOK); localStorage.removeItem(EXP); } catch(_){}
-    _gcalToken = null;
-    _gcalState = had ? 'expired' : 'idle';   /* 만료 vs 미연동을 구분해 보여준다 */
-    _renderGoogleBar();
-    console.log('[gcal] 자동 로그인 안 함 — 상태:', _gcalState, '(버튼으로만 연결)');
-  };
 
-  /* ③ silent 연결은 사용자 시작이 아니면 통과시키지 않는다 */
-  if(typeof _gcalSilentConnect === 'function'){
-    const _origSilent = _gcalSilentConnect;
-    _gcalSilentConnect = function(){
-      if(!_byUser){ console.log('[gcal] silent 연결 차단 (사용자 동작 아님)'); return; }
-      return _origSilent.apply(this, arguments);
-    };
-  }
+    const had = !!localStorage.getItem(TOK) || !!getExp();
+    if(!had){
+      clearToken();
+      _gcalState = 'idle';
+      if(typeof _renderGoogleBar === 'function') _renderGoogleBar();
+      return;                                   /* 미연동 — 조용히 둔다 */
+    }
 
-  /* 401 자동 재발급도 팝업을 부를 수 있다. 만료로 떨어뜨리고 버튼을 기다린다. */
-  if(typeof _gcalReauthSilent === 'function'){
-    _gcalReauthSilent = function(){
-      /* 여기까지 왔다는 건 토큰을 쓰다 거절당했다는 뜻이다 — 만료로 보여준다 */
+    /* 만료 상태.
+       silent를 실제로 시도할 수 있을 때만 'loading'으로 둔다. 시도하지도 않을 거면서
+       loading으로 두면 배너도 버튼도 없이 영원히 도는 것처럼 보인다. */
+    if(blocked() || _silentTriedThisLoad){
       _gcalToken = null;
       _gcalState = 'expired';
-      try { localStorage.removeItem(TOK); localStorage.removeItem(EXP); } catch(_){}
-      _renderGoogleBar();
-      console.log('[gcal] 토큰 만료 — 자동 재발급 안 함. 버튼으로 다시 연결해라.');
-      return Promise.resolve(false);
+      _gcalErrMsg = '구글 재연결이 필요해';
+      if(typeof _renderGoogleBar === 'function') _renderGoogleBar();
+      return;
+    }
+    _silentTriedThisLoad = true;
+    /* 배너를 먼저 띄우지 않는다 — silent가 성공하면 볼 일이 없다. */
+    _gcalState = 'loading';
+    if(typeof _renderGoogleBar === 'function') _renderGoogleBar();
+
+    const go = () => trySilent('페이지 로드').then(ok => {
+      if(ok && typeof fetchGcalEvents === 'function') fetchGcalEvents();
+    });
+    /* GIS 스크립트가 아직 안 떴을 수 있다 — 한 번만 늦춰서 시도 */
+    if(typeof _ensureTokenClient === 'function' && !_ensureTokenClient()) setTimeout(go, 1200);
+    else go();
+  };
+
+  /* ④ 사용자가 버튼으로 연결에 성공하면 가드를 풀어 자동 갱신으로 되돌린다.
+        (_gcalStoreToken에서 이미 풀지만, 버튼 경로를 명시적으로 남겨둔다) */
+  if(typeof connectGoogle === 'function'){
+    const _origConnect = connectGoogle;
+    connectGoogle = function(){
+      setBlocked(false);
+      _lastSilentAt = 0;
+      return _origConnect.apply(this, arguments);
     };
   }
 
-  /* 버튼 경로만 OAuth를 연다 */
-  if(typeof connectGoogle === 'function'){
-    const _origConnect = connectGoogle;
-    connectGoogle = function(){ return allow(() => _origConnect.apply(this, arguments)); };
+  /* 앱 원본의 로드 시 silent 연결(_gcalSilentConnect)은 쓰지 않는다.
+     복원 흐름은 위 _gcalRestore 하나로 일원화했다 — 두 경로가 각자 OAuth를 부르면
+     그게 예전의 중복 팝업이었다. */
+  if(typeof _gcalSilentConnect === 'function'){
+    _gcalSilentConnect = function(){
+      console.log('[gcal] _gcalSilentConnect 무시 — 복원은 _gcalRestore가 맡는다');
+    };
   }
 
-  console.log('[gcal] 자동 로그인 차단 설치됨 — OAuth는 버튼을 눌렀을 때만');
+  console.log('[gcal] 토큰 자동 갱신 설치됨 — 만료 60초 전 갱신 · 실패 시에만 버튼'
+              + (blocked() ? ' (이 기기는 현재 silent 차단 상태)' : ''));
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
@@ -7130,10 +7257,67 @@ async function renderCoach(force){
   /* 웹 검색 옵트인일 때만. 일반 모델은 web_search_options를 안 받는다(실측). */
   var SEARCH_MODEL = 'gpt-5-search-api';
   var ENDPOINT     = 'https://api.openai.com/v1/chat/completions';
-  var OA_KEY       = 'jay_openaiKey';   /* 지금 쓰는 키 */
-  var AN_KEY       = 'jay_apiKey';      /* 레거시 — 지우지 않는다 */
+
+  /* ⚠ 키 이름에 jay_ 접두사를 쓰지 마라.
+     앱의 수집기 8곳이 전부 `k.startsWith('jay_')` 로 localStorage를 훑는다:
+       _collectSyncData() → Gist 동기화 (30초 디바운스 자동 푸시)
+       _collectAllJay()   → IndexedDB 일일 스냅샷 · 내보내기 payload
+     _syncExcluded/_bkDeviceKey 예외 목록은 'jay_apiKey'만 알고 있어서,
+     jay_openaiKey로 두면 저장 30초 뒤 Gist로 새어 나간다.
+     접두사를 빼면 어느 수집기도 구조적으로 못 본다 — 예외 목록 관리가 필요 없다. */
+  var OA_KEY       = 'oa_api_key';
+  var OA_KEY_OLD   = 'jay_openaiKey';   /* 이전 이름 — 발견되면 옮기고 지운다 */
+  var AN_KEY       = 'jay_apiKey';      /* 레거시 Anthropic — 지우지 않는다 */
 
   var _oaKey = localStorage.getItem(OA_KEY) || '';
+
+  /* ── 유출 경로 차단 ─────────────────────────────────────────────────── */
+
+  /* ① 이전 이름으로 저장돼 있던 키를 옮기고 지운다.
+        이미 Gist로 나갔을 수 있으므로, 지운 뒤 곧바로 푸시해서 원격도 덮는다.
+        (키 자체는 이미 폐기 대상이지만, 원격에 남겨두지 않는다.) */
+  (function migrateKeyName(){
+    var old = null;
+    try { old = localStorage.getItem(OA_KEY_OLD); } catch(e) { return; }
+    if (!old) return;
+    if (!_oaKey) { _oaKey = old; try { localStorage.setItem(OA_KEY, old); } catch(e){} }
+    try { localStorage.removeItem(OA_KEY_OLD); } catch(e){}
+    console.warn('[openai] 이전 이름(' + OA_KEY_OLD + ')의 키를 ' + OA_KEY + '로 옮기고 지웠다.');
+    try {
+      if (typeof _syncPushNow === 'function' && typeof _syncToken === 'function' && _syncToken())
+        _syncPushNow();   /* 원격 사본에서도 즉시 걷어낸다 */
+    } catch(e){}
+  })();
+
+  /* ② 그래도 예외 목록에 등록해 둔다 — 다른 코드가 이 이름을 다시 쓰더라도 안 나가게. */
+  (function hardenExclusions(){
+    var SECRET = { 'jay_openaiKey':1, 'jay_apiKey':1, 'oa_api_key':1 };
+    try {
+      if (typeof _syncExcluded === 'function') {
+        var origSync = _syncExcluded;
+        _syncExcluded = function(k){ return !!SECRET[k] || origSync(k); };
+      }
+    } catch(e){}
+    try {
+      if (typeof _bkDeviceKey === 'function') {
+        var origBk = _bkDeviceKey;
+        _bkDeviceKey = function(k){ return !!SECRET[k] || origBk(k); };
+      }
+    } catch(e){}
+    /* ③ _collectAllJay는 예외 목록조차 안 본다 — 훑은 결과에서 비밀값을 털어낸다.
+          IndexedDB 스냅샷과 '내보내기' 파일에 Anthropic 레거시 키까지 들어가던
+          구멍이라, 이관 전부터 있던 문제다. 여기서 같이 막는다. */
+    try {
+      if (typeof _collectAllJay === 'function') {
+        var origAll = _collectAllJay;
+        _collectAllJay = function(){
+          var o = origAll.apply(this, arguments) || {};
+          Object.keys(SECRET).forEach(function(k){ delete o[k]; });
+          return o;
+        };
+      }
+    } catch(e){}
+  })();
 
   /* ── ③ 오류는 전부 한국어로 ────────────────────────────────────────── */
   var NEED_KEY = '설정에서 OpenAI 키를 넣어줘 (우상단 프로필 → API 키 설정)';
