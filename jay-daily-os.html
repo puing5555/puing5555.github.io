@@ -617,6 +617,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -878,6 +881,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1066,6 +1070,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -1499,22 +1504,10 @@ function switchPanel(name, el) {
 
 // ── API ──
 async function callClaude(messages, system, useSearch = false, maxTokens = null) {
-  const body = { model: 'claude-sonnet-4-6', max_tokens: maxTokens || (useSearch ? 8000 : 4000), system, messages };
-  // 웹 검색은 옵트인. 기본 대화·정형 응답은 tools 없이 예전처럼 빠르게.
-  if (useSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'x-api-key': getApiKey() },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error?.message || `API ${res.status}: ${JSON.stringify(data)}`);
-  // 웹 검색을 쓰면 content가 여러 text 블록(+검색 도구 블록)으로 쪼개져 옴 → text 블록만 전부 이어붙임
-  const text = Array.isArray(data.content)
-    ? data.content.filter(b => b.type === 'text').map(b => b.text).join('')
-    : '';
-  if (!text) throw new Error('빈 응답: ' + JSON.stringify(data));
-  return text;
+  // 원본은 Anthropic을 직접 불렀다. 2026-08 OpenAI로 이관하면서 비웠다.
+  // 실제 구현은 openai-port.html 조각이 로드 시점에 이 함수를 갈아끼운다.
+  // 그 조각이 어떤 이유로든 안 붙었을 때 영어 에러 대신 한국어로 안내한다.
+  throw new Error('AI 설정이 안 붙었어. 페이지를 새로고침하고, 그래도 안 되면 알려줘.');
 }
 
 // ── 덤프 ──
@@ -5491,6 +5484,13 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -7114,6 +7114,286 @@ async function renderCoach(force){
   }
 
   console.log('[gcal] 자동 로그인 차단 설치됨 — OAuth는 버튼을 눌렀을 때만');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  if (typeof callClaude !== 'function') {
+    console.warn('[openai] callClaude를 못 찾았다 — 이관 미설치');
+    return;
+  }
+
+  /* 봇(config.MODEL_DAILY)과 같은 계열. 바꾸려면 여기 한 줄. */
+  var MODEL        = 'gpt-5.6-luna';
+  /* 웹 검색 옵트인일 때만. 일반 모델은 web_search_options를 안 받는다(실측). */
+  var SEARCH_MODEL = 'gpt-5-search-api';
+  var ENDPOINT     = 'https://api.openai.com/v1/chat/completions';
+  var OA_KEY       = 'jay_openaiKey';   /* 지금 쓰는 키 */
+  var AN_KEY       = 'jay_apiKey';      /* 레거시 — 지우지 않는다 */
+
+  var _oaKey = localStorage.getItem(OA_KEY) || '';
+
+  /* ── ③ 오류는 전부 한국어로 ────────────────────────────────────────── */
+  var NEED_KEY = '설정에서 OpenAI 키를 넣어줘 (우상단 프로필 → API 키 설정)';
+
+  function korean(status, body){
+    var raw = (body && body.error && body.error.message) || '';
+    if (status === 401 || status === 403)
+      return 'OpenAI 키가 거부됐어. 설정에서 키를 다시 확인해줘.';
+    if (status === 429)
+      return /quota|billing/i.test(raw)
+        ? 'OpenAI 크레딧이 떨어졌어. 결제 상태를 확인해줘.'
+        : '요청이 몰렸어. 잠깐 뒤에 다시 해봐.';
+    if (status === 404)
+      return '모델을 못 찾았어 (' + MODEL + '). 계정에서 쓸 수 있는 모델인지 확인해줘.';
+    if (status >= 500)
+      return 'OpenAI 서버 쪽 문제야. 잠깐 뒤에 다시 해봐.';
+    if (status === 400)
+      return '요청이 거부됐어. 입력이 너무 길지 않은지 봐줘.';
+    return '요청이 실패했어 (' + status + '). 잠깐 뒤에 다시 해봐.';
+  }
+
+  /* ── 키 ────────────────────────────────────────────────────────────── */
+  function ensureKey(){
+    if (!_oaKey) {
+      if (typeof openModal === 'function') openModal('apiKeyModal');
+      throw new Error(NEED_KEY);
+    }
+    return _oaKey;
+  }
+
+  /* 앱 곳곳의 `if(!_apiKey)` / `if(!getApiKey())` 가드가 그대로 살게 한다.
+     실제 호출에 쓰이는 건 _oaKey 하나뿐이고, 레거시 키는 localStorage에만 남는다. */
+  function syncLegacyVar(){
+    try { if (typeof _apiKey !== 'undefined') _apiKey = _oaKey; } catch(e){}
+  }
+  syncLegacyVar();
+
+  getApiKey = function(){ return ensureKey(); };
+
+  /* ── 검색 응답 다듬기 ───────────────────────────────────────────────
+     검색 모델(gpt-5-search-api)은 시스템 프롬프트의 JSON 형식을 잘 안 지킨다.
+     {"reply":…} 대신 제 맘대로 된 키를 주면 브레인덤프가 parsed.reply를 못 읽고
+     답을 통째로 삼킨다. 검색 경로를 쓰는 곳은 브레인덤프 한 곳뿐이라,
+     여기서 그 형식으로 맞춰서 돌려준다.
+
+     출처는 마크다운 링크로 오는데 앱은 innerHTML에 그대로 꽂는다 →
+     [pubmed.ncbi.nlm.nih.gov](https://…) 가 화면에 그대로 보인다.
+     기관명만 남기고 URL은 턴다. */
+  function delink(s){
+    return String(s == null ? '' : s)
+      .replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '$1')
+      .replace(/\(\s*\)/g, '')
+      .replace(/[ \t]{2,}/g, ' ');
+  }
+
+  function flatten(v, depth){
+    depth = depth || 0;
+    var pad = '  '.repeat(depth);
+    if (v == null) return '';
+    if (typeof v !== 'object') return pad + delink(v);
+    if (Array.isArray(v))
+      return v.map(function(x){
+        return typeof x === 'object' ? flatten(x, depth) : pad + '· ' + delink(x);
+      }).filter(Boolean).join('\n');
+    return Object.keys(v).map(function(k){
+      var val = v[k];
+      if (val == null || val === '') return '';
+      if (typeof val === 'object') return pad + k + '\n' + flatten(val, depth + 1);
+      return pad + k + ': ' + delink(val);
+    }).filter(Boolean).join('\n');
+  }
+
+  function asDumpJson(text){
+    var body = text.replace(/```json|```/g, '').trim();
+    var parsed = null;
+    try { parsed = JSON.parse(body); } catch(e) {}
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        && typeof parsed.reply === 'string') {
+      parsed.reply = delink(parsed.reply);          /* 형식은 맞다 — 링크만 턴다 */
+      return JSON.stringify(parsed);
+    }
+    var out = { reply: parsed ? flatten(parsed) : delink(body) };
+    if (parsed && Array.isArray(parsed.todos)) out.todos = parsed.todos;
+    return JSON.stringify(out);
+  }
+
+  /* ── ① 호출 ────────────────────────────────────────────────────────── */
+
+  /* Anthropic 형식 content → OpenAI 형식.
+     문자열은 그대로, 블록 배열은 이미지/텍스트를 갈아끼운다. */
+  function content(c){
+    if (typeof c === 'string') return c;
+    if (!Array.isArray(c)) return String(c == null ? '' : c);
+    return c.map(function(b){
+      if (b.type === 'image' && b.source && b.source.type === 'base64')
+        return { type:'image_url',
+                 image_url:{ url:'data:' + (b.source.media_type||'image/jpeg') + ';base64,' + b.source.data } };
+      if (b.type === 'image_url') return b;
+      return { type:'text', text: b.text != null ? b.text : String(b) };
+    });
+  }
+
+  async function post(body){
+    var res, data;
+    try {
+      res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + _oaKey },
+        body: JSON.stringify(body)
+      });
+    } catch(netErr) {
+      throw new Error('네트워크가 끊겼어. 연결 확인하고 다시 해봐.');
+    }
+    try { data = await res.json(); } catch(e) { data = {}; }
+    return { res: res, data: data };
+  }
+
+  callClaude = async function(messages, system, useSearch, maxTokens){
+    ensureKey();
+
+    var msgs = [];
+    if (system) msgs.push({ role:'system', content: String(system) });
+    (messages || []).forEach(function(m){
+      msgs.push({ role: m.role, content: content(m.content) });
+    });
+
+    /* 추론 토큰이 출력 예산에서 함께 차감된다 → 바닥을 올려둔다(봇과 같은 이유). */
+    var budget = Math.max(maxTokens || (useSearch ? 8000 : 4000), 2000);
+
+    var body = {
+      model: useSearch ? SEARCH_MODEL : MODEL,
+      messages: msgs,
+      max_completion_tokens: budget
+    };
+    if (useSearch) body.web_search_options = {};
+    /* 일상 호출은 사고 없이 — 봇의 일상 턴과 같은 설정이다. */
+    else body.reasoning_effort = 'none';
+
+    var out = await post(body);
+
+    /* 모델·계정에 따라 못 받는 파라미터가 있다. 한 번씩 떼고 다시 시도한다. */
+    if (out.res.status === 400) {
+      var msg = (out.data.error && out.data.error.message) || '';
+      if (/reasoning_effort/.test(msg) && body.reasoning_effort) {
+        delete body.reasoning_effort;
+        out = await post(body);
+      } else if (/web_search_options/.test(msg) && body.web_search_options) {
+        delete body.web_search_options;
+        out = await post(body);
+      } else if (/max_completion_tokens/.test(msg)) {
+        body.max_tokens = body.max_completion_tokens;
+        delete body.max_completion_tokens;
+        out = await post(body);
+      }
+    }
+
+    if (!out.res.ok || out.data.error) {
+      console.warn('[openai]', out.res.status, out.data);
+      throw new Error(korean(out.res.status, out.data));
+    }
+
+    var choice = (out.data.choices && out.data.choices[0]) || {};
+    var text = (choice.message && choice.message.content) || '';
+    if (Array.isArray(text))
+      text = text.map(function(p){ return p.text || ''; }).join('');
+    text = (text || '').trim();
+
+    if (!text) {
+      if (choice.finish_reason === 'length')
+        throw new Error('답이 너무 길어서 잘렸어. 짧게 나눠서 물어봐.');
+      if (choice.finish_reason === 'content_filter')
+        throw new Error('안전 필터에 걸렸어. 다른 각도로 물어봐.');
+      throw new Error('응답이 비었어. 다시 해봐.');
+    }
+    return useSearch ? asDumpJson(text) : text;
+  };
+
+  /* ── ② 설정 모달 ───────────────────────────────────────────────────── */
+  function paintModal(){
+    var box = document.querySelector('#apiKeyModal .modal-box');
+    if (!box || box.dataset.oaPatched) return;
+    box.dataset.oaPatched = '1';
+    box.innerHTML =
+      '<div class="modal-title">🔑 API 키</div>' +
+      '<p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">' +
+        'AI 기능은 OpenAI 키로 돈다.<br>키는 이 기기에만 저장되고 서버로 전송 안 돼.</p>' +
+      '<div class="form-group">' +
+        '<label class="form-label">OpenAI API Key</label>' +
+        '<input class="form-input" id="openaiKeyInput" placeholder="sk-proj-..." type="password" ' +
+               'onkeydown="if(event.key===\'Enter\')saveApiKey()">' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:16px">👉 ' +
+        '<a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">' +
+        'platform.openai.com/api-keys</a> 에서 발급</div>' +
+      '<div class="form-group" style="opacity:.55">' +
+        '<label class="form-label">Anthropic API Key <span style="font-weight:400">— 레거시 (지금은 안 씀)</span></label>' +
+        '<input class="form-input" id="apiKeyInput" placeholder="sk-ant-api03-..." type="password">' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">' +
+          '계정 인증이 풀리면 다시 쓸 수 있게 남겨둔 칸이야. 비워둬도 아무 문제 없어.</div>' +
+      '</div>' +
+      '<div class="modal-btns">' +
+        '<button class="btn-secondary" onclick="closeModal(\'apiKeyModal\')">취소</button>' +
+        '<button class="btn-primary" onclick="saveApiKey()">저장</button>' +
+      '</div>';
+    var oa = box.querySelector('#openaiKeyInput');
+    var an = box.querySelector('#apiKeyInput');
+    if (oa) oa.value = _oaKey;
+    if (an) an.value = localStorage.getItem(AN_KEY) || '';
+  }
+
+  saveApiKey = function(){
+    paintModal();
+    var oaEl = document.getElementById('openaiKeyInput');
+    var anEl = document.getElementById('apiKeyInput');
+    var k = (oaEl && oaEl.value || '').trim();
+    if (k && !/^sk-/.test(k)) {
+      if (typeof showToast === 'function') showToast('OpenAI 키는 sk- 로 시작해');
+      return;
+    }
+    _oaKey = k;
+    if (k) localStorage.setItem(OA_KEY, k); else localStorage.removeItem(OA_KEY);
+    syncLegacyVar();
+
+    var legacy = (anEl && anEl.value || '').trim();
+    if (legacy) localStorage.setItem(AN_KEY, legacy);
+
+    if (typeof closeModal === 'function') closeModal('apiKeyModal');
+    paintStatus();
+    if (typeof showToast === 'function')
+      showToast(k ? '✅ OpenAI 키 저장됨' : '키를 비웠어');
+  };
+
+  function paintStatus(){
+    var st = document.getElementById('apiKeyStatus');
+    if (st) st.textContent = _oaKey ? '✅' : '🔑';
+  }
+
+  /* 모달은 열릴 때 그려도 늦지 않다 — 앱의 openModal을 감싼다. */
+  if (typeof openModal === 'function') {
+    var _origOpen = openModal;
+    openModal = function(id){
+      if (id === 'apiKeyModal') paintModal();
+      return _origOpen.apply(this, arguments);
+    };
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){ paintModal(); paintStatus(); });
+  paintModal();
+  paintStatus();
+
+  /* 이관 안내 — 예전에 Anthropic 키만 넣어둔 기기면 한 번 알려준다. */
+  if (!_oaKey && localStorage.getItem(AN_KEY)) {
+    setTimeout(function(){
+      if (typeof showToast === 'function')
+        showToast('AI가 OpenAI로 바뀌었어 — 설정에서 OpenAI 키를 넣어줘');
+    }, 1500);
+  }
+
+  console.log('[openai] AI 백엔드 이관됨 — ' + MODEL + ' (검색: ' + SEARCH_MODEL + ')');
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
