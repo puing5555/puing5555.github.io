@@ -626,6 +626,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -890,6 +893,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1078,6 +1082,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5517,6 +5522,14 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -7310,6 +7323,60 @@ async function renderCoach(force){
 
   console.log('[gcal] 토큰 자동 갱신 설치됨 — 만료 60초 전 갱신 · 실패 시에만 버튼'
               + (blocked() ? ' (이 기기는 현재 silent 차단 상태)' : ''));
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  if(!document.getElementById('rightPanel')){
+    console.warn('[최근항목] #rightPanel 을 못 찾았다 — 탭 제한 미설치');
+    return;
+  }
+
+  const DUMP = 'dump';
+  const onDump = () => (typeof currentPanel === 'string' ? currentPanel : DUMP) === DUMP;
+
+  function sync(){
+    const show = onDump();
+    const p = document.getElementById('rightPanel');
+    const t = document.getElementById('rightToggle');   /* 모바일 헤더 버튼 */
+    if(p) p.style.display = show ? '' : 'none';
+    if(t) t.style.display = show ? '' : 'none';
+    if(!show){
+      /* 다른 탭으로 옮기는 순간 열려 있던 서랍·확장은 닫는다 */
+      document.body.classList.remove('right-open');
+      if(p) p.classList.remove('expanded');
+    }
+  }
+  window._syncRecentPanel = sync;
+
+  /* 탭 전환 훅 — 앱이 currentPanel 을 갱신한 **뒤에** 동기화해야 한다 */
+  if(typeof switchPanel === 'function'){
+    const orig = switchPanel;
+    switchPanel = function(){
+      const r = orig.apply(this, arguments);
+      sync();
+      return r;
+    };
+  }
+
+  /* 브레인덤프가 아닐 때는 열리지 않게 — 버튼을 숨겨도 다른 호출 경로가 남는다 */
+  if(typeof openRightPanel === 'function'){
+    const orig = openRightPanel;
+    openRightPanel = function(){
+      if(!onDump()) return;
+      return orig.apply(this, arguments);
+    };
+  }
+
+  sync();
+  document.addEventListener('DOMContentLoaded', sync);
+  /* #rightToggle 은 모바일 조각이 나중에 만든다 — 생기고 나서 한 번 더 맞춘다 */
+  setTimeout(sync, 300);
+  setTimeout(sync, 1500);
+
+  console.log('[최근항목] 브레인덤프 탭 전용으로 제한됨');
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
