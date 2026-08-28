@@ -629,6 +629,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -894,6 +897,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1082,6 +1086,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -1519,8 +1524,9 @@ function switchPanel(name, el) {
 
 // ── API ──
 async function callClaude(messages, system, useSearch = false, maxTokens = null) {
-  // 원본은 Anthropic을 직접 불렀다. 2026-08 OpenAI로 이관하면서 비웠다.
-  // 실제 구현은 openai-port.html 조각이 로드 시점에 이 함수를 갈아끼운다.
+  // 원본의 Anthropic 직접 호출을 걷어낸 자리다. 옛 키 이름(jay_apiKey)과 옛 모델을
+  // 물고 있어서, 조각이 안 붙었을 때 조용히 그리로 나가면 안 된다.
+  // 실제 구현은 AI_PORT 조각(anthropic-port.html)이 로드 시점에 갈아끼운다.
   // 그 조각이 어떤 이유로든 안 붙었을 때 영어 에러 대신 한국어로 안내한다.
   throw new Error('AI 설정이 안 붙었어. 페이지를 새로고침하고, 그래도 안 되면 알려줘.');
 }
@@ -5530,6 +5536,15 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -7383,51 +7398,91 @@ async function renderCoach(force){
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
-  if (typeof callClaude !== 'function') {
-    console.warn('[openai] callClaude를 못 찾았다 — 이관 미설치');
-    return;
-  }
+  /* 앱 스크립트가 안 붙은 페이지에서도 ①유출 경로 차단 ②키 이관은 돌아야 한다.
+     예전엔 여기서 곧장 return 해서, callClaude가 없으면 옛 이름의 키가 그대로
+     남아 Gist로 새어 나갔다. 경고만 남기고 계속 간다. */
+  if (typeof callClaude !== 'function')
+    console.warn('[claude] callClaude를 못 찾았다 — 원본 위에 새로 정의한다');
 
-  /* 봇(config.MODEL_DAILY)과 같은 계열. 바꾸려면 여기 한 줄. */
-  var MODEL        = 'gpt-5.6-luna';
-  /* 웹 검색 옵트인일 때만. 일반 모델은 web_search_options를 안 받는다(실측). */
-  var SEARCH_MODEL = 'gpt-5-search-api';
-  var ENDPOINT     = 'https://api.openai.com/v1/chat/completions';
+  /* 바꾸려면 여기 한 줄. 봇의 MODEL_DAILY와는 별개다(봇은 OpenAI 유지). */
+  var MODEL       = 'claude-sonnet-5';
+  var ENDPOINT    = 'https://api.anthropic.com/v1/messages';
+  var API_VERSION = '2023-06-01';
+  /* 안전 분류기가 거절하면 같은 호출 안에서 대체 모델로 다시 돌리는 기능.
+     opus-5 · fable-5만 받는다 — sonnet-5는 400으로 거절한다(2026-08 실측:
+     "'claude-sonnet-5' does not support the `fallbacks` parameter").
+     켠 채로 두면 매 호출이 400 → 재시도로 왕복을 한 번씩 버린다.
+     MODEL을 opus-5 위로 올리면 이 줄만 true로 되돌려라. */
+  var USE_FALLBACKS = false;
+  var FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+
+  /* 웹 검색 옵트인일 때만 붙인다. 서버 도구라 우리가 실행할 게 없다.
+     20260209 이상은 검색 결과를 코드로 걸러서 넣는다(토큰 절약) — 기본 동작이라
+     code_execution을 tools에 따로 넣으면 안 된다. */
+  var SEARCH_TOOL = { type: 'web_search_20260318', name: 'web_search', max_uses: 5 };
 
   /* ⚠ 키 이름에 jay_ 접두사를 쓰지 마라.
-     앱의 수집기 8곳이 전부 `k.startsWith('jay_')` 로 localStorage를 훑는다:
+     앱의 수집기가 전부 `k.startsWith('jay_')` 로 localStorage를 훑는다:
        _collectSyncData() → Gist 동기화 (30초 디바운스 자동 푸시)
        _collectAllJay()   → IndexedDB 일일 스냅샷 · 내보내기 payload
-     _syncExcluded/_bkDeviceKey 예외 목록은 'jay_apiKey'만 알고 있어서,
-     jay_openaiKey로 두면 저장 30초 뒤 Gist로 새어 나간다.
-     접두사를 빼면 어느 수집기도 구조적으로 못 본다 — 예외 목록 관리가 필요 없다. */
-  var OA_KEY       = 'oa_api_key';
-  var OA_KEY_OLD   = 'jay_openaiKey';   /* 이전 이름 — 발견되면 옮기고 지운다 */
-  var AN_KEY       = 'jay_apiKey';      /* 레거시 Anthropic — 지우지 않는다 */
+     원래 Anthropic 키 자리였던 jay_apiKey는 _collectAllJay가 그대로 퍼갔다 —
+     스냅샷과 '내보내기' 파일에 키가 통째로 들어가던 구멍이다.
+     접두사를 빼면 어느 수집기도 구조적으로 못 본다. */
+  var AN_KEY      = 'an_api_key';
+  var AN_KEY_OLD  = 'jay_apiKey';    /* 이전 이름 — 발견되면 옮기고 지운다 */
+  var OA_KEY      = 'oa_api_key';    /* OpenAI 이관기 키 — 되돌릴 때를 위해 남긴다 */
 
-  var _oaKey = localStorage.getItem(OA_KEY) || '';
+  var _anKey = '';
 
-  /* ── 유출 경로 차단 ─────────────────────────────────────────────────── */
+  /* ── 키 읽기 ────────────────────────────────────────────────────────
+     읽기·이관·정리를 한 함수(refreshKey)로 묶는다. 로드 시점에 한 번만 읽으면
+     안 된다 — localStorage는 로드 뒤에도 바뀐다:
+       · Gist 풀(_applySyncData)  · 스냅샷/가져오기 복원(_restoreJayData)
+       · 다른 탭에서 키 저장       · 설정 모달에서 저장
+     그 경로로 키가 들어온 기기는 이관이 영영 안 돌아 키가 빈 채로 남는다.
+     그래서 호출 직전마다(ensureKey) 다시 읽고, 위 경로마다 다시 읽는다. */
 
-  /* ① 이전 이름으로 저장돼 있던 키를 옮기고 지운다.
-        이미 Gist로 나갔을 수 있으므로, 지운 뒤 곧바로 푸시해서 원격도 덮는다.
-        (키 자체는 이미 폐기 대상이지만, 원격에 남겨두지 않는다.) */
-  (function migrateKeyName(){
-    var old = null;
-    try { old = localStorage.getItem(OA_KEY_OLD); } catch(e) { return; }
+  /* 헤더에 그대로 실을 수 있는 값인지. 공백·줄바꿈·비ASCII가 섞이면 fetch가
+     TypeError로 터지는데, 그게 '네트워크가 끊겼어'로 둔갑한다. */
+  function headerSafe(k){ return /^[\x21-\x7e]+$/.test(k); }
+
+  function readRaw(name){
+    try { return localStorage.getItem(name) || ''; } catch(e) { return ''; }
+  }
+
+  /* 이전 이름(jay_apiKey)으로 저장돼 있던 키를 옮기고 지운다.
+     이미 스냅샷·내보내기로 새어 나갔을 수 있으므로, 지운 뒤 곧바로 푸시해서
+     원격 사본도 덮는다. */
+  function migrateKeyName(){
+    var old = readRaw(AN_KEY_OLD);
     if (!old) return;
-    if (!_oaKey) { _oaKey = old; try { localStorage.setItem(OA_KEY, old); } catch(e){} }
-    try { localStorage.removeItem(OA_KEY_OLD); } catch(e){}
-    console.warn('[openai] 이전 이름(' + OA_KEY_OLD + ')의 키를 ' + OA_KEY + '로 옮기고 지웠다.');
+    if (!readRaw(AN_KEY)) { try { localStorage.setItem(AN_KEY, old.trim()); } catch(e){} }
+    try { localStorage.removeItem(AN_KEY_OLD); } catch(e){}
+    console.warn('[claude] 이전 이름(' + AN_KEY_OLD + ')의 키를 ' + AN_KEY + '로 옮기고 지웠다.');
     try {
       if (typeof _syncPushNow === 'function' && typeof _syncToken === 'function' && _syncToken())
-        _syncPushNow();   /* 원격 사본에서도 즉시 걷어낸다 */
+        _syncPushNow();
     } catch(e){}
-  })();
+  }
 
-  /* ② 그래도 예외 목록에 등록해 둔다 — 다른 코드가 이 이름을 다시 쓰더라도 안 나가게. */
+  /* 이관 + 다시 읽기 + 앞뒤 공백 씻기. 붙여넣기로 딸려온 줄바꿈 하나가
+     fetch를 통째로 죽이던 자리라, 발견하면 씻은 값으로 되쓴다. */
+  function refreshKey(){
+    migrateKeyName();
+    var k = readRaw(AN_KEY), t = k.trim();
+    if (t !== k) {
+      try { if (t) localStorage.setItem(AN_KEY, t); else localStorage.removeItem(AN_KEY); } catch(e){}
+    }
+    _anKey = t;
+    syncLegacyVar();
+    return _anKey;
+  }
+
+  /* ── 유출 경로 차단 ───────────────────────────────────────────────────
+     이관(refreshKey)보다 먼저 건다 — 이관이 원격 푸시를 일으키므로,
+     예외 목록이 이미 서 있어야 그 푸시에 비밀값이 안 실린다. */
   (function hardenExclusions(){
-    var SECRET = { 'jay_openaiKey':1, 'jay_apiKey':1, 'oa_api_key':1 };
+    var SECRET = { 'an_api_key':1, 'oa_api_key':1, 'jay_apiKey':1, 'jay_openaiKey':1 };
     try {
       if (typeof _syncExcluded === 'function') {
         var origSync = _syncExcluded;
@@ -7440,9 +7495,7 @@ async function renderCoach(force){
         _bkDeviceKey = function(k){ return !!SECRET[k] || origBk(k); };
       }
     } catch(e){}
-    /* ③ _collectAllJay는 예외 목록조차 안 본다 — 훑은 결과에서 비밀값을 털어낸다.
-          IndexedDB 스냅샷과 '내보내기' 파일에 Anthropic 레거시 키까지 들어가던
-          구멍이라, 이관 전부터 있던 문제다. 여기서 같이 막는다. */
+    /* _collectAllJay는 예외 목록조차 안 본다 — 훑은 결과에서 비밀값을 털어낸다. */
     try {
       if (typeof _collectAllJay === 'function') {
         var origAll = _collectAllJay;
@@ -7455,55 +7508,85 @@ async function renderCoach(force){
     } catch(e){}
   })();
 
-  /* ── ③ 오류는 전부 한국어로 ────────────────────────────────────────── */
-  var NEED_KEY = '설정에서 OpenAI 키를 넣어줘 (우상단 프로필 → API 키 설정)';
+  /* ── 오류는 전부 한국어로, 그리고 원인별로 갈라서 ──────────────────
+     실패 사유가 한 문장으로 뭉개지면 화면만 보고는 손을 못 쓴다.
+     키 문제(401)·한도(429)·크레딧·진짜 네트워크를 각각 다르게 말해준다.
+     괄호 안 표식은 한눈에 구분하라고 붙인 것이다. */
+  var NEED_KEY = '설정에서 Anthropic 키를 넣어줘 (우상단 프로필 → API 키 설정)';
+  var BAD_KEY  = '저장된 Anthropic 키에 못 쓰는 문자가 섞였어 (키/형식) — 공백·줄바꿈 같은 것. 설정에서 지우고 다시 붙여넣어줘.';
+  var REFUSED  = '안전 필터에 걸렸어 (거절). 다른 각도로 물어봐.';
 
   function korean(status, body){
-    var raw = (body && body.error && body.error.message) || '';
-    if (status === 401 || status === 403)
-      return 'OpenAI 키가 거부됐어. 설정에서 키를 다시 확인해줘.';
+    var err  = (body && body.error) || {};
+    var raw  = err.message || '';
+    var kind = err.type || '';
+    /* 크레딧 소진은 Anthropic에선 400으로 온다 — 상태코드만 보면 '요청이 이상하다'로
+       읽히지만 실제로는 결제 문제다. 먼저 걸러낸다. */
+    if (/credit balance|too low|billing|payment/i.test(raw))
+      return 'Anthropic 크레딧이 떨어졌어 (결제). 콘솔에서 잔액을 확인해줘.';
+    if (status === 401)
+      return 'Anthropic 키가 거부됐어 — 없거나 무효한 키야 (401). 설정에서 키를 다시 넣어줘.';
+    if (status === 403)
+      return 'Anthropic 키가 거부됐어 — 이 키로는 접근이 막혀 있어 (403). 키 권한을 확인해줘.';
     if (status === 429)
-      return /quota|billing/i.test(raw)
-        ? 'OpenAI 크레딧이 떨어졌어. 결제 상태를 확인해줘.'
-        : '요청이 몰렸어. 잠깐 뒤에 다시 해봐.';
+      return '요청이 몰렸어 (429/속도). 잠깐 뒤에 다시 해봐.';
     if (status === 404)
-      return '모델을 못 찾았어 (' + MODEL + '). 계정에서 쓸 수 있는 모델인지 확인해줘.';
+      return '모델을 못 찾았어 (404 · ' + MODEL + '). 계정에서 쓸 수 있는 모델인지 확인해줘.';
+    if (status === 529)
+      return 'Anthropic이 지금 과부하야 (529). 잠깐 뒤에 다시 해봐.';
     if (status >= 500)
-      return 'OpenAI 서버 쪽 문제야. 잠깐 뒤에 다시 해봐.';
+      return 'Anthropic 서버 쪽 문제야 (' + status + '). 잠깐 뒤에 다시 해봐.';
     if (status === 400)
-      return '요청이 거부됐어. 입력이 너무 길지 않은지 봐줘.';
+      return '요청이 거부됐어 (400' + (kind ? ' · ' + kind : '') + '). 입력이 너무 길지 않은지 봐줘.';
+    /* 200인데 error가 실려 오는 경우 — 상태코드만으로는 아무것도 못 밝힌다 */
+    if (status >= 200 && status < 300)
+      return '응답에 오류가 실려 왔어 (' + (kind || 'error') + '). 다시 해봐.';
     return '요청이 실패했어 (' + status + '). 잠깐 뒤에 다시 해봐.';
+  }
+
+  /* fetch가 거부되는 이유는 하나가 아니다. 전부 '네트워크가 끊겼어'로 뭉개면
+     헤더를 못 만든 키 문제까지 그렇게 보인다. 갈라서 말해준다. */
+  function networkKorean(err){
+    var m = (err && err.message) || '';
+    if (!headerSafe(_anKey)) return BAD_KEY;
+    if (/header|ISO-8859-1|invalid value/i.test(m)) return BAD_KEY;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false)
+      return '인터넷이 끊겼어 (네트워크/오프라인). 연결 확인하고 다시 해봐.';
+    return 'Anthropic에 연결 자체가 막혔어 (네트워크/차단). 광고차단·VPN·방화벽을 의심해봐. [' + (m || 'fetch 거부') + ']';
   }
 
   /* ── 키 ────────────────────────────────────────────────────────────── */
   function ensureKey(){
-    if (!_oaKey) {
+    refreshKey();   /* 호출 직전마다 다시 읽는다 — 진입 경로를 안 가린다 */
+    if (!_anKey) {
       if (typeof openModal === 'function') openModal('apiKeyModal');
       throw new Error(NEED_KEY);
     }
-    return _oaKey;
+    if (!headerSafe(_anKey)) throw new Error(BAD_KEY);
+    return _anKey;
   }
 
-  /* 앱 곳곳의 `if(!_apiKey)` / `if(!getApiKey())` 가드가 그대로 살게 한다.
-     실제 호출에 쓰이는 건 _oaKey 하나뿐이고, 레거시 키는 localStorage에만 남는다. */
+  /* 앱 곳곳의 `if(!_apiKey)` / `if(!getApiKey())` 가드가 그대로 살게 한다. */
   function syncLegacyVar(){
-    try { if (typeof _apiKey !== 'undefined') _apiKey = _oaKey; } catch(e){}
+    try { if (typeof _apiKey !== 'undefined') _apiKey = _anKey; } catch(e){}
   }
-  syncLegacyVar();
+  refreshKey();   /* 최초 1회 — 이관·정리·레거시 변수 동기화까지 여기서 끝난다 */
 
   getApiKey = function(){ return ensureKey(); };
 
   /* ── 검색 응답 다듬기 ───────────────────────────────────────────────
-     검색 모델(gpt-5-search-api)은 시스템 프롬프트의 JSON 형식을 잘 안 지킨다.
-     {"reply":…} 대신 제 맘대로 된 키를 주면 브레인덤프가 parsed.reply를 못 읽고
-     답을 통째로 삼킨다. 검색 경로를 쓰는 곳은 브레인덤프 한 곳뿐이라,
-     여기서 그 형식으로 맞춰서 돌려준다.
+     브레인덤프는 {"reply":…} 형식을 기대한다. 검색을 켜면 모델이 형식을
+     흘릴 때가 있어서, 그때는 여기서 그 형식으로 접어서 돌려준다.
 
-     출처는 마크다운 링크로 오는데 앱은 innerHTML에 그대로 꽂는다 →
-     [pubmed.ncbi.nlm.nih.gov](https://…) 가 화면에 그대로 보인다.
-     기관명만 남기고 URL은 턴다. */
+     Anthropic 웹 검색의 출처는 마크다운이 아니라 text 블록의 citations로 온다 —
+     OpenAI 때처럼 [제목](url)이 본문에 박히지 않는다. 그래도 앱이 답을
+     innerHTML에 그대로 꽂으므로, 혹시 섞여 오면 턴다. */
   function delink(s){
     return String(s == null ? '' : s)
+      /* 검색 턴에서 모델이 인용을 <cite index="5-1,5-4">…</cite> 로 감싸서 준다.
+         앱이 reply를 innerHTML에 그대로 꽂으므로 태그째 화면에 들어간다 — 실호출로 확인했다.
+         출처는 아래에서 citations로 따로 붙이니, 여기선 껍데기만 벗기고 글은 남긴다. */
+      .replace(/<\/?cite\b[^>]*>/gi, '')
       .replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '$1')
       .replace(/\(\s*\)/g, '')
       .replace(/[ \t]{2,}/g, ' ');
@@ -7526,47 +7609,54 @@ async function renderCoach(force){
     }).filter(Boolean).join('\n');
   }
 
-  function asDumpJson(text){
+  function asDumpJson(text, sources){
     var body = text.replace(/```json|```/g, '').trim();
     var parsed = null;
     try { parsed = JSON.parse(body); } catch(e) {}
 
+    var out;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
         && typeof parsed.reply === 'string') {
-      parsed.reply = delink(parsed.reply);          /* 형식은 맞다 — 링크만 턴다 */
-      return JSON.stringify(parsed);
+      parsed.reply = delink(parsed.reply);        /* 형식은 맞다 — 링크만 턴다 */
+      out = parsed;
+    } else {
+      out = { reply: parsed ? flatten(parsed) : delink(body) };
+      if (parsed && Array.isArray(parsed.todos)) out.todos = parsed.todos;
     }
-    var out = { reply: parsed ? flatten(parsed) : delink(body) };
-    if (parsed && Array.isArray(parsed.todos)) out.todos = parsed.todos;
+    /* 출처는 붙여서 보여준다. OpenAI 때는 URL을 통째로 털어냈는데,
+       검색 결과를 그대로 보여줄 땐 출처를 같이 표시해야 한다. */
+    if (sources && sources.length)
+      out.reply = (out.reply || '') + '\n\n출처\n'
+        + sources.map(function(s){ return '· ' + s.title + ' — ' + s.url; }).join('\n');
     return JSON.stringify(out);
   }
 
-  /* ── ① 호출 ────────────────────────────────────────────────────────── */
-
-  /* Anthropic 형식 content → OpenAI 형식.
-     문자열은 그대로, 블록 배열은 이미지/텍스트를 갈아끼운다. */
-  function content(c){
-    if (typeof c === 'string') return c;
-    if (!Array.isArray(c)) return String(c == null ? '' : c);
-    return c.map(function(b){
-      if (b.type === 'image' && b.source && b.source.type === 'base64')
-        return { type:'image_url',
-                 image_url:{ url:'data:' + (b.source.media_type||'image/jpeg') + ';base64,' + b.source.data } };
-      if (b.type === 'image_url') return b;
-      return { type:'text', text: b.text != null ? b.text : String(b) };
-    });
-  }
+  /* ── ① 호출 ──────────────────────────────────────────────────────────
+     앱은 원래부터 Anthropic 형식(문자열 또는 {type:'image',source:{…}} 블록)으로
+     content를 만든다. OpenAI 이관기에선 그걸 image_url로 갈아끼웠는데,
+     이제는 변환이 필요 없다 — 그대로 넘긴다. */
 
   async function post(body){
     var res, data;
+    var headers = {
+      'content-type': 'application/json',
+      'x-api-key': _anKey,
+      'anthropic-version': API_VERSION,
+      /* 브라우저에서 직접 부르는 걸 허용하는 헤더. 이게 없으면 CORS로 막힌다.
+         키가 기기 안에만 있는 개인용 앱이라 이 구조를 쓴다. */
+      'anthropic-dangerous-direct-browser-access': 'true'
+    };
+    /* 쓰지도 않을 베타 헤더는 안 보낸다 — 프리플라이트에 얹히기만 한다. */
+    if (USE_FALLBACKS) headers['anthropic-beta'] = FALLBACK_BETA;
     try {
       res = await fetch(ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer ' + _oaKey },
+        headers: headers,
         body: JSON.stringify(body)
       });
     } catch(netErr) {
-      throw new Error('네트워크가 끊겼어. 연결 확인하고 다시 해봐.');
+      console.warn('[claude] fetch 거부', netErr);
+      throw new Error(networkKorean(netErr));
     }
     try { data = await res.json(); } catch(e) { data = {}; }
     return { res: res, data: data };
@@ -7575,121 +7665,149 @@ async function renderCoach(force){
   callClaude = async function(messages, system, useSearch, maxTokens){
     ensureKey();
 
-    var msgs = [];
-    if (system) msgs.push({ role:'system', content: String(system) });
-    (messages || []).forEach(function(m){
-      msgs.push({ role: m.role, content: content(m.content) });
+    var msgs = (messages || []).map(function(m){
+      return { role: m.role, content: m.content };
     });
 
-    /* 추론 토큰이 출력 예산에서 함께 차감된다 → 바닥을 올려둔다(봇과 같은 이유). */
-    var budget = Math.max(maxTokens || (useSearch ? 8000 : 4000), 2000);
+    /* 사고 토큰이 출력 예산에서 함께 차감된다 → 바닥을 올려둔다. */
+    var budget = Math.max(maxTokens || (useSearch ? 16000 : 8000), 4000);
 
     var body = {
-      model: useSearch ? SEARCH_MODEL : MODEL,
-      messages: msgs,
-      max_completion_tokens: budget
+      model: MODEL,
+      max_tokens: budget,
+      messages: msgs
     };
-    if (useSearch) body.web_search_options = {};
-    /* 일상 호출은 사고 없이 — 봇의 일상 턴과 같은 설정이다. */
-    else body.reasoning_effort = 'none';
+    if (USE_FALLBACKS) body.fallbacks = 'default';
+    if (system) body.system = String(system);
+    if (useSearch) body.tools = [SEARCH_TOOL];
+    /* 일상 턴은 얕게 — 사고를 끄는 것보다 effort를 낮추는 쪽이 안전하다. */
+    else body.output_config = { effort: 'low' };
 
     var out = await post(body);
 
-    /* 모델·계정에 따라 못 받는 파라미터가 있다. 한 번씩 떼고 다시 시도한다. */
+    /* 계정·모델에 따라 못 받는 파라미터가 있다. 한 번씩 떼고 다시 시도한다. */
     if (out.res.status === 400) {
       var msg = (out.data.error && out.data.error.message) || '';
-      if (/reasoning_effort/.test(msg) && body.reasoning_effort) {
-        delete body.reasoning_effort;
+      if (/output_config|effort/.test(msg) && body.output_config) {
+        delete body.output_config;
         out = await post(body);
-      } else if (/web_search_options/.test(msg) && body.web_search_options) {
-        delete body.web_search_options;
+      } else if (/fallbacks|server-side-fallback/.test(msg) && body.fallbacks) {
+        delete body.fallbacks;
         out = await post(body);
-      } else if (/max_completion_tokens/.test(msg)) {
-        body.max_tokens = body.max_completion_tokens;
-        delete body.max_completion_tokens;
+      } else if (/web_search|allowed_callers|tools/.test(msg) && body.tools) {
+        delete body.tools;
         out = await post(body);
       }
     }
 
-    if (!out.res.ok || out.data.error) {
-      console.warn('[openai]', out.res.status, out.data);
+    if (!out.res.ok || out.data.type === 'error') {
+      console.warn('[claude]', out.res.status, out.data);
       throw new Error(korean(out.res.status, out.data));
     }
 
-    var choice = (out.data.choices && out.data.choices[0]) || {};
-    var text = (choice.message && choice.message.content) || '';
-    if (Array.isArray(text))
-      text = text.map(function(p){ return p.text || ''; }).join('');
-    text = (text || '').trim();
+    /* 검색이 긴 턴은 서버가 중간에 끊고 pause_turn으로 돌려준다.
+       받은 걸 그대로 되돌려 보내야 이어진다 — 안 이으면 답이 잘린 채로 나온다. */
+    var blocks = (out.data.content || []).slice();
+    var rounds = 0;
+    while (out.data.stop_reason === 'pause_turn' && rounds < 3) {
+      rounds++;
+      body.messages = body.messages.concat([{ role: 'assistant', content: out.data.content }]);
+      out = await post(body);
+      if (!out.res.ok || out.data.type === 'error') {
+        console.warn('[claude] pause_turn 이어받기 실패', out.res.status, out.data);
+        break;
+      }
+      blocks = blocks.concat(out.data.content || []);
+    }
+
+    /* refusal이면 content가 비어 있다 — 상태코드는 200이라 위 가드에 안 걸린다. */
+    if (out.data.stop_reason === 'refusal') throw new Error(REFUSED);
+
+    var text = blocks.filter(function(b){ return b.type === 'text'; })
+                     .map(function(b){ return b.text || ''; }).join('').trim();
+
+    /* 출처 — text 블록의 citations에 붙어 온다. 같은 URL은 한 번만. */
+    var seen = {}, sources = [];
+    blocks.forEach(function(b){
+      (b.citations || []).forEach(function(c){
+        if (!c.url || seen[c.url]) return;
+        seen[c.url] = 1;
+        sources.push({ title: c.title || c.url, url: c.url });
+      });
+    });
 
     if (!text) {
-      if (choice.finish_reason === 'length')
+      if (out.data.stop_reason === 'max_tokens')
         throw new Error('답이 너무 길어서 잘렸어. 짧게 나눠서 물어봐.');
-      if (choice.finish_reason === 'content_filter')
-        throw new Error('안전 필터에 걸렸어. 다른 각도로 물어봐.');
       throw new Error('응답이 비었어. 다시 해봐.');
     }
-    return useSearch ? asDumpJson(text) : text;
+    return useSearch ? asDumpJson(text, sources) : text;
   };
 
   /* ── ② 설정 모달 ───────────────────────────────────────────────────── */
   function paintModal(){
     var box = document.querySelector('#apiKeyModal .modal-box');
-    if (!box || box.dataset.oaPatched) return;
-    box.dataset.oaPatched = '1';
+    if (!box || box.dataset.anPatched) return;
+    box.dataset.anPatched = '1';
+    delete box.dataset.oaPatched;   /* OpenAI 이관기가 그려둔 흔적을 지운다 */
     box.innerHTML =
       '<div class="modal-title">🔑 API 키</div>' +
       '<p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">' +
-        'AI 기능은 OpenAI 키로 돈다.<br>키는 이 기기에만 저장되고 서버로 전송 안 돼.</p>' +
+        'AI 기능은 Anthropic(Claude) 키로 돈다.<br>키는 이 기기에만 저장되고 서버로 전송 안 돼.</p>' +
       '<div class="form-group">' +
-        '<label class="form-label">OpenAI API Key</label>' +
-        '<input class="form-input" id="openaiKeyInput" placeholder="sk-proj-..." type="password" ' +
+        '<label class="form-label">Anthropic API Key</label>' +
+        '<input class="form-input" id="apiKeyInput" placeholder="sk-ant-api03-..." type="password" ' +
                'onkeydown="if(event.key===\'Enter\')saveApiKey()">' +
       '</div>' +
       '<div style="font-size:11px;color:var(--muted);margin-bottom:16px">👉 ' +
-        '<a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">' +
-        'platform.openai.com/api-keys</a> 에서 발급</div>' +
+        '<a href="https://platform.claude.com/settings/keys" target="_blank" style="color:var(--accent)">' +
+        'platform.claude.com/settings/keys</a> 에서 발급</div>' +
       '<div class="form-group" style="opacity:.55">' +
-        '<label class="form-label">Anthropic API Key <span style="font-weight:400">— 레거시 (지금은 안 씀)</span></label>' +
-        '<input class="form-input" id="apiKeyInput" placeholder="sk-ant-api03-..." type="password">' +
+        '<label class="form-label">OpenAI API Key <span style="font-weight:400">— 되돌리기용 (지금은 안 씀)</span></label>' +
+        '<input class="form-input" id="openaiKeyInput" placeholder="sk-proj-..." type="password">' +
         '<div style="font-size:11px;color:var(--muted);margin-top:6px">' +
-          '계정 인증이 풀리면 다시 쓸 수 있게 남겨둔 칸이야. 비워둬도 아무 문제 없어.</div>' +
+          'Anthropic이 또 막히면 다시 쓸 수 있게 남겨둔 칸이야. 비워둬도 아무 문제 없어.</div>' +
       '</div>' +
       '<div class="modal-btns">' +
         '<button class="btn-secondary" onclick="closeModal(\'apiKeyModal\')">취소</button>' +
         '<button class="btn-primary" onclick="saveApiKey()">저장</button>' +
       '</div>';
-    var oa = box.querySelector('#openaiKeyInput');
     var an = box.querySelector('#apiKeyInput');
-    if (oa) oa.value = _oaKey;
-    if (an) an.value = localStorage.getItem(AN_KEY) || '';
+    var oa = box.querySelector('#openaiKeyInput');
+    if (an) an.value = _anKey;
+    if (oa) oa.value = readRaw(OA_KEY);
   }
 
   saveApiKey = function(){
     paintModal();
-    var oaEl = document.getElementById('openaiKeyInput');
     var anEl = document.getElementById('apiKeyInput');
-    var k = (oaEl && oaEl.value || '').trim();
-    if (k && !/^sk-/.test(k)) {
-      if (typeof showToast === 'function') showToast('OpenAI 키는 sk- 로 시작해');
+    var oaEl = document.getElementById('openaiKeyInput');
+    var k = (anEl && anEl.value || '').trim();
+    if (k && !/^sk-ant-/.test(k)) {
+      if (typeof showToast === 'function') showToast('Anthropic 키는 sk-ant- 로 시작해');
       return;
     }
-    _oaKey = k;
-    if (k) localStorage.setItem(OA_KEY, k); else localStorage.removeItem(OA_KEY);
+    /* 가운데에 공백·줄바꿈이 낀 키는 저장 뒤 fetch를 통째로 죽인다. 여기서 막는다. */
+    if (k && !headerSafe(k)) {
+      if (typeof showToast === 'function') showToast('키에 공백·줄바꿈이 섞였어 — 다시 붙여넣어줘');
+      return;
+    }
+    _anKey = k;
+    if (k) localStorage.setItem(AN_KEY, k); else localStorage.removeItem(AN_KEY);
     syncLegacyVar();
 
-    var legacy = (anEl && anEl.value || '').trim();
-    if (legacy) localStorage.setItem(AN_KEY, legacy);
+    var legacy = (oaEl && oaEl.value || '').trim();
+    if (legacy) localStorage.setItem(OA_KEY, legacy);
 
     if (typeof closeModal === 'function') closeModal('apiKeyModal');
     paintStatus();
     if (typeof showToast === 'function')
-      showToast(k ? '✅ OpenAI 키 저장됨' : '키를 비웠어');
+      showToast(k ? '✅ Anthropic 키 저장됨' : '키를 비웠어');
   };
 
   function paintStatus(){
     var st = document.getElementById('apiKeyStatus');
-    if (st) st.textContent = _oaKey ? '✅' : '🔑';
+    if (st) st.textContent = _anKey ? '✅' : '🔑';
   }
 
   /* 모달은 열릴 때 그려도 늦지 않다 — 앱의 openModal을 감싼다. */
@@ -7705,15 +7823,55 @@ async function renderCoach(force){
   paintModal();
   paintStatus();
 
-  /* 이관 안내 — 예전에 Anthropic 키만 넣어둔 기기면 한 번 알려준다. */
-  if (!_oaKey && localStorage.getItem(AN_KEY)) {
+  /* ── 로드 뒤에 키가 바뀌는 진입 경로 ────────────────────────────────
+     이관은 로드 시점 한 번으로는 부족하다. 아래 경로들은 전부 로드 뒤에
+     localStorage를 건드리고, 그중 복원 두 개는 jay_ 키를 통째로 지웠다 다시 쓴다.
+     이전 이름의 키가 그 길로 되살아날 수 있어, 끝날 때마다 다시 이관한다. */
+  (function watchEntryPoints(){
+    function again(){ try { refreshKey(); paintStatus(); } catch(e){} }
+
+    /* 다른 탭에서 저장한 키 */
+    try {
+      if (typeof addEventListener === 'function') {
+        addEventListener('storage', function(e){
+          if (!e || e.key == null || e.key === AN_KEY || e.key === AN_KEY_OLD) again();
+        });
+        addEventListener('focus', again);
+      }
+    } catch(e){}
+
+    /* 모바일에서 탭을 다시 켤 때 */
+    try {
+      if (typeof document !== 'undefined' && document.addEventListener)
+        document.addEventListener('visibilitychange', function(){ if (!document.hidden) again(); });
+    } catch(e){}
+
+    /* Gist 풀 */
+    try {
+      if (typeof _applySyncData === 'function') {
+        var origApply = _applySyncData;
+        _applySyncData = function(){ var r = origApply.apply(this, arguments); again(); return r; };
+      }
+    } catch(e){}
+
+    /* IndexedDB 스냅샷 복원 · 가져오기 */
+    try {
+      if (typeof _restoreJayData === 'function') {
+        var origRestore = _restoreJayData;
+        _restoreJayData = function(){ var r = origRestore.apply(this, arguments); again(); return r; };
+      }
+    } catch(e){}
+  })();
+
+  /* 복귀 안내 — OpenAI 키만 넣어둔 기기면 한 번 알려준다. */
+  if (!_anKey && readRaw(OA_KEY)) {
     setTimeout(function(){
       if (typeof showToast === 'function')
-        showToast('AI가 OpenAI로 바뀌었어 — 설정에서 OpenAI 키를 넣어줘');
+        showToast('AI가 Claude로 돌아왔어 — 설정에서 Anthropic 키를 넣어줘');
     }, 1500);
   }
 
-  console.log('[openai] AI 백엔드 이관됨 — ' + MODEL + ' (검색: ' + SEARCH_MODEL + ')');
+  console.log('[claude] AI 백엔드 복귀 — ' + MODEL + ' (검색: ' + SEARCH_TOOL.type + ')');
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
