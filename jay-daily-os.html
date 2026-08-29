@@ -638,6 +638,9 @@ body {
 
 
 
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
@@ -906,6 +909,7 @@ body {
 
 
 
+
   </div>
 
   <!-- 스크래치패드 -->
@@ -1094,6 +1098,7 @@ body {
       <div id="coachBody"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
+
 
 
 
@@ -5573,6 +5578,15 @@ window.addEventListener('beforeunload', () => {
 
 
 
+
+
+
+
+
+
+
+
+
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
@@ -7397,6 +7411,281 @@ async function renderCoach(force){
   setTimeout(sync, 1500);
 
   console.log('[최근항목] 브레인덤프 탭 전용으로 제한됨');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  if (typeof coVision !== 'function') {
+    console.warn('[map-edit] coVision을 못 찾았다 — 코치 탭보다 먼저 실렸다');
+    return;
+  }
+
+  var Q_KEY = 'jay_coachMapEdits';   /* jay_ 접두사 = Gist 동기화 대상 (의도적) */
+
+  function readQ(){
+    try { return JSON.parse(localStorage.getItem(Q_KEY) || '{}') || {}; }
+    catch(e) { return {}; }
+  }
+  function writeQ(q){
+    try { localStorage.setItem(Q_KEY, JSON.stringify(q)); } catch(e){}
+  }
+
+  /* 봇이 반영을 마친 항목은 큐에서 걷어낸다. 이게 없으면 큐가 영원히 자란다.
+     ack는 coach-map.edits_applied — 봇이 쓰고 Gist로 되돌아온다. */
+  function prune(map){
+    var acked = (map && map.edits_applied) || {};
+    var q = readQ(), n = 0;
+    Object.keys(q).forEach(function(id){ if (acked[id]) { delete q[id]; n++; } });
+    if (n) writeQ(q);
+    return n;
+  }
+
+  function pending(section, key){
+    var q = readQ();
+    return Object.keys(q).map(function(id){ return q[id]; }).filter(function(e){
+      return e.section === section && (key === undefined || e.key === key);
+    });
+  }
+
+  function enqueue(e){
+    var q = readQ();
+    var id = 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    q[id] = Object.assign({ id: id, at: new Date().toISOString() }, e);
+    writeQ(q);
+    if (typeof showToast === 'function')
+      showToast(e.op === 'delete' ? '삭제 요청됨 — 봇이 반영하면 사라져' : '수정 요청됨 — 봇이 반영하면 확정돼');
+    if (typeof renderCoach === 'function') renderCoach();
+  }
+
+  function cancelEdit(id){
+    var q = readQ();
+    if (q[id]) { delete q[id]; writeQ(q); }
+    if (typeof renderCoach === 'function') renderCoach();
+  }
+
+  /* ── 조각 UI ───────────────────────────────────────────────────────── */
+  var esc = (typeof coEsc === 'function') ? coEsc : function(s){
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  };
+  var ACC = (typeof CO_C1 === 'string') ? CO_C1 : 'var(--accent)';
+
+  function penBtn(args){
+    return '<button onclick="_mapEdit(' + args + ')" title="편집" '
+      + 'style="border:none;background:transparent;color:var(--muted);cursor:pointer;'
+      + 'font-size:11px;padding:0 4px;font-family:inherit">✎</button>';
+  }
+  function addBtn(args){
+    return '<button onclick="_mapAdd(' + args + ')" '
+      + 'style="border:1px dashed var(--border2);background:transparent;color:var(--muted);'
+      + 'cursor:pointer;font-size:11px;padding:2px 8px;border-radius:6px;font-family:inherit;'
+      + 'margin-top:4px">+ 추가</button>';
+  }
+  function waitPill(e){
+    var what = e.op === 'delete' ? '삭제' : '수정';
+    return '<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;'
+      + 'background:var(--accent-dim);color:' + ACC + ';margin-left:6px">⏳ ' + what + ' 대기</span>'
+      + '<button onclick="_mapCancel(\'' + e.id + '\')" style="border:none;background:transparent;'
+      + 'color:var(--muted);cursor:pointer;font-size:10px;padding:0 3px;font-family:inherit">취소</button>';
+  }
+
+  /* 비어 있는 칸 — 세션 안내 + 직접 입력 둘 다 준다 */
+  function emptyHint(section, label, module){
+    return '<div style="font-size:12px;color:var(--muted);line-height:1.7">'
+      + '아직 비어 있어. <b style="color:' + ACC + '">토니와 ' + esc(module) + ' 세션으로 채우기</b>를 '
+      + '권하지만, 지금 직접 넣어도 돼.'
+      + '</div>' + addBtn("'" + section + "'");
+  }
+
+  /* ── 인라인 편집 폼 ────────────────────────────────────────────────── */
+  var _open = null;   /* {section, key} */
+
+  window._mapEdit = function(section, key, text, kind, deadline, note){
+    _open = { section: section, key: key || '', text: text || '', kind: kind || '',
+              deadline: deadline || '', note: note || '', isNew: false };
+    if (typeof renderCoach === 'function') renderCoach();
+  };
+  window._mapAdd = function(section, kind){
+    _open = { section: section, key: '', text: '', kind: kind || '', deadline: '', note: '', isNew: true };
+    if (typeof renderCoach === 'function') renderCoach();
+  };
+  window._mapCancel = function(id){ if (id) cancelEdit(id); else { _open = null; if (typeof renderCoach === 'function') renderCoach(); } };
+  window._mapClose = function(){ _open = null; if (typeof renderCoach === 'function') renderCoach(); };
+
+  window._mapSave = function(){
+    if (!_open) return;
+    var t = (document.getElementById('mapEditText') || {}).value || '';
+    var k = (document.getElementById('mapEditKey') || {}).value || _open.key;
+    var dl = (document.getElementById('mapEditDeadline') || {}).value || '';
+    t = t.trim(); k = (k || '').trim();
+    if (!t) { if (typeof showToast === 'function') showToast('내용을 입력해줘'); return; }
+    if (_open.section === 'fact' && !k) { if (typeof showToast === 'function') showToast('항목 이름(키)을 입력해줘'); return; }
+    enqueue({
+      op: 'upsert', section: _open.section, kind: _open.kind || undefined,
+      key: k || t.slice(0, 40), text: t,
+      deadline: dl || undefined, prev: _open.isNew ? undefined : _open.text,
+    });
+    _open = null;
+  };
+  window._mapDelete = function(){
+    if (!_open || _open.isNew) return;
+    if (!confirm('이 항목을 지울까? 봇이 다음 틱에 지도에서 없앤다.')) return;
+    enqueue({ op: 'delete', section: _open.section, kind: _open.kind || undefined,
+              key: _open.key, prev: _open.text });
+    _open = null;
+  };
+
+  function form(){
+    if (!_open) return '';
+    var f = _open;
+    var inp = 'width:100%;box-sizing:border-box;border:1.5px solid var(--border2);border-radius:8px;'
+      + 'padding:7px 10px;font-size:12px;font-family:inherit;background:var(--surface);color:var(--text);margin-bottom:6px';
+    var h = '<div style="border:1.5px solid ' + ACC + ';border-radius:10px;padding:10px;margin:6px 0;background:var(--surface)">'
+      + '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'
+      + (f.isNew ? '새 항목' : '수정') + ' · ' + esc(f.kind || f.section) + '</div>';
+    if (f.section === 'fact')
+      h += '<input id="mapEditKey" value="' + esc(f.key) + '" placeholder="항목 이름 (예: 출시일)" style="' + inp + '">';
+    h += '<textarea id="mapEditText" rows="2" placeholder="내용" style="' + inp + ';resize:vertical">' + esc(f.text) + '</textarea>';
+    if (f.kind === '기한')
+      h += '<input id="mapEditDeadline" value="' + esc(f.deadline) + '" placeholder="기한 YYYY-MM-DD" style="' + inp + '">';
+    h += '<div style="display:flex;gap:6px">'
+      + '<button onclick="_mapSave()" style="flex:1;border:none;background:' + ACC + ';color:#fff;'
+      + 'font-size:12px;font-weight:700;padding:7px;border-radius:8px;cursor:pointer;font-family:inherit">저장 요청</button>'
+      + (f.isNew ? '' : '<button onclick="_mapDelete()" style="border:1.5px solid var(--red);background:transparent;'
+        + 'color:var(--red);font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;cursor:pointer;font-family:inherit">삭제</button>')
+      + '<button onclick="_mapClose()" style="border:1.5px solid var(--border2);background:transparent;'
+      + 'color:var(--text2);font-size:12px;padding:7px 12px;border-radius:8px;cursor:pointer;font-family:inherit">취소</button>'
+      + '</div>'
+      + '<div style="font-size:10px;color:var(--muted);margin-top:6px">'
+      + '지도는 봇이 소유해. 여기서 바로 안 바꾸고 요청만 남긴다 — 다음 틱에 반영되고 텔레그램으로 알려줘.</div>'
+      + '</div>';
+    return h;
+  }
+
+  function openAt(section, key){
+    return _open && _open.section === section && !_open.isNew && _open.key === key;
+  }
+  function openNew(section){
+    return _open && _open.section === section && _open.isNew;
+  }
+
+  /* ── coVision 교체 ─────────────────────────────────────────────────── */
+  var _orig = coVision;
+
+  coVision = function(map){
+    if (!map) return _orig(map);
+    prune(map);
+
+    var d = map.dream || {}, s = map.standards || {};
+    var kv = function(k, v){
+      return '<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'
+        + '<div style="width:88px;flex-shrink:0;font-size:11px;color:var(--muted);padding-top:1px">' + k + '</div>'
+        + '<div style="flex:1;font-size:12px;color:var(--text);line-height:1.7">' + v + '</div></div>';
+    };
+
+    /* 확정 사실 — 지도의 본체 */
+    var KINDS = ['목표', '기한', '결정', '루틴', '원칙', '답변'];
+    var facts = (map.facts || []).slice();
+    var factHtml = KINDS.map(function(k){
+      var rows = facts.filter(function(f){ return f.kind === k; });
+      var body = rows.map(function(f){
+        var pend = pending('fact', f.key)[0];
+        var line = '<div style="font-size:12px;color:var(--text);line-height:1.65;padding-left:8px;'
+          + 'border-left:2px solid ' + ACC + ';margin-bottom:4px'
+          + (pend ? ';opacity:.55' : '') + '">'
+          + esc(f.text || '')
+          + (f.deadline ? ' <span style="color:' + ACC + ';font-weight:600">' + esc(f.deadline) + '</span>' : '')
+          + penBtn("'fact'," + JSON.stringify(f.key || '') + "," + JSON.stringify(f.text || '')
+                   + "," + JSON.stringify(k) + "," + JSON.stringify(f.deadline || ''))
+          + (pend ? waitPill(pend) : '')
+          + (f.note ? '<div style="font-size:11px;color:var(--muted)">※ ' + esc(f.note) + '</div>' : '')
+          /* 변경 전 값 — 기존 방식 그대로 회색 한 줄 */
+          + (f.revised_from ? '<div style="font-size:11px;color:var(--muted)">이전: ' + esc(f.revised_from) + '</div>' : '')
+          + (f.source === '수동' ? '<div style="font-size:10px;color:var(--muted)">✎ 직접 수정</div>' : '')
+          + '</div>';
+        return line + (openAt('fact', f.key) ? form() : '');
+      }).join('');
+      var newForm = (openNew('fact') && _open.kind === k) ? form() : '';
+      return '<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--muted);margin-bottom:3px">' + k + '</div>'
+        + (body || '<span style="color:var(--muted);font-size:11px">—</span>')
+        + newForm + addBtn("'fact'," + JSON.stringify(k)) + '</div>';
+    }).join('');
+
+    /* 목록형 (정체성·가치) */
+    var listBlock = function(section, arr, module){
+      arr = arr || [];
+      if (!arr.length && !pending(section).length && !openNew(section))
+        return emptyHint(section, section, module);
+      var html = arr.map(function(x){
+        var t = typeof x === 'string' ? x : (x.statement || x.text || '');
+        var pend = pending(section, t)[0];
+        return '<div style="margin-bottom:3px' + (pend ? ';opacity:.55' : '') + '">'
+          + '<span style="font-size:12px">' + esc(t) + '</span>'
+          + penBtn("'" + section + "'," + JSON.stringify(t) + "," + JSON.stringify(t))
+          + (pend ? waitPill(pend) : '') + '</div>'
+          + (openAt(section, t) ? form() : '');
+      }).join('');
+      pending(section).filter(function(e){ return e.op === 'upsert' && arr.indexOf(e.key) < 0; })
+        .forEach(function(e){
+          html += '<div style="margin-bottom:3px;opacity:.55"><span style="font-size:12px">'
+            + esc(e.text) + '</span>' + waitPill(e) + '</div>';
+        });
+      return html + (openNew(section) ? form() : '') + addBtn("'" + section + "'");
+    };
+
+    /* 꿈 */
+    var dreamPend = pending('dream')[0];
+    var dreamHtml = (d.text
+      ? '<span' + (dreamPend ? ' style="opacity:.55"' : '') + '>' + esc(d.text) + '</span>'
+        + penBtn("'dream','dream'," + JSON.stringify(d.text))
+        + (dreamPend ? waitPill(dreamPend) : '')
+        + (d.revised_from ? '<div style="font-size:11px;color:var(--muted)">이전: ' + esc(d.revised_from) + '</div>' : '')
+      : emptyHint('dream', '꿈', 'M10 끌어당기는 미래'))
+      + (openAt('dream', 'dream') || openNew('dream') ? form() : '');
+
+    /* 숨은 규칙 */
+    var rules = map.hidden_rules || [];
+    var ruleHtml = (!rules.length && !pending('rule').length && !openNew('rule'))
+      ? emptyHint('rule', '숨은 규칙', 'M8 숨은 규칙')
+      : rules.map(function(r){
+          var t = (r.emotion || '') + ' — ' + (r.rule || '');
+          var pend = pending('rule', r.emotion)[0];
+          return '<div style="font-size:12px;margin-bottom:4px' + (pend ? ';opacity:.55' : '') + '">'
+            + '<b>' + esc(r.emotion || '') + '</b> — ' + esc(r.rule || '')
+            + (r.revised ? ' <span style="color:var(--green)">→ ' + esc(r.revised) + '</span>' : '')
+            + penBtn("'rule'," + JSON.stringify(r.emotion || '') + "," + JSON.stringify(r.rule || ''))
+            + (pend ? waitPill(pend) : '') + '</div>'
+            + (openAt('rule', r.emotion) ? form() : '');
+        }).join('') + (openNew('rule') ? form() : '') + addBtn("'rule'");
+
+    var vocab = Object.entries(map.vocab_swap || {}).map(function(kv2){
+      return coPill(kv2[0] + ' → ' + kv2[1], ACC, 'var(--accent-dim)');
+    }).join('') || '<span style="color:var(--muted);font-size:12px">—</span>';
+    var coc = ((map.code_of_conduct || {}).states) || [];
+    var cocHtml = coc.length
+      ? coc.map(function(x){ return coPill(typeof x === 'string' ? x : (x.name || ''), 'var(--green)', 'rgba(0,170,102,0.10)'); }).join('')
+      : '<span style="color:var(--muted);font-size:12px">—</span>';
+
+    var q = readQ(), nq = Object.keys(q).length;
+    var banner = nq
+      ? '<div style="font-size:11px;color:' + ACC + ';padding:6px 0">⏳ 반영 대기 ' + nq + '건 — 봇이 다음 틱에 처리해</div>'
+      : '';
+
+    return coCard('비전 지도',
+      banner
+      + kv('확정 사실', factHtml)
+      + kv('꿈', dreamHtml)
+      + kv('정체성', listBlock('identity', map.identity, 'M9 정체성'))
+      + kv('지향 가치', listBlock('values', s.values_ranked, 'M7 가치 서열'))
+      + kv('회피 가치', listBlock('avoid', s.avoid_values, 'M7 가치 서열'))
+      + kv('숨은 규칙', ruleHtml)
+      + kv('치환 사전', vocab)
+      + kv('행동 강령', cocHtml));
+  };
+
+  console.log('[map-edit] 비전 지도 편집 켜짐 — 요청 큐 ' + Object.keys(readQ()).length + '건');
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
