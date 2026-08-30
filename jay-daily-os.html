@@ -5634,6 +5634,464 @@ window.addEventListener('beforeunload', () => {
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
+(function(){
+  if (typeof _syncPushNow !== 'function' || typeof _syncPullOnLoad !== 'function'
+      || typeof _collectSyncData !== 'function' || typeof _applySyncData !== 'function') {
+    console.warn('[동기화] 앱 동기화 함수를 못 찾았다 — 가드 미설치');
+    return;
+  }
+
+  var DIRTY = 'jay_sync_dirty', LAST = 'jay_sync_last_push', GID = 'jay_sync_gist_id';
+  var FILE  = (typeof SYNC_FILENAME === 'string') ? SYNC_FILENAME : 'jay-daily-os-data.json';
+  var DEV   = 'jay_sync_device';        /* 기기 식별자 — jay_sync_ 라 동기화 제외(기기 전용) */
+  var STASH = 'jay_sync_stash';         /* 버리기 전 로컬 백업 — 역시 기기 전용 */
+  var REG   = 'jay_syncDevices';        /* 기기 장부 — jay_sync_ 가 아니라 동기화에 실린다 */
+
+  var setLocal = (typeof _origSetItem === 'function')
+      ? _origSetItem : localStorage.setItem.bind(localStorage);
+  var toast = function(m){ try { showToast(m); } catch(_){} };
+
+  /* ── ① 부팅 시점의 dirty 만 진짜다 ──────────────────────────────────────
+     이 줄은 init() 보다 먼저 실행된다. 지금 값이 이전 세션의 미푸시 여부다. */
+  var dirtyAtBoot = localStorage.getItem(DIRTY);
+
+  function deviceId(){
+    var d = localStorage.getItem(DEV);
+    if (!d) {
+      var ua = navigator.userAgent || '';
+      var kind = /iPhone|iPod/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad'
+               : /Android/.test(ua) ? 'Android' : /Macintosh/.test(ua) ? 'Mac'
+               : /Windows/.test(ua) ? 'PC' : '기기';
+      d = kind + '-' + Math.random().toString(36).slice(2, 6);
+      setLocal(DEV, d);
+    }
+    return d;
+  }
+
+  function readReg(){
+    try { return JSON.parse(localStorage.getItem(REG) || '{}') || {}; } catch(_){ return {}; }
+  }
+  /* 장부는 병합한다 — 통짜 덮어쓰기면 다른 기기 기록이 사라진다 */
+  function touchReg(remoteReg){
+    var reg = readReg();
+    if (remoteReg) Object.keys(remoteReg).forEach(function(k){
+      if (!reg[k] || String(remoteReg[k].at || '') > String(reg[k].at || '')) reg[k] = remoteReg[k];
+    });
+    reg[deviceId()] = { at: new Date().toISOString() };
+    setLocal(REG, JSON.stringify(reg));   /* setLocal — 푸시 루프를 안 만든다 */
+  }
+
+  function stashLocal(why){
+    try {
+      setLocal(STASH, JSON.stringify({
+        at: new Date().toISOString(), why: why || '', data: _collectSyncData(),
+      }));
+      console.warn('[동기화] 로컬을 버리기 전에 스태시했다 — ' + why);
+    } catch(e){ console.warn('[동기화] 스태시 실패', e); }
+  }
+
+  /* 원격 파일을 읽어 {updated_at, data} 로 돌려준다 */
+  async function remoteSnapshot(){
+    var id = localStorage.getItem(GID);
+    if (!id) return null;
+    var g = await _gistApi('gists/' + id);
+    if (!g) return null;
+    var f = g.files && g.files[FILE];
+    var out = { updated_at: g.updated_at, data: null };
+    if (f) {
+      var txt = f.content;
+      if (f.truncated && f.raw_url) { try { txt = await (await fetch(f.raw_url)).text(); } catch(_){} }
+      try { var p = JSON.parse(txt || '{}'); out.data = (p && p.data) || null; } catch(_){}
+    }
+    return out;
+  }
+
+  /* ── ③ pull 전에 진짜 dirty 만 남긴다 ───────────────────────────────── */
+  var _origPull = _syncPullOnLoad;
+  _syncPullOnLoad = function(){
+    var real = (dirtyAtBoot === '1');    /* 이전 세션에서 진짜로 못 올린 변경 */
+    var lastBefore = localStorage.getItem(LAST);
+    if (real) {
+      /* 그래도 pull-first 다 — 버리지 않고 스태시해 두고 원격을 정본으로 받는다 */
+      stashLocal('이전 세션 미푸시 변경 — pull 우선');
+    }
+    localStorage.removeItem(DIRTY);      /* init() 이 만든 소음 제거 */
+    dirtyAtBoot = null;                  /* 이번 로드에서 한 번만 */
+    var r = _origPull.apply(this, arguments);
+
+    /* 원격이 더 최신이었으면 앱이 적용 후 location.reload() 한다 → 아래는 안 돈다.
+       돌았다는 건 원격이 안 밀렸다는 뜻 — 미룬 변경을 30초 기다리지 말고 바로 올린다. */
+    if (real) setTimeout(function(){
+      if (localStorage.getItem(LAST) === lastBefore) {
+        setLocal(DIRTY, '1');
+        try { _syncPushNow(); } catch(e){ console.warn('[동기화] 미푸시 플러시 실패', e); }
+      }
+    }, 1200);
+    return r;
+  };
+
+  /* ── ② 푸시 직전 compare-and-swap — 뒤처진 기기는 못 덮는다 ─────────── */
+  var _origPush = _syncPushNow;          /* data-guard 의 무게 가드까지 포함된 것 */
+  var _forcing = false;
+
+  _syncPushNow = async function(){
+    if (!_forcing) {
+      try {
+        var last = localStorage.getItem(LAST);
+        if (last && localStorage.getItem(GID) && typeof _syncToken === 'function' && _syncToken()) {
+          var snap = await remoteSnapshot();
+          if (snap && snap.updated_at && new Date(snap.updated_at) > new Date(last)) {
+            console.warn('[동기화] 원격이 더 최신 — 푸시 중단하고 먼저 받는다 ('
+              + last + ' → ' + snap.updated_at + ')');
+            toast('서버에 더 최신 데이터가 있어 — 먼저 받아올게');
+            if (localStorage.getItem(DIRTY) === '1') stashLocal('원격이 더 최신 — 푸시 대신 받기');
+            localStorage.removeItem(DIRTY);
+            return _syncPullOnLoad();
+          }
+          if (snap && snap.data) { try { touchReg(JSON.parse(snap.data[REG] || 'null')); } catch(_){ touchReg(null); } }
+          else touchReg(null);
+        } else {
+          touchReg(null);
+        }
+      } catch(e){
+        /* 원격 확인 실패는 저장을 막을 이유가 못 된다 — 원래 경로로 간다 */
+        console.warn('[동기화] 원격 확인 실패 — 그대로 진행', e);
+      }
+    }
+    return _origPush.apply(this, arguments);
+  };
+
+  /* ── ⑤ 수동 복구 ──────────────────────────────────────────────────── */
+  window._syncForcePull = async function(){
+    if (!confirm('이 기기의 데이터를 버리고 서버 것으로 맞출까?\n버리는 데이터는 이 기기에 백업해 둔다.')) return;
+    try {
+      toast('↓ 서버에서 받는 중…');
+      stashLocal('수동 강제 받기');
+      var id = await _ensureGistId();
+      var snap = await remoteSnapshot(id);
+      if (!snap || !snap.data || !Object.keys(snap.data).length) {
+        toast('서버 데이터가 비어 있어 — 아무것도 안 했어'); return;
+      }
+      _applySyncData(snap.data);
+      setLocal(LAST, snap.updated_at);
+      localStorage.removeItem(DIRTY);
+      toast('✅ 서버 데이터로 맞췄어 — 새로고침할게');
+      setTimeout(function(){ location.reload(); }, 700);
+    } catch(e){ console.warn(e); toast('받기 실패 — 잠시 뒤 다시 해줘'); }
+  };
+
+  window._syncForcePush = async function(){
+    if (!confirm('서버를 이 기기 데이터로 덮어쓸까?\n다른 기기에만 있던 최신 변경은 사라진다.')) return;
+    try {
+      toast('↑ 서버에 올리는 중…');
+      touchReg(null);
+      _forcing = true;                 /* 우리 CAS만 건너뛴다 — 무게 가드는 그대로 */
+      await _origPush.call(window);
+      _forcing = false;
+      toast('✅ 서버를 이 기기 데이터로 맞췄어');
+      renderPanel();
+    } catch(e){ _forcing = false; console.warn(e); toast('올리기 실패 — 잠시 뒤 다시 해줘'); }
+  };
+
+  window._syncRestoreStash = function(){
+    var raw = localStorage.getItem(STASH);
+    if (!raw) { toast('되돌릴 백업이 없어'); return; }
+    var s; try { s = JSON.parse(raw); } catch(_){ toast('백업을 못 읽었어'); return; }
+    if (!s || !s.data || !Object.keys(s.data).length) { toast('백업이 비어 있어'); return; }
+    if (!confirm('이 기기에 남겨둔 백업(' + new Date(s.at).toLocaleString('ko-KR') + ')으로 되돌릴까?')) return;
+    _applySyncData(s.data);
+    toast('백업으로 되돌렸어 — 새로고침할게');
+    setTimeout(function(){ location.reload(); }, 700);
+  };
+
+  /* ── ④ 모달에 기기 장부 + 버튼 ────────────────────────────────────── */
+  function renderPanel(){
+    var info = document.getElementById('syncModalInfo');
+    if (!info) return;
+    var box = document.getElementById('syncGuardPanel');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'syncGuardPanel';
+      box.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid var(--border2)';
+      info.parentNode.insertBefore(box, info.nextSibling);
+    }
+    var reg = readReg(), me = deviceId();
+    var rows = Object.keys(reg).sort().map(function(k){
+      var at = reg[k] && reg[k].at ? new Date(reg[k].at).toLocaleString('ko-KR') : '기록 없음';
+      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;'
+        + 'color:var(--text2);padding:2px 0">'
+        + '<span>' + (k === me ? '▸ ' : '') + k + (k === me ? ' (이 기기)' : '') + '</span>'
+        + '<span style="color:var(--muted)">' + at + '</span></div>';
+    }).join('') || '<div style="font-size:11px;color:var(--muted)">아직 기록 없음</div>';
+
+    var stash = localStorage.getItem(STASH);
+    var btn = function(fn, label, extra){
+      return '<button onclick="' + fn + '" style="flex:1 1 auto;border:1px solid var(--border2);'
+        + 'background:var(--surface);color:var(--text2);font-size:12px;padding:9px 10px;'
+        + 'border-radius:9px;cursor:pointer;font-family:inherit;min-height:40px;' + (extra || '') + '">'
+        + label + '</button>';
+    };
+    box.innerHTML =
+      '<div style="font-size:11px;font-weight:800;color:var(--text);margin-bottom:6px">기기별 마지막 동기화</div>'
+      + rows
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
+      + btn('_syncForcePull()', '↓ 서버에서 다시 받기')
+      + btn('_syncForcePush()', '↑ 이 기기로 서버 덮어쓰기')
+      + '</div>'
+      + (stash ? '<div style="margin-top:6px">'
+                 + btn('_syncRestoreStash()', '⤺ 이 기기 백업으로 되돌리기', 'color:var(--yellow)')
+                 + '</div>' : '')
+      + '<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">'
+      + '서버가 더 최신이면 이 기기는 자동으로 받아온다(덮어쓰지 않는다). '
+      + '못 올린 변경은 버리기 전에 이 기기에 백업된다.</div>';
+  }
+  window._syncRenderGuardPanel = renderPanel;
+
+  if (typeof window.openSyncModal === 'function') {
+    var _origOpen = window.openSyncModal;
+    window.openSyncModal = function(){
+      var r = _origOpen.apply(this, arguments);
+      try { renderPanel(); } catch(e){ console.warn('[동기화] 패널 렌더 실패', e); }
+      return r;
+    };
+  }
+
+  console.log('[동기화] pull-first 가드 켜짐 · 기기 ' + deviceId()
+    + ' · 부팅 dirty=' + (dirtyAtBoot || '없음'));
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  if (typeof _syncPushNow !== 'function' || typeof _syncPullOnLoad !== 'function'
+      || typeof _collectSyncData !== 'function' || typeof _applySyncData !== 'function') {
+    console.warn('[동기화] 앱 동기화 함수를 못 찾았다 — 가드 미설치');
+    return;
+  }
+
+  var DIRTY = 'jay_sync_dirty', LAST = 'jay_sync_last_push', GID = 'jay_sync_gist_id';
+  var FILE  = (typeof SYNC_FILENAME === 'string') ? SYNC_FILENAME : 'jay-daily-os-data.json';
+  var DEV   = 'jay_sync_device';        /* 기기 식별자 — jay_sync_ 라 동기화 제외(기기 전용) */
+  var STASH = 'jay_sync_stash';         /* 버리기 전 로컬 백업 — 역시 기기 전용 */
+  var REG   = 'jay_syncDevices';        /* 기기 장부 — jay_sync_ 가 아니라 동기화에 실린다 */
+
+  var setLocal = (typeof _origSetItem === 'function')
+      ? _origSetItem : localStorage.setItem.bind(localStorage);
+  var toast = function(m){ try { showToast(m); } catch(_){} };
+
+  /* ── ① 부팅 시점의 dirty 만 진짜다 ──────────────────────────────────────
+     이 줄은 init() 보다 먼저 실행된다. 지금 값이 이전 세션의 미푸시 여부다. */
+  var dirtyAtBoot = localStorage.getItem(DIRTY);
+
+  function deviceId(){
+    var d = localStorage.getItem(DEV);
+    if (!d) {
+      var ua = navigator.userAgent || '';
+      var kind = /iPhone|iPod/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad'
+               : /Android/.test(ua) ? 'Android' : /Macintosh/.test(ua) ? 'Mac'
+               : /Windows/.test(ua) ? 'PC' : '기기';
+      d = kind + '-' + Math.random().toString(36).slice(2, 6);
+      setLocal(DEV, d);
+    }
+    return d;
+  }
+
+  function readReg(){
+    try { return JSON.parse(localStorage.getItem(REG) || '{}') || {}; } catch(_){ return {}; }
+  }
+  /* 장부는 병합한다 — 통짜 덮어쓰기면 다른 기기 기록이 사라진다 */
+  function touchReg(remoteReg){
+    var reg = readReg();
+    if (remoteReg) Object.keys(remoteReg).forEach(function(k){
+      if (!reg[k] || String(remoteReg[k].at || '') > String(reg[k].at || '')) reg[k] = remoteReg[k];
+    });
+    reg[deviceId()] = { at: new Date().toISOString() };
+    setLocal(REG, JSON.stringify(reg));   /* setLocal — 푸시 루프를 안 만든다 */
+  }
+
+  function stashLocal(why){
+    try {
+      setLocal(STASH, JSON.stringify({
+        at: new Date().toISOString(), why: why || '', data: _collectSyncData(),
+      }));
+      console.warn('[동기화] 로컬을 버리기 전에 스태시했다 — ' + why);
+    } catch(e){ console.warn('[동기화] 스태시 실패', e); }
+  }
+
+  /* 원격 파일을 읽어 {updated_at, data} 로 돌려준다 */
+  async function remoteSnapshot(){
+    var id = localStorage.getItem(GID);
+    if (!id) return null;
+    var g = await _gistApi('gists/' + id);
+    if (!g) return null;
+    var f = g.files && g.files[FILE];
+    var out = { updated_at: g.updated_at, data: null };
+    if (f) {
+      var txt = f.content;
+      if (f.truncated && f.raw_url) { try { txt = await (await fetch(f.raw_url)).text(); } catch(_){} }
+      try { var p = JSON.parse(txt || '{}'); out.data = (p && p.data) || null; } catch(_){}
+    }
+    return out;
+  }
+
+  /* ── ③ pull 전에 진짜 dirty 만 남긴다 ───────────────────────────────── */
+  var _origPull = _syncPullOnLoad;
+  _syncPullOnLoad = function(){
+    var real = (dirtyAtBoot === '1');    /* 이전 세션에서 진짜로 못 올린 변경 */
+    var lastBefore = localStorage.getItem(LAST);
+    if (real) {
+      /* 그래도 pull-first 다 — 버리지 않고 스태시해 두고 원격을 정본으로 받는다 */
+      stashLocal('이전 세션 미푸시 변경 — pull 우선');
+    }
+    localStorage.removeItem(DIRTY);      /* init() 이 만든 소음 제거 */
+    dirtyAtBoot = null;                  /* 이번 로드에서 한 번만 */
+    var r = _origPull.apply(this, arguments);
+
+    /* 원격이 더 최신이었으면 앱이 적용 후 location.reload() 한다 → 아래는 안 돈다.
+       돌았다는 건 원격이 안 밀렸다는 뜻 — 미룬 변경을 30초 기다리지 말고 바로 올린다. */
+    if (real) setTimeout(function(){
+      if (localStorage.getItem(LAST) === lastBefore) {
+        setLocal(DIRTY, '1');
+        try { _syncPushNow(); } catch(e){ console.warn('[동기화] 미푸시 플러시 실패', e); }
+      }
+    }, 1200);
+    return r;
+  };
+
+  /* ── ② 푸시 직전 compare-and-swap — 뒤처진 기기는 못 덮는다 ─────────── */
+  var _origPush = _syncPushNow;          /* data-guard 의 무게 가드까지 포함된 것 */
+  var _forcing = false;
+
+  _syncPushNow = async function(){
+    if (!_forcing) {
+      try {
+        var last = localStorage.getItem(LAST);
+        if (last && localStorage.getItem(GID) && typeof _syncToken === 'function' && _syncToken()) {
+          var snap = await remoteSnapshot();
+          if (snap && snap.updated_at && new Date(snap.updated_at) > new Date(last)) {
+            console.warn('[동기화] 원격이 더 최신 — 푸시 중단하고 먼저 받는다 ('
+              + last + ' → ' + snap.updated_at + ')');
+            toast('서버에 더 최신 데이터가 있어 — 먼저 받아올게');
+            if (localStorage.getItem(DIRTY) === '1') stashLocal('원격이 더 최신 — 푸시 대신 받기');
+            localStorage.removeItem(DIRTY);
+            return _syncPullOnLoad();
+          }
+          if (snap && snap.data) { try { touchReg(JSON.parse(snap.data[REG] || 'null')); } catch(_){ touchReg(null); } }
+          else touchReg(null);
+        } else {
+          touchReg(null);
+        }
+      } catch(e){
+        /* 원격 확인 실패는 저장을 막을 이유가 못 된다 — 원래 경로로 간다 */
+        console.warn('[동기화] 원격 확인 실패 — 그대로 진행', e);
+      }
+    }
+    return _origPush.apply(this, arguments);
+  };
+
+  /* ── ⑤ 수동 복구 ──────────────────────────────────────────────────── */
+  window._syncForcePull = async function(){
+    if (!confirm('이 기기의 데이터를 버리고 서버 것으로 맞출까?\n버리는 데이터는 이 기기에 백업해 둔다.')) return;
+    try {
+      toast('↓ 서버에서 받는 중…');
+      stashLocal('수동 강제 받기');
+      var id = await _ensureGistId();
+      var snap = await remoteSnapshot(id);
+      if (!snap || !snap.data || !Object.keys(snap.data).length) {
+        toast('서버 데이터가 비어 있어 — 아무것도 안 했어'); return;
+      }
+      _applySyncData(snap.data);
+      setLocal(LAST, snap.updated_at);
+      localStorage.removeItem(DIRTY);
+      toast('✅ 서버 데이터로 맞췄어 — 새로고침할게');
+      setTimeout(function(){ location.reload(); }, 700);
+    } catch(e){ console.warn(e); toast('받기 실패 — 잠시 뒤 다시 해줘'); }
+  };
+
+  window._syncForcePush = async function(){
+    if (!confirm('서버를 이 기기 데이터로 덮어쓸까?\n다른 기기에만 있던 최신 변경은 사라진다.')) return;
+    try {
+      toast('↑ 서버에 올리는 중…');
+      touchReg(null);
+      _forcing = true;                 /* 우리 CAS만 건너뛴다 — 무게 가드는 그대로 */
+      await _origPush.call(window);
+      _forcing = false;
+      toast('✅ 서버를 이 기기 데이터로 맞췄어');
+      renderPanel();
+    } catch(e){ _forcing = false; console.warn(e); toast('올리기 실패 — 잠시 뒤 다시 해줘'); }
+  };
+
+  window._syncRestoreStash = function(){
+    var raw = localStorage.getItem(STASH);
+    if (!raw) { toast('되돌릴 백업이 없어'); return; }
+    var s; try { s = JSON.parse(raw); } catch(_){ toast('백업을 못 읽었어'); return; }
+    if (!s || !s.data || !Object.keys(s.data).length) { toast('백업이 비어 있어'); return; }
+    if (!confirm('이 기기에 남겨둔 백업(' + new Date(s.at).toLocaleString('ko-KR') + ')으로 되돌릴까?')) return;
+    _applySyncData(s.data);
+    toast('백업으로 되돌렸어 — 새로고침할게');
+    setTimeout(function(){ location.reload(); }, 700);
+  };
+
+  /* ── ④ 모달에 기기 장부 + 버튼 ────────────────────────────────────── */
+  function renderPanel(){
+    var info = document.getElementById('syncModalInfo');
+    if (!info) return;
+    var box = document.getElementById('syncGuardPanel');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'syncGuardPanel';
+      box.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid var(--border2)';
+      info.parentNode.insertBefore(box, info.nextSibling);
+    }
+    var reg = readReg(), me = deviceId();
+    var rows = Object.keys(reg).sort().map(function(k){
+      var at = reg[k] && reg[k].at ? new Date(reg[k].at).toLocaleString('ko-KR') : '기록 없음';
+      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;'
+        + 'color:var(--text2);padding:2px 0">'
+        + '<span>' + (k === me ? '▸ ' : '') + k + (k === me ? ' (이 기기)' : '') + '</span>'
+        + '<span style="color:var(--muted)">' + at + '</span></div>';
+    }).join('') || '<div style="font-size:11px;color:var(--muted)">아직 기록 없음</div>';
+
+    var stash = localStorage.getItem(STASH);
+    var btn = function(fn, label, extra){
+      return '<button onclick="' + fn + '" style="flex:1 1 auto;border:1px solid var(--border2);'
+        + 'background:var(--surface);color:var(--text2);font-size:12px;padding:9px 10px;'
+        + 'border-radius:9px;cursor:pointer;font-family:inherit;min-height:40px;' + (extra || '') + '">'
+        + label + '</button>';
+    };
+    box.innerHTML =
+      '<div style="font-size:11px;font-weight:800;color:var(--text);margin-bottom:6px">기기별 마지막 동기화</div>'
+      + rows
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
+      + btn('_syncForcePull()', '↓ 서버에서 다시 받기')
+      + btn('_syncForcePush()', '↑ 이 기기로 서버 덮어쓰기')
+      + '</div>'
+      + (stash ? '<div style="margin-top:6px">'
+                 + btn('_syncRestoreStash()', '⤺ 이 기기 백업으로 되돌리기', 'color:var(--yellow)')
+                 + '</div>' : '')
+      + '<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">'
+      + '서버가 더 최신이면 이 기기는 자동으로 받아온다(덮어쓰지 않는다). '
+      + '못 올린 변경은 버리기 전에 이 기기에 백업된다.</div>';
+  }
+  window._syncRenderGuardPanel = renderPanel;
+
+  if (typeof window.openSyncModal === 'function') {
+    var _origOpen = window.openSyncModal;
+    window.openSyncModal = function(){
+      var r = _origOpen.apply(this, arguments);
+      try { renderPanel(); } catch(e){ console.warn('[동기화] 패널 렌더 실패', e); }
+      return r;
+    };
+  }
+
+  console.log('[동기화] pull-first 가드 켜짐 · 기기 ' + deviceId()
+    + ' · 부팅 dirty=' + (dirtyAtBoot || '없음'));
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
 /* ── 토니 코치 탭 (읽기 전용) ─────────────────────────────────────────────
    봇이 Gist에 쓴 coach-map.json / coach-log.json 을 읽어 렌더한다.
    Daily OS 앱은 jay-daily-os-data.json 만 쓰므로 서로 건드리지 않는다.       */
