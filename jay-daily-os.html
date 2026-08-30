@@ -5890,6 +5890,645 @@ window.addEventListener('beforeunload', () => {
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
 (function(){
+  if (typeof save !== 'function' || typeof getDay !== 'function') {
+    console.warn('[할일] 앱 함수를 못 찾았다 — 중복 가드 미설치');
+    return;
+  }
+
+  var MIN_CONTAIN = 6;     /* 포함 판정에 필요한 최소 길이 — 짧은 말은 우연히 겹친다 */
+  var JACCARD = 0.7;
+  var DICE = 0.75;         /* 글자 2-gram 유사도 — 조사 차이를 넘긴다 */
+  var BACKUP_KEY = 'jay_tasks_backup';
+
+  function norm(s){
+    return String(s == null ? '' : s).toLowerCase()
+      .replace(/[\s　]+/g, '')
+      .replace(/[·,.\-—~!?()\[\]{}"'`:;/\\]/g, '');
+  }
+  function toks(s){
+    return (String(s == null ? '' : s).toLowerCase()
+      .match(/[가-힣]{2,}|[a-z0-9]{2,}/g) || []);
+  }
+  function jaccard(a, b){
+    var A = {}, n = 0, i;
+    for (i = 0; i < a.length; i++) A[a[i]] = 1;
+    var B = {};
+    for (i = 0; i < b.length; i++) B[b[i]] = 1;
+    var ka = Object.keys(A), kb = Object.keys(B);
+    for (i = 0; i < ka.length; i++) if (B[ka[i]]) n++;
+    var uni = ka.length + kb.length - n;
+    return uni ? n / uni : 0;
+  }
+  /* 글자 2-gram Dice. 한국어 조사("작업을" vs "작업")에 강하다 —
+     토큰 단위로만 보면 조사 하나에 유사도가 0.5로 주저앉는다(2026-08-31 실측). */
+  function dice(a, b){
+    if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+    var A = {}, i, g, n = 0, ca = 0, cb = 0;
+    for (i = 0; i < a.length - 1; i++) { g = a.substr(i, 2); A[g] = (A[g] || 0) + 1; ca++; }
+    for (i = 0; i < b.length - 1; i++) {
+      g = b.substr(i, 2); cb++;
+      if (A[g] > 0) { A[g]--; n++; }
+    }
+    return (ca + cb) ? (2 * n) / (ca + cb) : 0;
+  }
+
+  function same(x, y){
+    var nx = norm(x), ny = norm(y);
+    if (!nx || !ny) return false;
+    if (nx === ny) return true;
+    var shorter = nx.length <= ny.length ? nx : ny;
+    if (shorter.length >= MIN_CONTAIN && (nx.indexOf(ny) >= 0 || ny.indexOf(nx) >= 0)) return true;
+    if (shorter.length >= MIN_CONTAIN && dice(nx, ny) >= DICE) return true;
+    var tx = toks(x), ty = toks(y);
+    if (tx.length >= 3 && ty.length >= 3 && jaccard(tx, ty) >= JACCARD) return true;
+    return false;
+  }
+  window._taskSimilar = same;   /* 테스트가 판정기만 따로 본다 */
+
+  /* 같은 칸(when·done) 안에서만 묶는다. 오늘 것과 내일 것은 다른 계획이다. */
+  function bucketOf(t){
+    return (t && t.done ? '1' : '0') + '|' + String((t && t.when) || 'today');
+  }
+
+  function merge(tasks){
+    var kept = [], removed = [];
+    (tasks || []).forEach(function(t){
+      var host = null;
+      for (var i = 0; i < kept.length; i++) {
+        if (bucketOf(kept[i]) === bucketOf(t) && same(kept[i].text, t.text)) { host = kept[i]; break; }
+      }
+      if (!host) { kept.push(t); return; }
+      /* 먼저 들어온 걸 대표로 둔다 — 텍스트를 새로 쓰지 않는다(원문 보존) */
+      host.mentions = (host.mentions || 1) + (t.mentions || 1);
+      if ((t.priority | 0) > (host.priority | 0)) host.priority = t.priority;
+      if (t.urgent) host.urgent = true;
+      if (t.done && !host.done) host.done = true;
+      removed.push(t);
+    });
+    return { kept: kept, removed: removed };
+  }
+
+  function backup(removed){
+    try {
+      var b = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]');
+      b.push({ at: new Date().toISOString(), by: '자동 병합', removed: removed.map(function(t){ return Object.assign({}, t); }) });
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(b.slice(-50)));
+    } catch(e){ console.warn('[할일] 백업 실패', e); }
+  }
+
+  /* ── ① 저장 길목에서 잡는다 ─────────────────────────────────────────── */
+  var _origSave = save;
+  var _busy = false;
+  window.save = function(){
+    if (!_busy) {
+      _busy = true;
+      try {
+        var d = getDay();
+        if (d && Array.isArray(d.tasks) && d.tasks.length > 1) {
+          var r = merge(d.tasks);
+          if (r.removed.length) {
+            backup(r.removed);
+            d.tasks.length = 0;
+            r.kept.forEach(function(t){ d.tasks.push(t); });
+            console.log('[할일] 중복 ' + r.removed.length + '건 병합 — '
+              + r.removed.map(function(t){ return (t.text || '').slice(0, 18); }).join(' / '));
+          }
+        }
+      } catch(e){ console.warn('[할일] 병합 실패 — 저장은 그대로 진행', e); }
+      _busy = false;
+    }
+    return _origSave.apply(this, arguments);
+  };
+
+  /* ── ② 지금 당장 정리 (API 키 불필요) ───────────────────────────────── */
+  window._taskDedupeNow = function(silent){
+    var d = getDay();
+    if (!d || !Array.isArray(d.tasks)) return 0;
+    var r = merge(d.tasks);
+    if (!r.removed.length) {
+      if (!silent && typeof showToast === 'function') showToast('겹치는 할일이 없어');
+      return 0;
+    }
+    backup(r.removed);
+    d.tasks.length = 0;
+    r.kept.forEach(function(t){ d.tasks.push(t); });
+    _origSave();
+    if (typeof renderTasks === 'function') renderTasks();
+    if (!silent && typeof showToast === 'function')
+      showToast('중복 ' + r.removed.length + '건 정리했어');
+    return r.removed.length;
+  };
+
+  /* ── ③ "중복 정리" 버튼: 결정론 먼저, 남으면 LLM ────────────────────── */
+  if (typeof window.dedupeTasks === 'function') {
+    var _origDedupe = window.dedupeTasks;
+    window.dedupeTasks = function(){
+      var n = window._taskDedupeNow(true);
+      var left = ((getDay() || {}).tasks || []).filter(function(t){ return !t.done; });
+      if (n && left.length < 2) {
+        if (typeof showToast === 'function') showToast('중복 ' + n + '건 정리했어');
+        return;
+      }
+      if (typeof getApiKey === 'function' && !getApiKey()) {
+        /* 키가 없어도 여기까지는 해줬다 — 예전엔 아무것도 못 잡고 끝났다 */
+        if (typeof showToast === 'function')
+          showToast(n ? ('중복 ' + n + '건 정리했어 (뜻이 같은 건 API 키가 있어야 더 묶어)')
+                      : 'API 키가 필요해 (우상단에서 설정)');
+        return;
+      }
+      return _origDedupe.apply(this, arguments);
+    };
+  }
+
+  /* 켜질 때 한 번 조용히 정리한다 — 이미 쌓인 것부터 걷어낸다 */
+  try {
+    var n0 = window._taskDedupeNow(true);
+    if (n0) console.log('[할일] 시작하면서 중복 ' + n0 + '건 정리');
+  } catch(e){}
+
+  console.log('[할일] 중복 가드 켜짐');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  if (typeof getDay !== 'function' || typeof save !== 'function') {
+    console.warn('[타임박스] 앱 함수를 못 찾았다 — 미설치');
+    return;
+  }
+
+  var KEY = 'jay_timebox';
+  var UNITS = [20, 30, 60];
+  var DEF_UNIT = 30;
+  var DEF_START = 6 * 60;        /* 06:00 */
+  var DEF_END = 26 * 60;         /* 다음날 02:00 */
+  var SLOT_PX = { 20: 26, 30: 34, 60: 56 };
+  var ANCHORS = [[8 * 60, '아침 앵커'], [13 * 60, '점심 앵커'], [21 * 60, '저녁 앵커']];
+
+  var esc = (typeof coEsc === 'function') ? coEsc : function(s){
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  var ACC = (typeof CO_C1 === 'string') ? CO_C1 : 'var(--accent)';
+  var toast = function(m){ try { showToast(m); } catch(e){} };
+
+  /* ── 상태 ─────────────────────────────────────────────────────────── */
+  function readAll(){
+    try {
+      var d = JSON.parse(localStorage.getItem(KEY) || 'null') || {};
+      d.v = 1;
+      d.unit = UNITS.indexOf(d.unit) >= 0 ? d.unit : DEF_UNIT;
+      d.start = (typeof d.start === 'number') ? d.start : DEF_START;
+      d.end = (typeof d.end === 'number') ? d.end : DEF_END;
+      d.days = d.days || {};
+      d.migrated = d.migrated || {};
+      return d;
+    } catch(e){
+      return { v: 1, unit: DEF_UNIT, start: DEF_START, end: DEF_END, days: {}, migrated: {} };
+    }
+  }
+  function writeAll(d){ try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){} }
+
+  function todayKey(){
+    var n = new Date();
+    return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0')
+      + '-' + String(n.getDate()).padStart(2, '0');
+  }
+  var _date = todayKey();
+
+  function blocks(){ return readAll().days[_date] || []; }
+  function setBlocks(list){
+    var d = readAll();
+    d.days[_date] = list;
+    writeAll(d);
+  }
+  function uid(){ return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+
+  function hhmm(min){
+    var m = ((min % 1440) + 1440) % 1440;
+    return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  }
+  function parseHM(s){
+    var m = /(\d{1,2})\s*:\s*(\d{2})/.exec(String(s || ''));
+    return m ? (+m[1]) * 60 + (+m[2]) : null;
+  }
+
+  /* 옛 타임라인(day.schedule)을 흡수한다.
+     ⚠ 한 번만 돌면 안 된다 — 앱의 "+ 일정" 버튼이 계속 day.schedule 에 쓰기 때문이다.
+        매번 흡수하되 (from, text) 로 중복을 막는다. day.schedule 자체는 안 지운다 —
+        다른 곳이 읽고 있을지 모르니 건드리지 않는다. */
+  function migrate(){
+    var all = readAll();
+    var day = (_date === todayKey()) ? getDay() : null;
+    var sched = (day && day.schedule) || [];
+    if (sched.length) {
+      var list = blocks().slice();
+      sched.forEach(function(s){
+        var from = parseHM(s.time);
+        if (from == null) return;
+        if (list.some(function(b){ return b.from === from && b.text === (s.task || ''); })) return;
+        list.push({ id: uid(), from: from, dur: all.unit, text: s.task || '', task: true });
+      });
+      all.days[_date] = list;
+      all.migrated[_date] = true;
+      writeAll(all);
+    }
+  }
+
+  /* ── 루틴 고스트 ──────────────────────────────────────────────────── */
+  function ghosts(){
+    var out = ANCHORS.map(function(a){ return { from: a[0], dur: 30, label: a[1] }; });
+    /* coach-map 의 시각 있는 시스템 — 코치 탭이 받아둔 캐시가 있으면 쓴다 */
+    var map = null;
+    try { map = (typeof _coachCache !== 'undefined' && _coachCache) ? _coachCache.map : null; } catch(e){}
+    var sys = (map && map.systems) || [];
+    sys.forEach(function(s){
+      var t = parseHM(s && (s.text || s.name || ''));
+      if (t == null) return;
+      out.push({ from: t, dur: 30, label: String(s.text || s.name).replace(/^매일\s*/, '').slice(0, 14) });
+    });
+    return out;
+  }
+
+  /* ── 뼈대 ─────────────────────────────────────────────────────────── */
+  var _host = null, _root = null, _grid = null, _layer = null, _now = null, _chips = null, _head = null;
+  var _armed = null;      /* 배정 대기 중인 할 일 텍스트 */
+  var _drag = null;
+  var _moved = false;
+
+  function unit(){ return readAll().unit; }
+  function slotPx(){ return SLOT_PX[unit()] || 34; }
+  function startMin(){ return readAll().start; }
+  function endMin(){ return readAll().end; }
+  function slotCount(){ return Math.max(1, Math.round((endMin() - startMin()) / unit())); }
+  function yOf(min){ return ((min - startMin()) / unit()) * slotPx(); }
+  function minOf(y){
+    var i = Math.floor(y / slotPx());
+    i = Math.max(0, Math.min(slotCount() - 1, i));
+    return startMin() + i * unit();
+  }
+
+  function mount(){
+    var host = document.getElementById('scheduleList');
+    if (!host) return null;
+    if (host === _host && _root && _root.parentNode === host) return host;
+    _host = host;
+    host.innerHTML = '';
+
+    _root = document.createElement('div');
+    _root.id = 'tbRoot';
+    _root.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0';
+
+    _head = document.createElement('div');
+    _head.id = 'tbHead';
+    _head.style.cssText = 'flex:0 0 auto;padding-bottom:8px';
+    _root.appendChild(_head);
+
+    _chips = document.createElement('div');
+    _chips.id = 'tbChips';
+    _chips.style.cssText = 'flex:0 0 auto;display:flex;gap:5px;flex-wrap:wrap;padding-bottom:8px';
+    _root.appendChild(_chips);
+
+    var scroller = document.createElement('div');
+    scroller.style.cssText = 'flex:1 1 auto;overflow-y:auto;min-height:0';
+    _grid = document.createElement('div');
+    _grid.id = 'tbGrid';
+    /* 격자 안에서는 세로 드래그를 우리가 쓴다 — 스크롤에 안 뺏기게 */
+    _grid.style.cssText = 'position:relative;touch-action:none;user-select:none;'
+      + '-webkit-user-select:none';
+    scroller.appendChild(_grid);
+    _root.appendChild(scroller);
+    host.appendChild(_root);
+
+    _grid.addEventListener('pointerdown', onDown);
+    _grid.addEventListener('pointermove', onMove);
+    _grid.addEventListener('pointerup', onUp);
+    _grid.addEventListener('pointercancel', onUp);
+    return host;
+  }
+
+  function local(ev){
+    var r = _grid.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  }
+
+  /* ── 그리기 ───────────────────────────────────────────────────────── */
+  function drawHead(){
+    var d = readAll();
+    var isToday = _date === todayKey();
+    var btn = function(fn, label, extra){
+      return '<button onclick="' + fn + '" style="border:1px solid var(--border2);'
+        + 'background:var(--surface);color:var(--text2);font-size:12px;padding:7px 10px;'
+        + 'border-radius:8px;cursor:pointer;font-family:inherit;min-height:36px;' + (extra || '')
+        + '">' + label + '</button>';
+    };
+    _head.innerHTML =
+      '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+      + btn('_tbDay(-1)', '◀')
+      + '<div style="font-size:12px;font-weight:700;color:var(--text);min-width:92px;text-align:center">'
+      + _date.slice(5) + (isToday ? ' · 오늘' : '') + '</div>'
+      + btn('_tbDay(1)', '▶')
+      + (isToday ? '' : btn('_tbToday()', '오늘로', 'color:' + ACC))
+      + '<span style="flex:1"></span>'
+      + UNITS.map(function(u){
+          return btn('_tbUnit(' + u + ')', u + '분',
+            (d.unit === u ? 'border-color:' + ACC + ';color:' + ACC + ';font-weight:700' : ''));
+        }).join('')
+      + '</div>';
+  }
+
+  function drawChips(){
+    var day = getDay();
+    var open = ((day && day.tasks) || []).filter(function(t){
+      return !t.done && (t.when === 'today' || !t.when);
+    });
+    if (!open.length) {
+      _chips.innerHTML = '<div style="font-size:11px;color:var(--muted)">배정할 할 일이 없어</div>';
+      return;
+    }
+    _chips.innerHTML =
+      '<div style="width:100%;font-size:11px;color:var(--muted);margin-bottom:2px">'
+      + (_armed ? '칸을 누르면 <b style="color:' + ACC + '">' + esc(_armed) + '</b> 배정'
+                : '할 일을 누르고 칸을 누르면 배정돼')
+      + '</div>'
+      + open.slice(0, 12).map(function(t){
+          var on = _armed === t.text;
+          return '<button onclick="_tbArm(this.dataset.t)" data-t="' + esc(t.text) + '"'
+            + ' style="border:1px solid ' + (on ? ACC : 'var(--border2)') + ';'
+            + 'background:' + (on ? 'var(--accent-dim)' : 'var(--surface)') + ';'
+            + 'color:' + (on ? ACC : 'var(--text2)') + ';font-size:11px;padding:6px 9px;'
+            + 'border-radius:999px;cursor:pointer;font-family:inherit;min-height:34px;'
+            + 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+            + esc(t.text.slice(0, 22)) + '</button>';
+        }).join('');
+  }
+
+  function drawGrid(){
+    var u = unit(), sp = slotPx(), n = slotCount();
+    _grid.style.height = (n * sp) + 'px';
+    _grid.innerHTML = '';
+
+    /* 칸 배경 + 시간 라벨 */
+    for (var i = 0; i < n; i++) {
+      var m = startMin() + i * u;
+      var onHour = (m % 60) === 0;
+      var row = document.createElement('div');
+      row.style.cssText = 'position:absolute;left:0;right:0;height:' + sp + 'px;top:' + (i * sp)
+        + 'px;border-top:1px solid ' + (onHour ? 'var(--border2)' : 'var(--border)')
+        + ';box-sizing:border-box';
+      var lab = document.createElement('div');
+      lab.style.cssText = 'position:absolute;left:0;top:1px;width:42px;font-size:10px;'
+        + 'font-family:JetBrains Mono,monospace;color:' + (onHour ? 'var(--text2)' : 'var(--muted)')
+        + ';pointer-events:none';
+      lab.textContent = onHour ? hhmm(m) : '';
+      row.appendChild(lab);
+      _grid.appendChild(row);
+    }
+
+    /* 루틴 고스트 — 클릭 대상 아님 */
+    ghosts().forEach(function(g){
+      if (g.from < startMin() || g.from >= endMin()) return;
+      var el = document.createElement('div');
+      el.className = 'tb-ghost';
+      el.style.cssText = 'position:absolute;left:46px;right:4px;pointer-events:none;'
+        + 'top:' + yOf(g.from) + 'px;height:' + ((g.dur / unit()) * slotPx()) + 'px;'
+        + 'border:1px dashed var(--border2);border-radius:7px;background:var(--surface2);'
+        + 'opacity:.55;font-size:10px;color:var(--muted);padding:2px 6px;box-sizing:border-box;'
+        + 'overflow:hidden';
+      el.textContent = g.label;
+      _grid.appendChild(el);
+    });
+
+    /* 배정 블록 */
+    blocks().forEach(function(b){
+      var el = document.createElement('div');
+      el.className = 'tb-block';
+      el.dataset.id = b.id;
+      el.style.cssText = 'position:absolute;left:46px;right:4px;box-sizing:border-box;'
+        + 'top:' + yOf(b.from) + 'px;height:' + Math.max(sp, (b.dur / u) * sp) + 'px;'
+        + 'background:var(--surface);border:1.5px solid ' + (b.task ? ACC : 'var(--border2)') + ';'
+        + 'border-radius:8px;padding:3px 8px;font-size:12px;color:var(--text);'
+        + 'overflow:hidden;cursor:grab;line-height:1.35';
+      el.textContent = b.text || '(비어 있음)';
+      var grip = document.createElement('div');
+      grip.className = 'tb-grip';
+      grip.style.cssText = 'position:absolute;left:0;right:0;bottom:-3px;height:10px;'
+        + 'cursor:ns-resize';
+      el.appendChild(grip);
+      _grid.appendChild(el);
+    });
+
+    /* 현재 시각 줄 — 오늘일 때만 */
+    if (_date === todayKey()) {
+      var now = new Date();
+      var m2 = now.getHours() * 60 + now.getMinutes();
+      if (m2 < startMin()) m2 += 1440;                 /* 새벽은 아래쪽에 */
+      if (m2 >= startMin() && m2 <= endMin()) {
+        _now = document.createElement('div');
+        _now.id = 'tbNow';
+        _now.style.cssText = 'position:absolute;left:0;right:0;height:0;pointer-events:none;'
+          + 'border-top:2px solid var(--red);top:' + yOf(m2) + 'px;z-index:5';
+        var dot = document.createElement('div');
+        dot.style.cssText = 'position:absolute;left:0;top:-4px;width:7px;height:7px;'
+          + 'border-radius:50%;background:var(--red)';
+        _now.appendChild(dot);
+        _grid.appendChild(_now);
+      }
+    }
+  }
+
+  function draw(){
+    if (!mount()) return;
+    migrate();
+    drawHead();
+    drawChips();
+    drawGrid();
+  }
+
+  /* ── 조작 ─────────────────────────────────────────────────────────── */
+  function blockAt(y){
+    var list = blocks();
+    for (var i = list.length - 1; i >= 0; i--) {
+      var top = yOf(list[i].from);
+      var h = Math.max(slotPx(), (list[i].dur / unit()) * slotPx());
+      if (y >= top && y < top + h) return list[i];
+    }
+    return null;
+  }
+
+  function onDown(ev){
+    if (ev.target && ev.target.tagName === 'INPUT') return;   /* 입력 중 */
+    _moved = false;
+    var p = local(ev);
+    var b = blockAt(p.y);
+    ev.preventDefault();
+    try { _grid.setPointerCapture(ev.pointerId); } catch(e){}
+    if (b) {
+      var top = yOf(b.from);
+      var h = Math.max(slotPx(), (b.dur / unit()) * slotPx());
+      var mode = (p.y >= top + h - 10) ? 'resize' : 'move';
+      _drag = { kind: mode, id: b.id, y0: p.y, from0: b.from, dur0: b.dur };
+    } else {
+      _drag = { kind: 'new', y0: p.y, from: minOf(p.y) };
+    }
+  }
+
+  function onMove(ev){
+    if (!_drag) return;
+    var p = local(ev);
+    if (Math.abs(p.y - _drag.y0) > 4) _moved = true;
+    if (!_moved) return;
+    var u = unit();
+    if (_drag.kind === 'new') {
+      var a = Math.min(_drag.from, minOf(p.y)), z = Math.max(_drag.from, minOf(p.y));
+      _drag.preview = { from: a, dur: (z - a) + u };
+      paintPreview(_drag.preview);
+    } else {
+      var list = blocks();
+      var b = list.filter(function(x){ return x.id === _drag.id; })[0];
+      if (!b) return;
+      var d = Math.round((p.y - _drag.y0) / slotPx()) * u;
+      if (_drag.kind === 'move') {
+        b.from = Math.max(startMin(), Math.min(endMin() - b.dur, _drag.from0 + d));
+      } else {
+        b.dur = Math.max(u, Math.min(endMin() - b.from, _drag.dur0 + d));
+      }
+      setBlocks(list);
+      drawGrid();
+    }
+  }
+
+  function paintPreview(pv){
+    var el = document.getElementById('tbPreview');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tbPreview';
+      el.style.cssText = 'position:absolute;left:46px;right:4px;border:1.5px dashed ' + ACC
+        + ';border-radius:8px;background:var(--accent-dim);pointer-events:none;z-index:4';
+      _grid.appendChild(el);
+    }
+    el.style.top = yOf(pv.from) + 'px';
+    el.style.height = ((pv.dur / unit()) * slotPx()) + 'px';
+  }
+
+  function onUp(ev){
+    var pv = _drag && _drag.preview;
+    var kind = _drag && _drag.kind;
+    var id = _drag && _drag.id;
+    var p = local(ev);
+    _drag = null;
+    try { _grid.releasePointerCapture(ev.pointerId); } catch(e){}
+    var ghost = document.getElementById('tbPreview');
+    if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+
+    if (kind === 'new' && _moved && pv) {
+      var nb = { id: uid(), from: pv.from, dur: pv.dur, text: _armed || '', task: !!_armed };
+      var list = blocks(); list.push(nb); setBlocks(list);
+      _armed = null;
+      draw();
+      if (!nb.text) edit(nb.id);
+      return;
+    }
+    if (_moved) { _moved = false; drawGrid(); return; }   /* 이동·리사이즈 끝 */
+
+    /* 탭 — click 에 안 기댄다 (터치에서 삼켜진다) */
+    var b = blockAt(p.y);
+    if (b) { edit(b.id); return; }
+    var nb2 = { id: uid(), from: minOf(p.y), dur: unit(),
+                text: _armed || '', task: !!_armed };
+    var list2 = blocks(); list2.push(nb2); setBlocks(list2);
+    var wasArmed = !!_armed;
+    _armed = null;
+    draw();
+    if (!wasArmed) edit(nb2.id);            /* 빈 칸이면 바로 입력 */
+    else toast('배정했어 — ' + hhmm(nb2.from));
+  }
+
+  /* 블록 안에서 바로 고친다. focus 는 이 제스처 안에서 부른다(모바일 키보드) */
+  function edit(id){
+    var el = _grid.querySelector('[data-id="' + id + '"]');
+    var b = blocks().filter(function(x){ return x.id === id; })[0];
+    if (!el || !b) return;
+    el.innerHTML = '';
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = b.text || '';
+    inp.style.cssText = 'width:100%;border:none;background:transparent;color:var(--text);'
+      + 'font-size:12px;font-family:inherit;outline:none;padding:0';
+    el.appendChild(inp);
+    var done = function(keep){
+      var list = blocks();
+      var t = list.filter(function(x){ return x.id === id; })[0];
+      if (!t) return;
+      if (keep) {
+        t.text = inp.value.trim();
+        if (!t.text) list = list.filter(function(x){ return x.id !== id; });   /* 빈 건 지운다 */
+      }
+      setBlocks(list);
+      draw();
+    };
+    inp.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); inp.value = b.text || ''; inp.blur(); }
+    });
+    inp.addEventListener('blur', function(){ done(true); });
+    inp.focus();
+    try { inp.select(); } catch(e){}
+  }
+
+  /* ── 밖에서 부르는 것들 ───────────────────────────────────────────── */
+  window._tbArm = function(t){
+    _armed = (_armed === t) ? null : t;
+    drawChips();
+  };
+  window._tbUnit = function(u){
+    var d = readAll();
+    if (UNITS.indexOf(u) < 0) return;
+    d.unit = u; writeAll(d);
+    draw();
+  };
+  window._tbDay = function(delta){
+    var p = _date.split('-').map(Number);
+    var dt = new Date(p[0], p[1] - 1, p[2] + delta);
+    _date = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0')
+      + '-' + String(dt.getDate()).padStart(2, '0');
+    _armed = null;
+    draw();
+  };
+  window._tbToday = function(){ _date = todayKey(); _armed = null; draw(); };
+  window._tbDelete = function(id){
+    setBlocks(blocks().filter(function(b){ return b.id !== id; }));
+    draw();
+  };
+  window._tbRender = draw;
+  window._tbState = function(){ return { date: _date, all: readAll(), armed: _armed }; };
+
+  /* 삭제 — 블록을 비우면 사라지므로 별도 버튼은 두지 않는다(설명은 힌트로) */
+
+  /* ── 앱의 renderSchedule 자리를 차지한다 ──────────────────────────── */
+  var _orig = window.renderSchedule;
+  window.renderSchedule = function(){
+    try { draw(); }
+    catch(e){
+      console.warn('[타임박스] 그리기 실패 — 옛 타임라인으로 되돌린다', e);
+      if (typeof _orig === 'function') return _orig.apply(this, arguments);
+    }
+  };
+
+  /* 현재 시각 줄은 1분마다 옮긴다 */
+  setInterval(function(){
+    if (!_grid || !_grid.parentNode || _date !== todayKey()) return;
+    if (_drag) return;                       /* 조작 중엔 안 건드린다 */
+    drawGrid();
+  }, 60000);
+
+  console.log('[타임박스] 켜짐 — 칸 ' + unit() + '분');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
   if (typeof _syncPushNow !== 'function' || typeof _syncPullOnLoad !== 'function'
       || typeof _collectSyncData !== 'function' || typeof _applySyncData !== 'function') {
     console.warn('[동기화] 앱 동기화 함수를 못 찾았다 — 가드 미설치');
