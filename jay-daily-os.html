@@ -7812,9 +7812,7 @@ async function renderCoach(force){
   var MAX_EDGE = 1600;                /* 리사이즈 목표 긴 변 */
   var FS = [14, 20, 32, 56];          /* 글자 크기 4단계 */
   var MIN_H = 520;
-  var HANDLE = 16;                    /* 우하단 리사이즈 모서리 판정 크기 */
   var MIN_W = 60, MIN_EL_H = 40;
-  var DBL_MS = 400;                   /* 두 번째 탭을 더블로 볼 시간 */
 
   function readJ(k, d){ try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch(e){ return d; } }
   function writeJ(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){ console.warn('[vb] 저장 실패', e); } }
@@ -7973,10 +7971,6 @@ async function renderCoach(force){
   var _nodes = {};        /* id → 래퍼 div. 한 번 만들면 삭제될 때까지 그대로 */
   var _sel = null;        /* 선택된 id */
   var _act = null;        /* 활성(편집·재생)된 id */
-  var _drag = null;
-  var _moved = false;
-  var _blankHadSel = false;   /* 빈 곳을 누를 때 선택이 있었나 — pointerup이 판단에 쓴다 */
-  var _lastTapId = null, _lastTapAt = 0;   /* 더블탭을 우리가 직접 센다 */
 
   /* 화면 좌표 → 캔버스 로컬 좌표. 이 함수 하나만 쓴다.
      요소는 패딩 박스 기준이라 테두리(clientLeft/Top)를 뺀다.
@@ -8181,90 +8175,132 @@ async function renderCoach(force){
     });
     return best;
   }
-  function onHandle(p){
-    if (!_sel) return false;
-    var e = elOf(board(), _sel);
-    if (!e) return false;
-    return p.x >= e.x + e.w - HANDLE && p.x <= e.x + e.w + 6
-        && p.y >= e.y + e.h - HANDLE && p.y <= e.y + e.h + 6;
+  /* ── 조작은 interact.js에 위임한다 ────────────────────────────────────
+     우리가 직접 pointerdown을 잡던 코드는 전부 걷어냈다. preventDefault도
+     우리가 부르지 않는다 — 그게 텍스트 focus를 죽였던 뿌리였다.
+     탭/드래그 구분, 터치 제스처, 더블탭 판정은 interact가 한다.
+     우리는 '무엇을 눌렀나'(모델 히트 테스트)와 '얼마나 움직였나'(델타)만 받는다. */
+  var _drag = null, _rs = null, _wired = null;
+
+  function endGesture(g){
+    if (!g) return;
+    save(g.b);
+    grow();
+    _canvas.style.height = (board().h || MIN_H) + 'px';
+    if (!_saveTimer && !_act) _editing = false;
   }
 
-  /* ── 포인터 — 캔버스 루트에서 전부 위임 처리한다 ──────────────────── */
-  function onDown(ev){
-    /* 활성된 요소 위의 클릭은 여기까지 안 온다(그 요소만 pointer-events:auto).
-       여기 왔다는 건 바깥을 눌렀다는 뜻 — 편집을 닫는다. */
-    if (_act) { deactivate(); sync(); }
-
-    /* 새 제스처는 항상 깨끗하게 시작한다. 터치는 드래그 뒤에 click이 안 오는 경우가
-       있어서, 이 두 값을 click에서만 치우면 다음 탭이 통째로 씹힌다. */
-    _moved = false;
-
-    var p = toLocal(ev);
-    var resize = onHandle(p);
-    var e = resize ? elOf(board(), _sel) : hit(p);
-
-    /* 빈 곳 — 여기서 선택을 풀면 안 된다. 풀어버리면 이어지는 click이
-       "선택이 없으니 새 글" 로 오해해서, 한 번 눌렀는데 선택 해제 + 빈 글이
-       같이 생긴다. 판단은 click 한 곳에서만 한다. */
-    if (!e) { _blankHadSel = !!_sel; return; }
-    _blankHadSel = false;
-
-    ev.preventDefault();
-    select(e.id);
-    _moved = false;
-    _editing = true;
-    _drag = { id: e.id, mode: resize ? 'resize' : 'move', sx: p.x, sy: p.y,
-              ox: e.x, oy: e.y, ow: e.w, oh: e.h, b: board(), pid: ev.pointerId };
-    try { if (_canvas.setPointerCapture && ev.pointerId != null) _canvas.setPointerCapture(ev.pointerId); } catch(err){}
+  /* 탭 — 선택 / 해제 / 새 글. 좌표로 판단하므로 이벤트 target에 안 기댄다. */
+  function onTap(ev){
+    var p = toLocal(ev), e = hit(p);
+    if (_act && (!e || e.id !== _act)) { deactivate(); sync(); return; }
+    if (e) { select(e.id); return; }
+    if (_sel) { select(null); return; }
+    addText(Math.round(p.x), Math.round(p.y));   /* interact의 탭 = 사용자 제스처 → focus 먹는다 */
   }
 
-  function onMove(ev){
-    if (!_drag) return;
-    var p = toLocal(ev);
-    var dx = p.x - _drag.sx, dy = p.y - _drag.sy;
-    if (dx || dy) _moved = true;
-    var e = elOf(_drag.b, _drag.id);
+  function onDoubleTap(ev){
+    var p = toLocal(ev), e = hit(p);
     if (!e) return;
-    if (_drag.mode === 'move') {
-      e.x = Math.max(0, Math.round(_drag.ox + dx));
-      e.y = Math.max(0, Math.round(_drag.oy + dy));
-    } else {
-      e.w = Math.max(MIN_W, Math.round(_drag.ow + dx));
-      e.h = Math.max(MIN_EL_H, Math.round(_drag.oh + dy));
-    }
-    /* 그 요소의 스타일만 직접 건드린다. 재렌더 없음 → iframe 그대로. */
+    select(e.id);
+    activate(e.id, ev);
+  }
+
+  function gestureStart(ev, kind){
+    var id = idOf(ev.target);
+    if (!id) return null;
+    var b = board(), e = elOf(b, id);
+    if (!e) return null;
+    _editing = true;
+    select(id);
+    return kind === 'resize'
+      ? { id: id, b: b, ow: e.w, oh: e.h, dw: 0, dh: 0 }
+      : { id: id, b: b, ox: e.x, oy: e.y, dx: 0, dy: 0 };
+  }
+
+  /* 모델을 고치고 그 요소의 스타일만 직접 바꾼다 — 재렌더 없음 */
+  function applyGeom(g, e){
     var n = _nodes[e.id];
     if (n) place(n, e);
-    if (_selBox && _sel === e.id) place(_selBox, e);
+    if (_sel === e.id && _selBox) place(_selBox, e);
   }
 
-  function onUp(ev){
-    if (_drag) {
-      try { if (_canvas.releasePointerCapture && _drag.pid != null) _canvas.releasePointerCapture(_drag.pid); } catch(err){}
-      save(_drag.b);
-      _drag = null;
-      grow();
-      _canvas.style.height = (board().h || MIN_H) + 'px';
-      if (!_saveTimer && !_act) _editing = false;
+  function idOf(node){
+    while (node && node !== _canvas) {
+      if (node.dataset && node.dataset.id) return node.dataset.id;
+      node = node.parentNode;
     }
-    if (_moved) { _moved = false; return; }      /* 끌었다 — 탭이 아니다 */
+    return null;
+  }
 
-    /* ⚠ 탭 판정을 여기서 한다. click/dblclick에 얹으면 안 된다 —
-       터치에서 브라우저가 제스처 판별·더블탭 감지 때문에 click을 통째로 삼킨다.
-       (실측: 드래그 직후 첫 탭은 pointerdown/up만 오고 click이 안 온다.)
-       pointerup은 항상 오고, 사용자 제스처 안이라 iOS에서 focus()도 먹는다. */
-    var p = toLocal(ev);
-    var e = hit(p);
-    var now = Date.now();
-    if (e) {
-      var second = (_lastTapId === e.id) && (now - _lastTapAt < DBL_MS);
-      _lastTapId = e.id; _lastTapAt = now;
-      if (second) activate(e.id, ev);            /* 두 번째 탭 = 활성(재생·타이핑) */
-      return;                                    /* 첫 탭의 선택은 onDown이 이미 했다 */
-    }
-    _lastTapId = null;
-    if (_blankHadSel) { _blankHadSel = false; select(null); return; }
-    addText(Math.round(p.x), Math.round(p.y));
+  function wire(){
+    if (typeof interact !== 'function' || !_canvas || _wired === _canvas) return false;
+    if (_wired) { try { interact(_wired).unset(); } catch(err){} }
+    _wired = _canvas;
+
+    interact(_canvas).on('tap', onTap).on('doubletap', onDoubleTap);
+
+    interact('#vbLayer [data-id]')
+      .draggable({
+        inertia: false,
+        autoScroll: false,
+        listeners: {
+          start: function(ev){ _drag = gestureStart(ev, 'move'); },
+          move: function(ev){
+            if (!_drag) return;
+            _drag.dx += ev.dx; _drag.dy += ev.dy;
+            var e = elOf(_drag.b, _drag.id);
+            if (!e) return;
+            e.x = Math.max(0, Math.round(_drag.ox + _drag.dx));
+            e.y = Math.max(0, Math.round(_drag.oy + _drag.dy));
+            applyGeom(_drag, e);
+          },
+          end: function(){ endGesture(_drag); _drag = null; },
+        },
+      })
+      .resizable({
+        edges: { right: true, bottom: true },
+        margin: 12,                       /* 오른쪽·아래 가장자리 12px가 크기 조절 구역 */
+        inertia: false,
+        listeners: {
+          start: function(ev){ _rs = gestureStart(ev, 'resize'); },
+          move: function(ev){
+            if (!_rs) return;
+            var d = ev.deltaRect || { width: 0, height: 0 };
+            _rs.dw += d.width; _rs.dh += d.height;
+            var e = elOf(_rs.b, _rs.id);
+            if (!e) return;
+            e.w = Math.max(MIN_W, Math.round(_rs.ow + _rs.dw));
+            e.h = Math.max(MIN_EL_H, Math.round(_rs.oh + _rs.dh));
+            applyGeom(_rs, e);
+          },
+          end: function(){ endGesture(_rs); _rs = null; },
+        },
+      });
+    console.log('[vb] interact.js 연결됨');
+    return true;
+  }
+
+  /* interact.js는 CDN에서 받아온다. 조각이 <script src>를 못 심으므로 여기서 넣는다. */
+  var IA_SRC = 'https://cdn.jsdelivr.net/npm/interactjs@1.10.28/dist/interact.min.js';
+  var IA_SRI = 'sha384-M8D+RMAiR0totYNPoldHamQ91OX9eGv5aR15538+pfeV/zsOqt4HYh2nyC8RPZUR';
+  var _iaLoading = false;
+
+  function ensureInteract(){
+    if (wire()) return;
+    if (typeof interact === 'function' || _iaLoading) return;
+    _iaLoading = true;
+    var s = document.createElement('script');
+    s.src = IA_SRC;
+    s.integrity = IA_SRI;
+    s.crossOrigin = 'anonymous';
+    s.onload = function(){ _iaLoading = false; wire(); };
+    s.onerror = function(){
+      _iaLoading = false;
+      console.warn('[vb] interact.js를 못 받았다 — 보드는 보이지만 조작은 안 된다');
+      if (typeof showToast === 'function') showToast('비전 보드 조작 라이브러리를 못 받았어. 새로고침해봐.');
+    };
+    (document.head || document.body).appendChild(s);
   }
 
   /* contenteditable 입력도 캔버스 루트에서 받는다 (input은 버블한다) */
@@ -8377,11 +8413,9 @@ async function renderCoach(force){
     _canvas.appendChild(_selBox);
 
     /* 포인터·입력은 전부 이 한 곳에서 받는다 */
-    _canvas.addEventListener('pointerdown', onDown);
-    _canvas.addEventListener('pointermove', onMove);
-    _canvas.addEventListener('pointerup', onUp);
-    _canvas.addEventListener('pointercancel', onUp);
+    /* 포인터는 interact.js가 가져간다. 우리가 직접 다는 건 입력 하나뿐이다. */
     _canvas.addEventListener('input', onInput);
+    ensureInteract();
 
     var hint = document.createElement('div');
     hint.style.cssText = 'font-size:10px;color:var(--muted);margin-top:6px';
