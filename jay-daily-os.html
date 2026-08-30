@@ -732,6 +732,32 @@ body {
   #coachBody table { font-size: 11px; }
   #coachBody { overflow-x: hidden; }
 }
+
+  /* ── 탭 타깃 바닥값 (2026-08-31, 390px 실측) ─────────────────────────────
+     실측에서 패널 버튼 상당수가 19~29px였다 — 손가락으로 못 누른다.
+     레이아웃을 흔들지 않도록 '높이 바닥값'만 준다. 폭은 건드리지 않는다. */
+  @media (max-width: 430px) {
+    .panel.active button,
+    .panel.active a[role="button"] {
+      min-height: 40px;
+    }
+    /* 아이콘 하나짜리 버튼(× 등)은 폭도 같이 — 10px짜리가 있었다 */
+    .panel.active button {
+      min-width: 32px;
+    }
+    /* 코치 탭 비전 지도 — 라벨 컬럼(88px)이 화면 1/4을 먹는다. 폰에서는 세로로 쌓는다 */
+    .co-kv { flex-direction: column; gap: 2px !important; }
+    .co-kv-k { width: auto !important; font-size: 12px !important; }
+    /* 지도·차트의 SVG 라벨이 10px이라 폰에서 안 읽힌다 */
+    .panel.active svg text { font-size: 12px; }
+
+    /* 10px 글자는 폰에서 안 읽힌다 */
+    .panel.active [style*="font-size:10px"],
+    .panel.active [style*="font-size: 10px"] {
+      font-size: 12px !important;
+      line-height: 1.6 !important;
+    }
+  }
 </style>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
@@ -6243,8 +6269,10 @@ function coBoard(map){
 function coVision(map){
   if(!map) return coCard('비전 지도', coEmpty('아직 데이터가 없어.'));
   const d = map.dream||{}, s = map.standards||{};
-  const kv = (k,v) => `<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-    <div style="width:88px;flex-shrink:0;font-size:11px;color:var(--muted);padding-top:1px">${k}</div>
+  /* co-kv 클래스는 모바일 CSS가 잡는다 — 폰에서는 라벨을 위로 올려 세로로 쌓는다.
+     390px에서 88px 라벨 컬럼이 화면 1/4을 먹어 본문이 눌렸다 (2026-08-31 실측). */
+  const kv = (k,v) => `<div class="co-kv" style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+    <div class="co-kv-k" style="width:88px;flex-shrink:0;font-size:11px;color:var(--muted);padding-top:1px">${k}</div>
     <div style="flex:1;font-size:12px;color:var(--text);line-height:1.7">${v}</div></div>`;
   const list = a => (a&&a.length) ? a.map(x=>coPill(typeof x==='string'?x:(x.statement||x.text||JSON.stringify(x)))).join('') : '<span style="color:var(--muted);font-size:12px">—</span>';
   const rules = (map.hidden_rules||[]).map(r =>
@@ -6718,7 +6746,16 @@ function coChannels(map, log){
         color:var(--red);font-size:15px;cursor:pointer">✕</button>
     </div>`;
   }).join('');
-  return coCard('구독 채널', rows, `${chans.length}개 · 1시간마다 새 영상 확인`);
+  /* 목록은 동기부여 탭이 전담한다 (2026-08-31 통합). 여기서는 현황만 한 줄. */
+  return coCard('구독 채널',
+    `<div style="font-size:12px;color:var(--muted);line-height:1.7">
+       ${chans.length}개 구독 중 · 하루 4번(08 / 13 / 17 / 21시) 새 영상 확인<br>
+       추가·해제는 <b style="color:var(--text)">동기부여 탭</b>에서 한 곳으로 관리해.
+     </div>
+     <button onclick="switchPanel('motiv', document.querySelector('.nav-btn'))"
+       style="margin-top:10px;min-height:40px;border:1px solid var(--border2);
+       background:var(--surface);color:var(--text2);font-size:12px;padding:8px 14px;
+       border-radius:9px;cursor:pointer;font-family:inherit">동기부여 탭에서 관리 →</button>`);
 }
 
 /* ── 8. 학습 아카이브 ───────────────────────────────────────────────
@@ -8207,9 +8244,12 @@ async function renderCoach(force){
   /* ── 6) 정체성 슬롯 (봇 소유 · A-5 산출물) ─────────────────────────── */
   function identityBlock(map){
     var ids = (map && map.identity) || [];
-    var vals = ((map && map.standards) || {}).values_ranked || [];
+    var std = (map && map.standards) || {};
+    var vals = std.values_ranked || [];
+    var musts = std.musts || [];          /* 경계 기준 — 세션 산출물 (2026-08-31) */
     var txt = function(x){ return typeof x === 'string' ? x : (x.text || x.statement || ''); };
-    if (!ids.length && !vals.length)
+    var sub = function(x){ return (x && typeof x === 'object' && x.detail) ? x.detail : ''; };
+    if (!ids.length && !vals.length && !musts.length)
       return card('정체성', sessionHint('M9 정체성 / M7 가치 서열'));
     var body = '';
     if (ids.length)
@@ -8222,6 +8262,14 @@ async function renderCoach(force){
         + vals.map(function(x, i){
             return '<div style="font-size:13px;line-height:1.8">'
               + '<span style="color:' + ACC + ';font-weight:700">' + (i+1) + '</span> ' + esc(txt(x)) + '</div>';
+          }).join('');
+    if (musts.length)
+      body += '<div style="font-size:11px;color:var(--muted);margin:10px 0 4px">원칙</div>'
+        + musts.map(function(x){
+            var d = sub(x);
+            return '<div style="font-size:13px;font-weight:600;line-height:1.7">' + esc(txt(x)) + '</div>'
+              + (d ? '<div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:4px">'
+                     + esc(d) + '</div>' : '');
           }).join('');
     return card('정체성', body);
   }
@@ -8424,6 +8472,8 @@ async function renderCoach(force){
   /* ── 층·노드 ──────────────────────────────────────────────────────── */
   var ACC = (typeof CO_C1 === 'string') ? CO_C1 : 'var(--accent)';
 
+  /* 폰 폭 기준 — 탭 타깃과 글자를 키운다 (2026-08-31 390px 점검) */
+  function _narrow(){ return (window.innerWidth || 999) <= 430; }
   var _host = null, _canvas = null, _layer = null, _selBox = null, _handle = null, _tools = null;
   var _tbText = null, _tbCommon = null, _fsBtns = [], _boldBtn = null;
   var _nodes = {};        /* id → 래퍼 div. 한 번 만들면 삭제될 때까지 그대로 */
@@ -8444,7 +8494,12 @@ async function renderCoach(force){
      피드백 루프가 되어 타이핑 한 글자마다 상자가 자란다(2026-08-31 버그). */
   function place(node, e, autoH){
     node.style.transform = 'translate3d(' + e.x + 'px,' + e.y + 'px,0)';
-    node.style.width = e.w + 'px';
+    /* 좁은 화면에서는 폭을 화면 안으로 접는다 — **표시만** 접는다.
+       저장된 w는 그대로 둔다: PC에서 잡아둔 크기를 폰이 망가뜨리면 안 되고,
+       Gist로 나가면 다른 기기까지 오염된다. (390px에서 시드 글 w=620이
+       화면 밖으로 잘려 안 보이던 문제 — 2026-08-31 실측) */
+    var room = (_canvas ? _canvas.clientWidth : 0) - e.x - 4;
+    node.style.width = (room > MIN_W && room < e.w ? room : e.w) + 'px';
     if (!autoH) node.style.height = e.h + 'px';
   }
 
@@ -8868,7 +8923,7 @@ async function renderCoach(force){
        커지면서 아래 캔버스가 통째로 밀린다 — 그게 "클릭할 때마다 화면이 튄다"였다. */
     _tools = document.createElement('div');
     _tools.style.cssText = 'display:flex;gap:5px;align-items:center;flex-wrap:nowrap;'
-      + 'height:30px;overflow-x:auto;overflow-y:hidden;margin-bottom:8px';
+      + 'height:' + (_narrow() ? 46 : 30) + 'px;overflow-x:auto;overflow-y:hidden;margin-bottom:8px';
     host.appendChild(_tools);
     buildTools();
 
@@ -8903,7 +8958,8 @@ async function renderCoach(force){
     ensureInteract();
 
     var hint = document.createElement('div');
-    hint.style.cssText = 'font-size:10px;color:var(--muted);margin-top:6px';
+    hint.style.cssText = 'font-size:' + (_narrow() ? 12 : 10)
+      + 'px;color:var(--muted);margin-top:6px;line-height:1.6';
     hint.textContent = '빈 곳을 누르면 글을 쓴다 · 한 번 눌러 선택하고 끌면 이동 · '
       + '두 번 누르면 글을 쓰거나 영상이 재생된다 (Esc로 빠져나옴) · '
       + '우하단 모서리로 크기 조절 · Delete로 삭제';
@@ -8917,6 +8973,7 @@ async function renderCoach(force){
     b.textContent = label;
     b.style.cssText = 'border:1px solid var(--border2);background:var(--surface);color:var(--text2);'
       + 'font-size:11px;padding:4px 9px;border-radius:7px;cursor:pointer;font-family:inherit;'
+      + (_narrow() ? 'min-height:40px;padding:8px 12px;font-size:12px;' : '')
       + 'flex:0 0 auto;white-space:nowrap;' + (extra || '');
     b.addEventListener('click', fn);
     return b;
@@ -9066,21 +9123,127 @@ async function renderCoach(force){
       }).join('');
   }
 
+  /* ── 채널 관리 (2026-08-31 통합) ─────────────────────────────────────
+     추가·해제 모두 요청 큐로만 나간다. 목록 소유는 봇이다. */
+  var CHAN_KEY = 'jay_coachChannelRemovals';   /* 코치 탭이 쓰던 해제 큐를 그대로 쓴다 */
+  var POLL_LABEL = '하루 4번 · 08:00 / 13:00 / 17:00 / 21:00';
+
+  function removedMap(){
+    try { return JSON.parse(localStorage.getItem(CHAN_KEY) || '{}') || {}; } catch(e){ return {}; }
+  }
+  function liveChannels(map){
+    var gone = removedMap();
+    return (((map || {}).youtube || {}).channels || []).filter(function(c){ return !gone[c.channel_id]; });
+  }
+  function cardCount(log, title){
+    var all = ((log || {}).study || [])
+      .concat((log || {}).learn || [], (log || {}).motiv_feed || []);
+    return all.filter(function(x){ return (x.channel || '') === title; }).length;
+  }
+
+  /* 형식 검증은 여기서 즉시. 채널 실존·RSS 유효성은 봇이 확인한다 —
+     브라우저는 유튜브를 직접 못 부른다(CORS). 실패하면 ack의 why가 아래에 뜬다. */
+  function parseChannelInput(raw){
+    var v = String(raw || '').trim();
+    if (!v) return { err: '채널 주소나 @핸들을 넣어줘' };
+    if (/^@[\w.-]{3,}$/.test(v)) return { ok: v };
+    if (/^https?:\/\/(www\.)?youtube\.com\/(@[\w.-]+|channel\/UC[\w-]{20,}|c\/[\w.-]+|user\/[\w.-]+)/i.test(v))
+      return { ok: v };
+    if (/^https?:\/\/(www\.)?youtu\.be\//i.test(v))
+      return { err: '영상 링크야. 채널 주소나 @핸들을 넣어줘' };
+    if (/^https?:\/\//i.test(v)) return { err: '유튜브 채널 주소가 아니야' };
+    if (/^[\w.-]{3,}$/.test(v)) return { ok: '@' + v };   /* 핸들에 @를 빼먹은 경우 */
+    return { err: '채널 주소(youtube.com/@…)나 @핸들 형식이어야 해' };
+  }
+
+  window._subAddFromInput = function(){
+    var el = document.getElementById('subChanInput');
+    var msg = document.getElementById('subChanErr');
+    if (!el) return;
+    var r = parseChannelInput(el.value);
+    if (r.err) {
+      if (msg) { msg.textContent = r.err; msg.style.display = 'block'; }
+      return;
+    }
+    if (msg) { msg.textContent = ''; msg.style.display = 'none'; }
+    el.value = '';
+    enqueue('yt', r.ok);
+  };
+  window._subChanKey = function(ev){
+    if (ev && (ev.key === 'Enter' || ev.keyCode === 13)) { ev.preventDefault(); _subAddFromInput(); }
+  };
+  window._subRemoveChannel = function(cid, title){
+    if (!confirm(title + ' 구독 해제할까?\n\n새 영상 카드가 더 이상 오지 않아. 이미 받은 카드는 남아.')) return;
+    var g = removedMap();
+    g[cid] = { at: new Date().toISOString(), title: title };
+    try { localStorage.setItem(CHAN_KEY, JSON.stringify(g)); } catch(e){}
+    if (typeof showToast === 'function') showToast('해제됨 — 봇이 다음 확인 때 반영한다');
+    if (typeof renderMotiv === 'function') renderMotiv();
+  };
+
+  /* 봇이 실패로 ack 한 건 이유를 보여준다 — 잘못된 핸들이 조용히 사라지지 않게 */
+  function failedRows(map){
+    var acked = ((map || {}).subs_applied) || {};
+    return Object.keys(acked).map(function(k){ return acked[k]; })
+      .filter(function(a){ return a && a.result && a.result !== 'ok' && a.why; })
+      .slice(-3)
+      .map(function(a){
+        return '<div style="font-size:11px;color:var(--red);padding:3px 0">✕ '
+          + esc(String(a.why).slice(0, 70)) + '</div>';
+      }).join('');
+  }
+
+  function channelBlock(map, log){
+    prune(map);
+    var chans = liveChannels(map);
+    var rows = chans.map(function(c){
+      var n = cardCount(log, c.title || '');
+      return '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;'
+        + 'border-bottom:1px solid var(--border2)">'
+        + '<div style="min-width:0;flex:1">'
+        + '<div style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;'
+        + 'text-overflow:ellipsis;white-space:nowrap">' + esc(c.title || '(이름 없음)') + '</div>'
+        + '<div style="font-size:11px;color:var(--muted);margin-top:2px">'
+        + (c.handle ? esc(c.handle) + ' · ' : '') + esc(c.added || '') + ' 등록 · 카드 ' + n + '개</div>'
+        + '</div>'
+        + '<button onclick="_subRemoveChannel(&#39;' + esc(c.channel_id) + '&#39;, this.dataset.t)"'
+        + ' data-t="' + esc(c.title || '') + '" aria-label="구독 해제"'
+        + ' style="min-width:44px;min-height:44px;border:none;background:transparent;'
+        + 'color:var(--red);font-size:15px;cursor:pointer;font-family:inherit">✕</button>'
+        + '</div>';
+    }).join('');
+
+    var adder =
+      '<div style="display:flex;gap:6px;margin-top:12px">'
+      + '<input id="subChanInput" type="text" inputmode="url" autocomplete="off"'
+      + ' onkeydown="_subChanKey(event)" placeholder="youtube.com/@채널 또는 @핸들"'
+      + ' style="flex:1 1 auto;min-width:0;min-height:40px;border:1px solid var(--border2);'
+      + 'border-radius:9px;background:var(--surface2);color:var(--text);font-size:13px;'
+      + 'padding:8px 10px;font-family:inherit">'
+      + '<button onclick="_subAddFromInput()" style="flex:0 0 auto;min-height:40px;'
+      + 'border:1px solid var(--border2);background:var(--surface);color:var(--text2);'
+      + 'font-size:13px;padding:8px 14px;border-radius:9px;cursor:pointer;font-family:inherit">추가</button>'
+      + '</div>'
+      + '<div id="subChanErr" style="display:none;font-size:11px;color:var(--red);margin-top:6px"></div>'
+      + '<div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6">'
+      + '채널명·핸들 확인과 피드 유효성은 봇이 등록할 때 검사한다. 잘못된 핸들이면 여기 이유가 뜬다.</div>';
+
+    var body = (rows || '<div style="font-size:12px;color:var(--muted)">아직 구독한 채널이 없어.</div>')
+      + pendingRows('yt') + failedRows(map) + adder;
+    return card('구독 채널', body, chans.length + '개 · ' + POLL_LABEL);
+  }
+
   /* ── 유튜브 피드 — 인라인 재생, 페이지 이탈 없음 ──────────────────── */
   function ytBlock(map, log){
     prune(map);
     var chans = (((map || {}).youtube || {}).channels || [])
       .filter(function(c){ return c.feed === 'motiv'; });
     var feed = ((log || {}).motiv_feed || []).slice();
-    var head = pendingRows('yt')
-      + (chans.length
-         ? '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">구독 '
-           + chans.map(function(c){ return esc(c.title || ''); }).join(' · ') + '</div>'
-           : '');
+    var head = '';   /* 채널 목록·추가는 위의 '구독 채널' 카드가 전담한다 */
     if (!feed.length)
       return card('영상 피드', head + '<div style="font-size:12px;color:var(--muted)">'
         + (chans.length ? '새 영상이 뜨면 여기 올라와.' : '아직 구독한 채널이 없어.')
-        + '</div>' + btn('_subAddYT()', '+ 채널 구독'), chans.length ? chans.length + '채널' : '');
+        + '</div>', chans.length ? chans.length + '채널' : '');
 
     var show = _open.feed ? feed : feed.slice(0, SHOW);
     var body = show.map(function(v){
@@ -9096,8 +9259,7 @@ async function renderCoach(force){
     var more = feed.length > SHOW
       ? btn('_subMore(\'feed\')', _open.feed ? '접기' : '이전 것 ' + (feed.length - SHOW) + '개 더')
       : '';
-    return card('영상 피드', head + body + more + btn('_subAddYT()', '+ 채널 구독'),
-                feed.length + '개');
+    return card('영상 피드', head + body + more, feed.length + '개');
   }
 
   /* ── 웹문서 카드 — 요약 + 핵심 구절, 전문은 링크 ──────────────────── */
@@ -9132,7 +9294,8 @@ async function renderCoach(force){
 
   /* 동기부여 탭이 이 함수를 찾으면 구독 블록을 그린다 */
   window._renderSubs = function(map, log){
-    return ytBlock(map, log) + webBlock(log);
+    /* 채널 관리가 먼저 — 피드보다 위에 둔다 (관리 창구가 여기 하나다) */
+    return channelBlock(map, log) + ytBlock(map, log) + webBlock(log);
   };
 
   console.log('[subs] 구독 메뉴 켜짐 — 대기 ' + Object.keys(readQ()).length + '건');
