@@ -6749,7 +6749,7 @@ function coChannels(map, log){
   /* 목록은 동기부여 탭이 전담한다 (2026-08-31 통합). 여기서는 현황만 한 줄. */
   return coCard('구독 채널',
     `<div style="font-size:12px;color:var(--muted);line-height:1.7">
-       ${chans.length}개 구독 중 · 하루 4번(08 / 13 / 17 / 21시) 새 영상 확인<br>
+       ${chans.length}개 구독 중 · 4시간마다 새 영상 확인, 하루 4번 묶어 배달<br>
        추가·해제는 <b style="color:var(--text)">동기부여 탭</b>에서 한 곳으로 관리해.
      </div>
      <button onclick="switchPanel('motiv', document.querySelector('.nav-btn'))"
@@ -9126,7 +9126,11 @@ async function renderCoach(force){
   /* ── 채널 관리 (2026-08-31 통합) ─────────────────────────────────────
      추가·해제 모두 요청 큐로만 나간다. 목록 소유는 봇이다. */
   var CHAN_KEY = 'jay_coachChannelRemovals';   /* 코치 탭이 쓰던 해제 큐를 그대로 쓴다 */
-  var POLL_LABEL = '하루 4번 · 08:00 / 13:00 / 17:00 / 21:00';
+  /* ⚠ 두 개는 다른 값이다 (2026-08-31 확인).
+       수집(RSS 확인) = config.YT_POLL_INTERVAL, 지금 4시간
+       배달(카드 전송) = config.YT_SLOTS, 하루 4번(08/13/17/21)
+     예전 "1시간마다"는 수집 주기가 4시간으로 바뀐 뒤에도 안 고쳐진 표기였다. */
+  var POLL_LABEL = '4시간마다 새 영상 확인 · 하루 4번 묶어 배달';
 
   function removedMap(){
     try { return JSON.parse(localStorage.getItem(CHAN_KEY) || '{}') || {}; } catch(e){ return {}; }
@@ -9185,7 +9189,8 @@ async function renderCoach(force){
   function failedRows(map){
     var acked = ((map || {}).subs_applied) || {};
     return Object.keys(acked).map(function(k){ return acked[k]; })
-      .filter(function(a){ return a && a.result && a.result !== 'ok' && a.why; })
+      /* 봇이 쓰는 값은 "적용" / "오류" 다 (bot.py). 성공까지 빨간 줄로 띄우면 안 된다 */
+      .filter(function(a){ return a && /오류|error|fail/i.test(String(a.result || '')) && a.why; })
       .slice(-3)
       .map(function(a){
         return '<div style="font-size:11px;color:var(--red);padding:3px 0">✕ '
