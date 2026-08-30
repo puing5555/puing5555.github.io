@@ -7981,10 +7981,18 @@ async function renderCoach(force){
              y: ev.clientY - r.top - (_canvas.clientTop || 0) };
   }
 
-  function place(node, e){
+  /* autoH면 높이를 손대지 않는다 — 편집 중 텍스트는 CSS(height:auto + min-height)가
+     내용만큼만 잡는다. 여기서 높이를 다시 써넣으면 자기가 만든 값을 다시 읽는
+     피드백 루프가 되어 타이핑 한 글자마다 상자가 자란다(2026-08-31 버그). */
+  function place(node, e, autoH){
     node.style.transform = 'translate3d(' + e.x + 'px,' + e.y + 'px,0)';
     node.style.width = e.w + 'px';
-    node.style.height = e.h + 'px';
+    if (!autoH) node.style.height = e.h + 'px';
+  }
+
+  /* 지금 렌더된 높이를 "읽는다". 계산도 누적도 없다 — 순수 대입용 값. */
+  function measuredH(node){
+    return Math.max(MIN_EL_H, Math.round(node.offsetHeight || 0));
   }
 
   function srcOf(e, as){
@@ -8044,7 +8052,7 @@ async function renderCoach(force){
 
   /* 모델 → DOM. 새 것만 만들고, 있던 건 속성만 갱신하고, 사라진 것만 지운다. */
   function patchNode(n, e, as){
-    place(n, e);
+    place(n, e, n._type === 'text' && _act === e.id);
     n.style.zIndex = String(e.z || 1);
     if (n._type === 'text') {
       var t = n._body;
@@ -8118,6 +8126,12 @@ async function renderCoach(force){
       t.style.webkitUserSelect = 'text';
       t.style.cursor = 'text';
       t.contentEditable = 'true';
+      /* 높이 주도권을 CSS에 넘긴다. min-height는 들어올 때 값으로 한 번만 박는다 —
+         e.h를 계속 다시 읽으면 그게 곧 누적이다. */
+      n.style.height = 'auto';
+      n.style.minHeight = e.h + 'px';
+      t.style.height = 'auto';
+      t.style.overflow = 'visible';
       t.focus();                                  /* ← 예전에 이게 없어서 입력이 안 됐다 */
       caretAt(t, ev);
     }
@@ -8146,7 +8160,7 @@ async function renderCoach(force){
 
   function deactivate(){
     if (!_act) return;
-    var n = _nodes[_act], e = elOf(board(), _act);
+    var b = board(), n = _nodes[_act], e = elOf(b, _act);
     if (n) {
       n._body.style.pointerEvents = 'none';
       if (n._type === 'text') {
@@ -8156,6 +8170,16 @@ async function renderCoach(force){
         t.style.webkitUserSelect = 'none';
         t.style.cursor = 'default';
         if (t.blur) t.blur();
+        /* 최종 높이는 여기서 딱 한 번 "대입"한다 (누적 아님) */
+        var h = measuredH(n);
+        n.style.minHeight = '';
+        t.style.height = '100%';
+        t.style.overflow = 'hidden';
+        if (e && e.h !== h) { e.h = h; save(b); }
+        if (e) {
+          place(n, e);
+          if (_selBox && _sel === e.id) place(_selBox, e);
+        }
       }
     }
     _act = null;
@@ -8311,10 +8335,14 @@ async function renderCoach(force){
     var b = board(), e = elOf(b, id);
     if (!e) return;
     e.content = ev.target.innerText != null ? ev.target.innerText : ev.target.textContent;
-    e.h = Math.max(MIN_EL_H, ev.target.scrollHeight + 8);
     var node = _nodes[id];
-    if (node) place(node, e);                     /* 글이 길어지면 상자도 같이 */
-    if (_selBox && _sel === id) place(_selBox, e);
+    if (node) {
+      /* ⚠ 높이를 계산하지 않는다. CSS가 잡아놓은 결과를 읽어서 대입만 한다.
+         scrollHeight에 여백을 더해 되쓰던 옛 코드는 한 글자마다 8px씩 자랐다. */
+      e.h = measuredH(node);
+      place(node, e, true);                       /* 높이는 CSS 몫 — 안 건드린다 */
+      if (_selBox && _sel === id) place(_selBox, e);
+    }
     saveSoon(b);
   }
 
@@ -8323,9 +8351,8 @@ async function renderCoach(force){
     var b = board(), e = elOf(b, id);
     if (!e) return;
     e.content = el.innerText != null ? el.innerText : el.textContent;
-    e.h = Math.max(MIN_EL_H, (el.scrollHeight || 0) + 8);
     var n = _nodes[id];
-    if (n) place(n, e);
+    if (n) { e.h = measuredH(n); place(n, e, _act === id); }
     saveSoon(b);
   };
 
