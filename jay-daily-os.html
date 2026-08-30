@@ -7812,17 +7812,22 @@ async function renderCoach(force){
   var MAX_EDGE = 1600;                /* 리사이즈 목표 긴 변 */
   var FS = [14, 20, 32, 56];          /* 글자 크기 4단계 */
   var MIN_H = 520;
+  var HANDLE = 16;                    /* 우하단 리사이즈 모서리 판정 크기 */
+  var MIN_W = 60, MIN_EL_H = 40;
+  var DBL_MS = 400;                   /* 두 번째 탭을 더블로 볼 시간 */
 
   function readJ(k, d){ try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch(e){ return d; } }
   function writeJ(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){ console.warn('[vb] 저장 실패', e); } }
 
   function board(){ return readJ(BOARD_KEY, { v: 1, h: MIN_H, els: [] }); }
   function assets(){ return readJ(ASSET_KEY, {}); }
+  function elOf(b, id){ return b.els.filter(function(x){ return x.id === id; })[0]; }
 
   /* ── 편집 중 병합 제외 ─────────────────────────────────────────────────
      _applySyncData가 돌아도 편집 중인 보드는 원격 값으로 덮이지 않는다.
      편집이 끝나면 다음 풀부터 정상 병합된다. */
   var _editing = false;
+
   function guardMerge(){
     ['_applySyncData', '_restoreJayData'].forEach(function(name){
       if (typeof window[name] !== 'function' || window[name]._vbGuarded) return;
@@ -7847,15 +7852,14 @@ async function renderCoach(force){
   document.addEventListener('DOMContentLoaded', guardMerge);
 
   var _saveTimer = null;
-  function save(b){
-    writeJ(BOARD_KEY, b);
-  }
+  function save(b){ writeJ(BOARD_KEY, b); }
   function saveSoon(b){
     _editing = true;
     if (_saveTimer) clearTimeout(_saveTimer);
     _saveTimer = setTimeout(function(){
       save(b);
-      _editing = false;      /* 저장이 끝나야 병합을 다시 허용한다 */
+      /* 텍스트를 편집 중이면 아직 병합을 열면 안 된다 */
+      if (!_act) _editing = false;
       _saveTimer = null;
     }, 600);
   }
@@ -7893,7 +7897,6 @@ async function renderCoach(force){
           cv.width = Math.round(w * scale); cv.height = Math.round(h * scale);
           cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
           out = cv.toDataURL('image/jpeg', q);
-          /* 그래도 크면 품질을 단계적으로 낮춘다 */
           while (bytesOf(out) > MAX_ASSET_BYTES && q > 0.4) {
             q -= 0.15;
             out = cv.toDataURL('image/jpeg', q);
@@ -7908,20 +7911,18 @@ async function renderCoach(force){
     fr.readAsDataURL(file);
   }
 
-  /* ── 요소 만들기 ──────────────────────────────────────────────────── */
+  /* ── 요소 추가 ────────────────────────────────────────────────────── */
   function nextZ(b){ return b.els.reduce(function(m, e){ return Math.max(m, e.z || 1); }, 0) + 1; }
   function uid(){ return 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
   function addText(x, y){
-    var b = board();
-    b.els.push({ id: uid(), type: 'text', x: x, y: y, w: 280, h: 60,
+    var b = board(), id = uid();
+    b.els.push({ id: id, type: 'text', x: x, y: y, w: 280, h: 60,
                  fs: 1, color: 'var(--text)', bold: false, z: nextZ(b), content: '' });
-    save(b); render(); setTimeout(function(){ focusLast(); }, 0);
-  }
-  function focusLast(){
-    var nodes = document.querySelectorAll('#vbCanvas .vb-text');
-    var n = nodes[nodes.length - 1];
-    if (n) { n.focus(); _sel = n.parentNode.dataset.id; render(); }
+    save(b);
+    sync();
+    select(id);
+    activate(id);            /* 새 글은 바로 쓸 수 있어야 한다 */
   }
 
   window._vbAddImage = function(){
@@ -7938,7 +7939,7 @@ async function renderCoach(force){
         var ratio = (w && h) ? h / w : 0.66;
         b.els.push({ id: uid(), type: 'image', x: 40, y: 40, w: 320, h: Math.round(320 * ratio),
                      z: nextZ(b), content: 'asset:' + aid });
-        save(b); render();
+        save(b); sync();
         if (typeof showToast === 'function')
           showToast('이미지 추가됨 (' + Math.round(size / 1024) + 'KB)');
       });
@@ -7951,7 +7952,7 @@ async function renderCoach(force){
     if (!u || !/^https?:\/\//.test(u.trim())) return;
     var b = board();
     b.els.push({ id: uid(), type: 'image', x: 40, y: 40, w: 320, h: 210, z: nextZ(b), content: u.trim() });
-    save(b); render();
+    save(b); sync();
   };
 
   window._vbAddYT = function(){
@@ -7961,79 +7962,359 @@ async function renderCoach(force){
     if (!m) { if (typeof showToast === 'function') showToast('유튜브 링크를 못 읽었어'); return; }
     var b = board();
     b.els.push({ id: uid(), type: 'yt', x: 40, y: 40, w: 400, h: 225, z: nextZ(b), content: m[1] });
-    save(b); render();
+    save(b); sync();
   };
 
-  /* ── 선택·편집 ────────────────────────────────────────────────────── */
-  var _sel = null;
+  /* ── 층·노드 ──────────────────────────────────────────────────────── */
+  var ACC = (typeof CO_C1 === 'string') ? CO_C1 : 'var(--accent)';
 
-  window._vbSel = function(id, ev){ if (ev) ev.stopPropagation(); _sel = id; render(); };
+  var _host = null, _canvas = null, _layer = null, _selBox = null, _handle = null, _tools = null;
+  var _tbText = null, _tbCommon = null, _fsBtns = [], _boldBtn = null;
+  var _nodes = {};        /* id → 래퍼 div. 한 번 만들면 삭제될 때까지 그대로 */
+  var _sel = null;        /* 선택된 id */
+  var _act = null;        /* 활성(편집·재생)된 id */
+  var _drag = null;
+  var _moved = false;
+  var _blankHadSel = false;   /* 빈 곳을 누를 때 선택이 있었나 — pointerup이 판단에 쓴다 */
+  var _lastTapId = null, _lastTapAt = 0;   /* 더블탭을 우리가 직접 센다 */
+
+  /* 화면 좌표 → 캔버스 로컬 좌표. 이 함수 하나만 쓴다.
+     요소는 패딩 박스 기준이라 테두리(clientLeft/Top)를 뺀다.
+     스크롤은 getBoundingClientRect가 이미 반영하므로 따로 더하지 않는다. */
+  function toLocal(ev){
+    var r = _canvas.getBoundingClientRect();
+    return { x: ev.clientX - r.left - (_canvas.clientLeft || 0),
+             y: ev.clientY - r.top - (_canvas.clientTop || 0) };
+  }
+
+  function place(node, e){
+    node.style.transform = 'translate3d(' + e.x + 'px,' + e.y + 'px,0)';
+    node.style.width = e.w + 'px';
+    node.style.height = e.h + 'px';
+  }
+
+  function srcOf(e, as){
+    return /^asset:/.test(e.content) ? (as[e.content.slice(6)] || '') : e.content;
+  }
+
+  /* 요소 노드를 딱 한 번 만든다. iframe.src도 여기서 한 번만 쓴다. */
+  function buildNode(e, as){
+    var n = document.createElement('div');
+    n.dataset.id = e.id;
+    n.dataset.type = e.type;
+    /* left/top은 0으로 두고 위치는 transform이 맡는다 — 리플로우 없이 움직인다.
+       ⚠ 래퍼는 포인터를 받고(touch-action:none), 본체(iframe/img/글)는 안 받는다.
+         · 래퍼가 받아야 터치에서 세로로 끌 때 페이지 스크롤에 뺏기지 않는다
+           (캔버스는 pan-y라 빈 곳 터치는 여전히 스크롤된다 — 둘 다 산다).
+         · 본체가 안 받아야 iframe이 드래그를 훔쳐 유튜브 탭으로 안 튄다.
+       이벤트는 그대로 캔버스 루트까지 버블하므로 위임 처리는 그대로다. */
+    n.style.cssText = 'position:absolute;left:0;top:0;pointer-events:auto;'
+      + 'touch-action:none;will-change:transform';
+    n._type = e.type;
+
+    var body;
+    if (e.type === 'text') {
+      body = document.createElement('div');
+      body.className = 'vb-text';
+      body.style.cssText = 'width:100%;height:100%;outline:none;overflow:hidden;'
+        + 'white-space:pre-wrap;line-height:1.35;pointer-events:none;user-select:none;'
+        + '-webkit-user-select:none;cursor:default';
+      body.textContent = e.content || '';
+    } else if (e.type === 'image') {
+      body = document.createElement('img');
+      body.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:10px;pointer-events:none';
+      body.setAttribute('alt', '');
+      body.src = srcOf(e, as);
+    } else {
+      body = document.createElement('iframe');
+      /* ⚠ src는 이 한 줄이 전부다. 갱신 경로에서 절대 다시 쓰지 않는다 —
+         다시 쓰면 유튜브를 새로 받아오고, 그게 눈에 보이는 깜빡임이다. */
+      body.src = 'https://www.youtube-nocookie.com/embed/' + e.content
+        + '?rel=0&modestbranding=1&playsinline=1';
+      body.style.cssText = 'width:100%;height:100%;border:0;border-radius:10px;display:block;'
+        + 'pointer-events:none';
+      body.setAttribute('allow', 'encrypted-media');
+      body.setAttribute('allowfullscreen', '');
+      body.setAttribute('loading', 'lazy');
+    }
+    /* 본체는 기본적으로 포인터를 안 받는다. 활성될 때만 auto로 바뀐다 —
+       이 한 줄이 "iframe이 드래그를 훔쳐 유튜브 탭으로 튀는" 문제의 뿌리 처방이다. */
+    body.style.pointerEvents = 'none';
+    n.appendChild(body);
+    n._body = body;
+
+    _layer.appendChild(n);
+    _nodes[e.id] = n;
+    return n;
+  }
+
+  /* 모델 → DOM. 새 것만 만들고, 있던 건 속성만 갱신하고, 사라진 것만 지운다. */
+  function patchNode(n, e, as){
+    place(n, e);
+    n.style.zIndex = String(e.z || 1);
+    if (n._type === 'text') {
+      var t = n._body;
+      t.style.fontSize = FS[e.fs || 0] + 'px';
+      t.style.color = e.color || 'var(--text)';
+      t.style.fontWeight = e.bold ? '800' : '400';
+      var cur = t.textContent == null ? '' : t.textContent;
+      /* 편집 중인 글은 절대 안 건드린다 — 캐럿이 튄다 */
+      if (cur !== (e.content || '') && _act !== e.id) t.textContent = e.content || '';
+    } else if (n._type === 'image') {
+      var s = srcOf(e, as);
+      if (n._body.src !== s) n._body.src = s;
+    }
+    /* 유튜브는 아무것도 안 건드린다 */
+  }
+
+  function dropNode(id){
+    var n = _nodes[id];
+    if (n && n.parentNode) n.parentNode.removeChild(n);
+    delete _nodes[id];
+  }
+
+  function sync(){
+    if (!mount()) return;
+    var b = board(), as = assets(), seen = {};
+    b.els.forEach(function(e){
+      seen[e.id] = 1;
+      var n = _nodes[e.id];
+      if (n && n._type !== e.type) { dropNode(e.id); n = null; }
+      if (!n) n = buildNode(e, as);
+      patchNode(n, e, as);
+    });
+    Object.keys(_nodes).forEach(function(id){ if (!seen[id]) dropNode(id); });
+    if (_sel && !seen[_sel]) _sel = null;
+    if (_act && !seen[_act]) _act = null;
+    _canvas.style.height = (b.h || MIN_H) + 'px';
+    placeSel();
+    syncTools();
+  }
+  window._vbRender = sync;
+
+  /* ── 선택 — 오버레이 한 개를 옮긴다. 요소는 손대지 않는다 ─────────── */
+  function placeSel(){
+    if (!_selBox) return;
+    var e = _sel ? elOf(board(), _sel) : null;
+    if (!e) { _selBox.style.display = 'none'; return; }
+    _selBox.style.display = 'block';
+    place(_selBox, e);
+  }
+
+  function select(id){
+    if (_sel === id) { placeSel(); return; }
+    _sel = id;
+    placeSel();
+    syncTools();
+  }
+  window._vbSel = function(id, ev){ if (ev && ev.stopPropagation) ev.stopPropagation(); select(id); };
+
+  /* ── 활성 — 이 요소 하나만 포인터를 받는다 (재생 / 타이핑) ────────── */
+  function activate(id, ev){
+    if (_act === id) return;
+    deactivate();
+    var e = elOf(board(), id), n = _nodes[id];
+    if (!e || !n || e.type === 'image') return;   /* 이미지는 활성할 게 없다 */
+    _act = id;
+    _editing = true;                              /* 편집 중엔 원격 병합을 잠근다 */
+    n._body.style.pointerEvents = 'auto';
+    if (e.type === 'text') {
+      var t = n._body;
+      t.style.userSelect = 'text';
+      t.style.webkitUserSelect = 'text';
+      t.style.cursor = 'text';
+      t.contentEditable = 'true';
+      t.focus();                                  /* ← 예전에 이게 없어서 입력이 안 됐다 */
+      caretAt(t, ev);
+    }
+    if (_selBox) _selBox.style.borderStyle = 'dashed';
+  }
+
+  /* 누른 그 자리에 캐럿을 놓는다. 안 되면 그냥 맨 끝. */
+  function caretAt(t, ev){
+    var range = null;
+    try {
+      if (ev && document.caretRangeFromPoint) range = document.caretRangeFromPoint(ev.clientX, ev.clientY);
+      else if (ev && document.caretPositionFromPoint) {
+        var p = document.caretPositionFromPoint(ev.clientX, ev.clientY);
+        if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); }
+      }
+      if (!range || !t.contains(range.startContainer)) {
+        range = document.createRange();
+        range.selectNodeContents(t);
+        range.collapse(false);
+      }
+      range.collapse(true);
+      var s = window.getSelection();
+      s.removeAllRanges(); s.addRange(range);
+    } catch (err) { /* 캐럿 배치는 실패해도 입력 자체는 된다 */ }
+  }
+
+  function deactivate(){
+    if (!_act) return;
+    var n = _nodes[_act], e = elOf(board(), _act);
+    if (n) {
+      n._body.style.pointerEvents = 'none';
+      if (n._type === 'text') {
+        var t = n._body;
+        t.contentEditable = 'false';
+        t.style.userSelect = 'none';
+        t.style.webkitUserSelect = 'none';
+        t.style.cursor = 'default';
+        if (t.blur) t.blur();
+      }
+    }
+    _act = null;
+    if (_selBox) _selBox.style.borderStyle = 'solid';
+    if (!_saveTimer) _editing = false;
+    if (e) grow();
+  }
+  window._vbDeactivate = deactivate;
+
+  /* ── 히트 테스트 — 모델에서 찾는다. z 큰 것이 이긴다 ──────────────── */
+  function hit(p){
+    var b = board(), best = null;
+    b.els.forEach(function(e){
+      if (p.x >= e.x && p.x <= e.x + e.w && p.y >= e.y && p.y <= e.y + e.h) {
+        if (!best || (e.z || 1) >= (best.z || 1)) best = e;
+      }
+    });
+    return best;
+  }
+  function onHandle(p){
+    if (!_sel) return false;
+    var e = elOf(board(), _sel);
+    if (!e) return false;
+    return p.x >= e.x + e.w - HANDLE && p.x <= e.x + e.w + 6
+        && p.y >= e.y + e.h - HANDLE && p.y <= e.y + e.h + 6;
+  }
+
+  /* ── 포인터 — 캔버스 루트에서 전부 위임 처리한다 ──────────────────── */
+  function onDown(ev){
+    /* 활성된 요소 위의 클릭은 여기까지 안 온다(그 요소만 pointer-events:auto).
+       여기 왔다는 건 바깥을 눌렀다는 뜻 — 편집을 닫는다. */
+    if (_act) { deactivate(); sync(); }
+
+    /* 새 제스처는 항상 깨끗하게 시작한다. 터치는 드래그 뒤에 click이 안 오는 경우가
+       있어서, 이 두 값을 click에서만 치우면 다음 탭이 통째로 씹힌다. */
+    _moved = false;
+
+    var p = toLocal(ev);
+    var resize = onHandle(p);
+    var e = resize ? elOf(board(), _sel) : hit(p);
+
+    /* 빈 곳 — 여기서 선택을 풀면 안 된다. 풀어버리면 이어지는 click이
+       "선택이 없으니 새 글" 로 오해해서, 한 번 눌렀는데 선택 해제 + 빈 글이
+       같이 생긴다. 판단은 click 한 곳에서만 한다. */
+    if (!e) { _blankHadSel = !!_sel; return; }
+    _blankHadSel = false;
+
+    ev.preventDefault();
+    select(e.id);
+    _moved = false;
+    _editing = true;
+    _drag = { id: e.id, mode: resize ? 'resize' : 'move', sx: p.x, sy: p.y,
+              ox: e.x, oy: e.y, ow: e.w, oh: e.h, b: board(), pid: ev.pointerId };
+    try { if (_canvas.setPointerCapture && ev.pointerId != null) _canvas.setPointerCapture(ev.pointerId); } catch(err){}
+  }
+
+  function onMove(ev){
+    if (!_drag) return;
+    var p = toLocal(ev);
+    var dx = p.x - _drag.sx, dy = p.y - _drag.sy;
+    if (dx || dy) _moved = true;
+    var e = elOf(_drag.b, _drag.id);
+    if (!e) return;
+    if (_drag.mode === 'move') {
+      e.x = Math.max(0, Math.round(_drag.ox + dx));
+      e.y = Math.max(0, Math.round(_drag.oy + dy));
+    } else {
+      e.w = Math.max(MIN_W, Math.round(_drag.ow + dx));
+      e.h = Math.max(MIN_EL_H, Math.round(_drag.oh + dy));
+    }
+    /* 그 요소의 스타일만 직접 건드린다. 재렌더 없음 → iframe 그대로. */
+    var n = _nodes[e.id];
+    if (n) place(n, e);
+    if (_selBox && _sel === e.id) place(_selBox, e);
+  }
+
+  function onUp(ev){
+    if (_drag) {
+      try { if (_canvas.releasePointerCapture && _drag.pid != null) _canvas.releasePointerCapture(_drag.pid); } catch(err){}
+      save(_drag.b);
+      _drag = null;
+      grow();
+      _canvas.style.height = (board().h || MIN_H) + 'px';
+      if (!_saveTimer && !_act) _editing = false;
+    }
+    if (_moved) { _moved = false; return; }      /* 끌었다 — 탭이 아니다 */
+
+    /* ⚠ 탭 판정을 여기서 한다. click/dblclick에 얹으면 안 된다 —
+       터치에서 브라우저가 제스처 판별·더블탭 감지 때문에 click을 통째로 삼킨다.
+       (실측: 드래그 직후 첫 탭은 pointerdown/up만 오고 click이 안 온다.)
+       pointerup은 항상 오고, 사용자 제스처 안이라 iOS에서 focus()도 먹는다. */
+    var p = toLocal(ev);
+    var e = hit(p);
+    var now = Date.now();
+    if (e) {
+      var second = (_lastTapId === e.id) && (now - _lastTapAt < DBL_MS);
+      _lastTapId = e.id; _lastTapAt = now;
+      if (second) activate(e.id, ev);            /* 두 번째 탭 = 활성(재생·타이핑) */
+      return;                                    /* 첫 탭의 선택은 onDown이 이미 했다 */
+    }
+    _lastTapId = null;
+    if (_blankHadSel) { _blankHadSel = false; select(null); return; }
+    addText(Math.round(p.x), Math.round(p.y));
+  }
+
+  /* contenteditable 입력도 캔버스 루트에서 받는다 (input은 버블한다) */
+  function onInput(ev){
+    var n = ev.target && ev.target.parentNode;
+    var id = n && n.dataset && n.dataset.id;
+    if (!id) return;
+    var b = board(), e = elOf(b, id);
+    if (!e) return;
+    e.content = ev.target.innerText != null ? ev.target.innerText : ev.target.textContent;
+    e.h = Math.max(MIN_EL_H, ev.target.scrollHeight + 8);
+    var node = _nodes[id];
+    if (node) place(node, e);                     /* 글이 길어지면 상자도 같이 */
+    if (_selBox && _sel === id) place(_selBox, e);
+    saveSoon(b);
+  }
+
+  /* 밖에서 부르던 옛 이름들 — 그대로 살려둔다 */
+  window._vbText = function(id, el){
+    var b = board(), e = elOf(b, id);
+    if (!e) return;
+    e.content = el.innerText != null ? el.innerText : el.textContent;
+    e.h = Math.max(MIN_EL_H, (el.scrollHeight || 0) + 8);
+    var n = _nodes[id];
+    if (n) place(n, e);
+    saveSoon(b);
+  };
+
   window._vbDel = function(){
     if (!_sel) return;
-    var b = board();
-    var e = b.els.filter(function(x){ return x.id === _sel; })[0];
+    var b = board(), e = elOf(b, _sel);
     b.els = b.els.filter(function(x){ return x.id !== _sel; });
     /* 에셋도 같이 지운다 — 안 지우면 Gist에 고아 이미지가 쌓인다 */
     if (e && e.type === 'image' && /^asset:/.test(e.content)) {
       var as = assets(); delete as[e.content.slice(6)]; writeJ(ASSET_KEY, as);
     }
-    _sel = null; save(b); render();
+    if (_act === _sel) deactivate();
+    _sel = null; save(b); sync();
   };
+
   window._vbStyle = function(what, val){
-    var b = board();
-    var e = b.els.filter(function(x){ return x.id === _sel; })[0];
+    var b = board(), e = elOf(b, _sel);
     if (!e) return;
     if (what === 'fs') e.fs = val;
     if (what === 'color') e.color = val;
     if (what === 'bold') e.bold = !e.bold;
     if (what === 'front') e.z = nextZ(b);
     if (what === 'back') e.z = 0;
-    save(b); render();
+    save(b); sync();
   };
-  window._vbText = function(id, el){
-    var b = board();
-    var e = b.els.filter(function(x){ return x.id === id; })[0];
-    if (!e) return;
-    e.content = el.innerText;
-    e.h = Math.max(40, el.scrollHeight + 8);
-    saveSoon(b);
-  };
-
-  /* ── 드래그·리사이즈 (포인터 이벤트 = 마우스+터치 공용) ───────────── */
-  var _drag = null;
-
-  function onDown(ev, id, mode){
-    ev.preventDefault(); ev.stopPropagation();
-    var b = board();
-    var e = b.els.filter(function(x){ return x.id === id; })[0];
-    if (!e) return;
-    _sel = id; _editing = true;
-    _drag = { id: id, mode: mode, sx: ev.clientX, sy: ev.clientY,
-              ox: e.x, oy: e.y, ow: e.w, oh: e.h, b: b };
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp);
-    render();
-  }
-  function onMove(ev){
-    if (!_drag) return;
-    var dx = ev.clientX - _drag.sx, dy = ev.clientY - _drag.sy;
-    var e = _drag.b.els.filter(function(x){ return x.id === _drag.id; })[0];
-    if (!e) return;
-    if (_drag.mode === 'move') { e.x = Math.max(0, _drag.ox + dx); e.y = Math.max(0, _drag.oy + dy); }
-    else { e.w = Math.max(60, _drag.ow + dx); e.h = Math.max(40, _drag.oh + dy); }
-    var node = document.querySelector('#vbCanvas [data-id="' + _drag.id + '"]');
-    if (node) {
-      node.style.left = e.x + 'px'; node.style.top = e.y + 'px';
-      node.style.width = e.w + 'px'; node.style.height = e.h + 'px';
-    }
-  }
-  function onUp(){
-    document.removeEventListener('pointermove', onMove);
-    document.removeEventListener('pointerup', onUp);
-    if (_drag) { save(_drag.b); _drag = null; grow(); render(); }
-    _editing = false;
-  }
-  window._vbDown = onDown;
 
   /* 아래로 무한 확장 — 가장 아래 요소보다 한 화면 더 준다 */
   function grow(){
@@ -8044,113 +8325,135 @@ async function renderCoach(force){
   }
 
   document.addEventListener('keydown', function(ev){
+    if (ev.key === 'Escape' && _act) { deactivate(); sync(); return; }
     if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+    if (_act) return;                              /* 편집 중이면 글자를 지우는 중이다 */
     if (!_sel) return;
     var t = ev.target;
     if (t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     ev.preventDefault(); _vbDel();
   });
 
-  /* ── 렌더 ──────────────────────────────────────────────────────────── */
-  var esc = (typeof coEsc === 'function') ? coEsc : function(s){
-    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  };
-  var ACC = (typeof CO_C1 === 'string') ? CO_C1 : 'var(--accent)';
-
-  function elHtml(e, as){
-    var selCss = (e.id === _sel) ? 'outline:2px solid ' + ACC + ';outline-offset:2px' : '';
-    var box = 'position:absolute;left:' + e.x + 'px;top:' + e.y + 'px;width:' + e.w + 'px;'
-      + 'height:' + e.h + 'px;z-index:' + (e.z || 1) + ';' + selCss;
-    var handle = (e.id === _sel)
-      ? '<div onpointerdown="_vbDown(event,\'' + e.id + '\',\'resize\')" style="position:absolute;'
-        + 'right:-6px;bottom:-6px;width:14px;height:14px;border-radius:3px;background:' + ACC + ';'
-        + 'cursor:nwse-resize;touch-action:none"></div>'
-      : '';
-    var inner;
-    if (e.type === 'text') {
-      inner = '<div class="vb-text" contenteditable="true" oninput="_vbText(\'' + e.id + '\',this)"'
-        + ' style="width:100%;height:100%;outline:none;overflow:hidden;white-space:pre-wrap;'
-        + 'font-size:' + FS[e.fs || 0] + 'px;line-height:1.35;color:' + (e.color || 'var(--text)') + ';'
-        + 'font-weight:' + (e.bold ? 800 : 400) + '">' + esc(e.content || '') + '</div>';
-    } else if (e.type === 'image') {
-      var src = /^asset:/.test(e.content) ? (as[e.content.slice(6)] || '') : e.content;
-      inner = '<img src="' + esc(src) + '" style="width:100%;height:100%;object-fit:cover;'
-        + 'border-radius:10px;pointer-events:none" alt="">';
-    } else {
-      /* rel=0 추천 최소화 · modestbranding · 자동재생 없음 · 연속재생 없음 */
-      inner = '<iframe src="https://www.youtube-nocookie.com/embed/' + esc(e.content)
-        + '?rel=0&modestbranding=1&playsinline=1" style="width:100%;height:100%;border:0;'
-        + 'border-radius:10px" allow="encrypted-media" allowfullscreen loading="lazy"></iframe>';
-    }
-    /* 유튜브는 본체가 클릭을 먹어야 하므로 이동 손잡이를 위쪽 띠로 준다 */
-    var grip = (e.type === 'yt')
-      ? '<div onpointerdown="_vbDown(event,\'' + e.id + '\',\'move\')" style="position:absolute;'
-        + 'left:0;top:-14px;width:100%;height:14px;cursor:move;touch-action:none;'
-        + 'background:' + (e.id === _sel ? ACC : 'transparent') + ';border-radius:4px"></div>'
-      : '';
-    var moveAttr = (e.type === 'yt') ? ''
-      : ' onpointerdown="_vbDown(event,\'' + e.id + '\',\'move\')"';
-    return '<div data-id="' + e.id + '" onclick="_vbSel(\'' + e.id + '\',event)"' + moveAttr
-      + ' style="' + box + ';touch-action:none">' + grip + inner + handle + '</div>';
-  }
-
-  function toolbar(){
-    var b = board();
-    var e = b.els.filter(function(x){ return x.id === _sel; })[0];
-    var btn = function(on, label, extra){
-      return '<button onclick="' + on + '" style="border:1px solid var(--border2);background:var(--surface);'
-        + 'color:var(--text2);font-size:11px;padding:4px 9px;border-radius:7px;cursor:pointer;'
-        + 'font-family:inherit;' + (extra || '') + '">' + label + '</button>';
-    };
-    var left = btn('_vbAddImage()', '🖼 이미지') + btn('_vbAddImageUrl()', '🔗 URL')
-             + btn('_vbAddYT()', '▶ 유튜브');
-    var right = '';
-    if (e) {
-      if (e.type === 'text') {
-        right += [0,1,2,3].map(function(i){
-          return btn('_vbStyle(\'fs\',' + i + ')', 'A',
-            'font-size:' + (10 + i * 3) + 'px;' + (e.fs === i ? 'border-color:' + ACC : ''));
-        }).join('');
-        right += btn('_vbStyle(\'bold\')', 'B', 'font-weight:800;' + (e.bold ? 'border-color:' + ACC : ''));
-        ['var(--text)', ACC, 'var(--green)', 'var(--yellow)', 'var(--red)'].forEach(function(c){
-          right += '<button onclick="_vbStyle(\'color\',\'' + c + '\')" style="width:18px;height:18px;'
-            + 'border-radius:50%;border:1px solid var(--border2);background:' + c + ';cursor:pointer;'
-            + 'padding:0;margin:0 1px"></button>';
-        });
-      }
-      right += btn('_vbStyle(\'front\')', '앞으로') + btn('_vbStyle(\'back\')', '뒤로')
-             + btn('_vbDel()', '삭제', 'color:var(--red)');
-    }
-    return '<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
-      + left + '<span style="flex:1"></span>' + right + '</div>';
-  }
-
-  function render(){
+  /* ── 뼈대 — 한 번만 세운다 ────────────────────────────────────────── */
+  function mount(){
     var host = document.getElementById('vbHost');
-    if (!host) return;
-    var b = board(), as = assets();
-    var els = b.els.slice().sort(function(x, y){ return (x.z || 1) - (y.z || 1); });
-    host.innerHTML = toolbar()
-      + '<div id="vbCanvas" onclick="_vbBlank(event)" style="position:relative;width:100%;'
-      + 'height:' + (b.h || MIN_H) + 'px;background:var(--surface2);border:1.5px solid var(--border2);'
-      + 'border-radius:12px;overflow:hidden;touch-action:pan-y">'
-      + els.map(function(e){ return elHtml(e, as); }).join('')
-      + '</div>'
-      + '<div style="font-size:10px;color:var(--muted);margin-top:6px">'
-      + '빈 곳을 누르면 글을 쓴다 · 모서리를 끌어 크기 조절 · Delete로 삭제</div>';
-  }
-  window._vbRender = render;
+    if (!host) return null;
+    if (host === _host && _canvas && _canvas.parentNode === host) return host;
 
-  window._vbBlank = function(ev){
-    if (ev.target.id !== 'vbCanvas') return;
-    var r = ev.target.getBoundingClientRect();
-    if (_sel) { _sel = null; render(); return; }
-    addText(Math.round(ev.clientX - r.left), Math.round(ev.clientY - r.top));
-  };
+    _host = host; _nodes = {};
+    host.innerHTML = '';
+
+    /* ⚠ 툴바 높이는 고정이다. 선택에 따라 버튼이 늘고 줄바꿈되면 툴바가 한 줄
+       커지면서 아래 캔버스가 통째로 밀린다 — 그게 "클릭할 때마다 화면이 튄다"였다. */
+    _tools = document.createElement('div');
+    _tools.style.cssText = 'display:flex;gap:5px;align-items:center;flex-wrap:nowrap;'
+      + 'height:30px;overflow-x:auto;overflow-y:hidden;margin-bottom:8px';
+    host.appendChild(_tools);
+    buildTools();
+
+    _canvas = document.createElement('div');
+    _canvas.id = 'vbCanvas';
+    _canvas.style.cssText = 'position:relative;width:100%;height:' + (board().h || MIN_H) + 'px;'
+      + 'background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;'
+      + 'overflow:hidden;touch-action:pan-y;cursor:default';
+    host.appendChild(_canvas);
+
+    /* 요소 층 — 통째로 pointer-events:none. iframe이 포인터를 훔칠 길이 없다. */
+    _layer = document.createElement('div');
+    _layer.id = 'vbLayer';
+    _layer.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none';
+    _canvas.appendChild(_layer);
+
+    /* 선택 오버레이 — 딱 하나. 선택된 요소 위로 옮겨 다닌다. */
+    _selBox = document.createElement('div');
+    _selBox.id = 'vbSel';
+    _selBox.style.cssText = 'position:absolute;left:0;top:0;display:none;pointer-events:none;'
+      + 'border:2px solid ' + ACC + ';border-radius:4px;box-sizing:border-box;'
+      + 'z-index:2147483000;will-change:transform';
+    _handle = document.createElement('div');
+    _handle.style.cssText = 'position:absolute;right:-7px;bottom:-7px;width:12px;height:12px;'
+      + 'border-radius:3px;background:' + ACC + ';pointer-events:none';
+    _selBox.appendChild(_handle);
+    _canvas.appendChild(_selBox);
+
+    /* 포인터·입력은 전부 이 한 곳에서 받는다 */
+    _canvas.addEventListener('pointerdown', onDown);
+    _canvas.addEventListener('pointermove', onMove);
+    _canvas.addEventListener('pointerup', onUp);
+    _canvas.addEventListener('pointercancel', onUp);
+    _canvas.addEventListener('input', onInput);
+
+    var hint = document.createElement('div');
+    hint.style.cssText = 'font-size:10px;color:var(--muted);margin-top:6px';
+    hint.textContent = '빈 곳을 누르면 글을 쓴다 · 한 번 눌러 선택하고 끌면 이동 · '
+      + '두 번 누르면 글을 쓰거나 영상이 재생된다 (Esc로 빠져나옴) · '
+      + '우하단 모서리로 크기 조절 · Delete로 삭제';
+    host.appendChild(hint);
+    return host;
+  }
+
+  /* ── 툴바 — 한 번만 짓고 묶음만 보였다 감췄다 한다 ────────────────── */
+  function tbBtn(label, fn, extra){
+    var b = document.createElement('button');
+    b.textContent = label;
+    b.style.cssText = 'border:1px solid var(--border2);background:var(--surface);color:var(--text2);'
+      + 'font-size:11px;padding:4px 9px;border-radius:7px;cursor:pointer;font-family:inherit;'
+      + 'flex:0 0 auto;white-space:nowrap;' + (extra || '');
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function buildTools(){
+    _tools.innerHTML = '';
+    _tools.appendChild(tbBtn('🖼 이미지', function(){ window._vbAddImage(); }));
+    _tools.appendChild(tbBtn('🔗 URL', function(){ window._vbAddImageUrl(); }));
+    _tools.appendChild(tbBtn('▶ 유튜브', function(){ window._vbAddYT(); }));
+
+    var sp = document.createElement('span');
+    sp.style.cssText = 'flex:1 0 8px';
+    _tools.appendChild(sp);
+
+    _tbText = document.createElement('span');
+    _tbText.style.cssText = 'display:none;gap:4px;align-items:center;flex:0 0 auto';
+    _fsBtns = [0, 1, 2, 3].map(function(i){
+      var b = tbBtn('A', function(){ window._vbStyle('fs', i); }, 'font-size:' + (10 + i * 3) + 'px');
+      _tbText.appendChild(b);
+      return b;
+    });
+    _boldBtn = tbBtn('B', function(){ window._vbStyle('bold'); }, 'font-weight:800');
+    _tbText.appendChild(_boldBtn);
+    ['var(--text)', ACC, 'var(--green)', 'var(--yellow)', 'var(--red)'].forEach(function(c){
+      var b = document.createElement('button');
+      b.style.cssText = 'width:18px;height:18px;border-radius:50%;border:1px solid var(--border2);'
+        + 'background:' + c + ';cursor:pointer;padding:0;margin:0 1px;flex:0 0 auto';
+      b.addEventListener('click', function(){ window._vbStyle('color', c); });
+      _tbText.appendChild(b);
+    });
+    _tools.appendChild(_tbText);
+
+    _tbCommon = document.createElement('span');
+    _tbCommon.style.cssText = 'display:none;gap:4px;align-items:center;flex:0 0 auto;margin-left:5px';
+    _tbCommon.appendChild(tbBtn('앞으로', function(){ window._vbStyle('front'); }));
+    _tbCommon.appendChild(tbBtn('뒤로', function(){ window._vbStyle('back'); }));
+    _tbCommon.appendChild(tbBtn('삭제', function(){ window._vbDel(); }, 'color:var(--red)'));
+    _tools.appendChild(_tbCommon);
+  }
+
+  function syncTools(){
+    if (!_tools || !_tbCommon) return;
+    var e = elOf(board(), _sel);
+    _tbCommon.style.display = e ? 'inline-flex' : 'none';
+    _tbText.style.display = (e && e.type === 'text') ? 'inline-flex' : 'none';
+    if (e && e.type === 'text') {
+      _fsBtns.forEach(function(b, i){ b.style.borderColor = (e.fs === i) ? ACC : 'var(--border2)'; });
+      _boldBtn.style.borderColor = e.bold ? ACC : 'var(--border2)';
+    }
+  }
 
   /* 동기부여 탭이 이 함수를 찾으면 자리 표시자 대신 캔버스를 그린다 */
   window._renderVisionBoard = function(){
-    setTimeout(render, 0);
+    _host = null;                 /* 탭이 새 껍데기를 주므로 뼈대부터 다시 세운다 */
+    setTimeout(sync, 0);
     return '<div style="background:var(--surface);border:1.5px solid var(--border2);border-radius:14px;'
       + 'padding:16px 18px;margin-bottom:14px">'
       + '<div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:10px">비전 보드</div>'
