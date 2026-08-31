@@ -5736,6 +5736,14 @@ window.addEventListener('beforeunload', () => {
   /* ── 사진 저장소 (Supabase private 버킷) ───────────────────────────────
      경로만 저장돼 있으므로 볼 때마다 서명 URL 을 받는다 (머리말 참고). */
   var SB_KEY = 'jay_diarySupabase';
+  /* JWT 가운데 조각만 열어 본다. 검증이 아니라 **오입력 방지**용이다 —
+     service_role 키가 브라우저에 들어오는 걸 그 자리에서 잡는다. */
+  function atobSafe(t){
+    try {
+      var p = String(t).split('.')[1] || '';
+      return atob(p.replace(/-/g, '+').replace(/_/g, '/'));
+    } catch (e) { return ''; }
+  }
   function sb(){
     try {
       var c = JSON.parse(localStorage.getItem(SB_KEY) || 'null');
@@ -5747,6 +5755,12 @@ window.addEventListener('beforeunload', () => {
     return null;
   }
   window._dySetStore = function (url, anon, bucket){
+    /* ⚠ service_role 키는 절대 저장하지 않는다. 브라우저에 있으면 버킷 전체가
+       열리는 것과 같다 — 그러면 private 버킷을 쓴 의미가 없다. */
+    if (/"role"\s*:\s*"service_role"/.test(atobSafe(anon))) {
+      console.error('[일기] service_role 키는 저장하지 않는다. anon 키를 써라.');
+      return null;
+    }
     localStorage.setItem(SB_KEY, JSON.stringify({ url: url, anon: anon,
                                                   bucket: bucket || 'diary-photos' }));
     _signed = {};
@@ -6031,13 +6045,40 @@ window.addEventListener('beforeunload', () => {
       if (pick.getAttribute('data-off')) {
         var bar = document.getElementById('dyBar');
         var old2 = document.getElementById('dyNotice');
-        if (old2) old2.remove();
+        if (old2) { old2.remove(); return; }        /* 두 번 누르면 접는다 */
         var n = document.createElement('div');
         n.id = 'dyNotice';
-        n.textContent = '사진 저장소가 아직 연결되지 않았어 — 글은 그대로 담긴다.';
+        /* 콘솔을 열게 하지 않는다 — 여기서 바로 연결한다.
+           ⚠ anon 키만 받는다. service_role 키는 봇 전용이고 브라우저에 오면 안 된다. */
+        n.innerHTML = '사진 저장소가 아직 연결되지 않았어 — 글은 그대로 담긴다.'
+          + '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px;'
+          + 'max-width:420px">'
+          + '<input id="dySbUrl" placeholder="https://xxxx.supabase.co" '
+          + 'style="border:1px solid var(--border2);border-radius:8px;padding:6px 9px;'
+          + 'font-size:11px;font-family:inherit;background:var(--surface);color:var(--text)">'
+          + '<input id="dySbAnon" placeholder="anon 키 (service_role 아님)" '
+          + 'style="border:1px solid var(--border2);border-radius:8px;padding:6px 9px;'
+          + 'font-size:11px;font-family:inherit;background:var(--surface);color:var(--text)">'
+          + '<div style="display:flex;gap:6px;align-items:center">'
+          + '<button id="dySbSave" style="padding:5px 14px;border-radius:999px;border:none;'
+          + 'background:var(--accent);color:#fff;font-size:11px;font-weight:700;'
+          + 'cursor:pointer;font-family:inherit">연결</button>'
+          + '<span id="dySbMsg" style="font-size:10px;color:var(--muted)">버킷 diary-photos</span>'
+          + '</div></div>';
         bar.parentNode.insertBefore(n, bar.nextSibling);
-        if (typeof showToast === 'function')
-          showToast('📔 사진 저장소가 아직 연결되지 않았어');
+        var go = document.getElementById('dySbSave');
+        go.addEventListener('click', function(){
+          var u = (document.getElementById('dySbUrl').value || '').trim();
+          var k = (document.getElementById('dySbAnon').value || '').trim();
+          var msg = document.getElementById('dySbMsg');
+          if (!u || !k) { msg.textContent = '둘 다 필요해'; return; }
+          if (/service_role/.test(k) || /"role":"service_role"/.test(atobSafe(k))) {
+            msg.textContent = '⚠ service_role 키다 — anon 키를 넣어야 해';
+            return;
+          }
+          window._dySetStore(u, k, 'diary-photos');
+          if (typeof showToast === 'function') showToast('📔 사진 저장소 연결됨');
+        });
         return;
       }
       file.click();
