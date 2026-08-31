@@ -7177,16 +7177,40 @@ window.addEventListener('beforeunload', () => {
       if (!t) return;
       var g = blockGeom(b);
       var cur = { at: hhmm(b.from), from: b.from, right: g.right ? 1 : 0, order: i };
-      /* 같은 문구가 여러 번 배정됐으면 가장 이른 것을 대표로 */
-      if (!m[t] || cur.from < m[t].from) m[t] = cur;
+      /* 같은 문구가 여러 칸에 잡혔으면 **가장 이른 것을 대표**로 세우고,
+         나머지는 세어 둔다 (뱃지 "12:00 +2", 정렬은 첫 시각 기준). */
+      if (!m[t]) { m[t] = cur; m[t].all = [b.from]; }
+      else {
+        m[t].all.push(b.from);
+        if (cur.from < m[t].from) {
+          var all = m[t].all;
+          m[t] = cur; m[t].all = all;
+        }
+      }
+    });
+    Object.keys(m).forEach(function(k){
+      m[k].all.sort(function(a, b2){ return a - b2; });
+      m[k].n = m[k].all.length;
     });
     return m;
   }
   /* { 문구: "HH:MM" } — 뱃지·칩이 쓰는 얇은 형태 */
   function assignedMap(){
     var r = {}, x = assignedRich();
-    Object.keys(x).forEach(function(k){ r[k] = x[k].at; });
+    Object.keys(x).forEach(function(k){
+      /* 여러 칸이면 가장 이른 시각 + 나머지 개수. 범위("12:00~15:00")로 쓰면
+         중간이 비어 있어도 이어진 것처럼 읽힌다 — 떨어진 시간대가 기본이라 틀리다. */
+      r[k] = x[k].n > 1 ? (x[k].at + ' +' + (x[k].n - 1)) : x[k].at;
+    });
     return r;
+  }
+  /* 뱃지에 붙일 전체 시각 목록 (호버) */
+  function assignedTitle(k){
+    var x = assignedRich()[k];
+    if (!x) return '';
+    return x.n > 1
+      ? '타임박스 ' + x.n + '칸 — ' + x.all.map(hhmm).join(', ')
+      : '타임박스 ' + x.at + ' 에 배정됨';
   }
   window._tbAssigned = assignedMap;
   window._tbAssignedRich = assignedRich;
@@ -7287,26 +7311,37 @@ window.addEventListener('beforeunload', () => {
     /* 보고 있는 날짜의 할 일만 칩으로. 내일(▶)을 보면 내일로 미룬 것들이
        미배정 상태로 여기 다시 나타난다 — 오늘 미배정과 같은 취급이다. */
     var want = whenForDate();
-    var open = !want ? [] : ((day && day.tasks) || []).filter(function(t){
-      var w = t.when || 'today';
-      return !t.done && w === want && !done[String(t.text || '').trim()];
+    /* 배정된 것도 **남긴다** — 한 번 더 누르면 다른 칸에 하나 더 잡힌다.
+       미배정을 앞에, 배정된 건 뒤에 흐리게. */
+    var all = !want ? [] : ((day && day.tasks) || []).filter(function(t){
+      return !t.done && (t.when || 'today') === want;
     });
+    var open = all.filter(function(t){ return !done[String(t.text || '').trim()]; })
+      .concat(all.filter(function(t){ return !!done[String(t.text || '').trim()]; }));
     /* 배정이 끝나면 이 줄은 할 일이 없다 — 안내문도 같이 접는다.
        왼쪽 "할 일" 목록이 이미 전체를 보여주므로 여기 빈 문구를 남길 이유가 없다. */
     if (!open.length) { _chips.innerHTML = ''; return; }
     _chips.innerHTML =
       '<div style="width:100%;font-size:11px;color:var(--muted);margin-bottom:2px">'
       + (_armed ? '칸을 누르면 <b style="color:' + ACC + '">' + esc(_armed) + '</b> 배정'
-                : '할 일을 누르고 칸을 누르면 배정돼')
+                : '할 일을 누르고 칸을 누르면 배정돼 · 이미 잡은 것도 다시 누르면 한 칸 더')
       + '</div>'
-      + open.slice(0, 12).map(function(t){
+      + open.slice(0, 14).map(function(t){
           var on = _armed === t.text;
+          var at = done[String(t.text || '').trim()];      /* 이미 배정됨 */
           return '<button onclick="_tbArm(this.dataset.t)" data-t="' + esc(t.text) + '"'
+            + ' class="tb-chip' + (at ? ' tb-chip-set' : '') + '"'
+            + ' title="' + esc(at ? assignedTitle(String(t.text || '').trim())
+                                    + ' — 한 번 더 누르면 다른 칸에도 잡는다'
+                                  : '누르고 칸을 누르면 배정돼') + '"'
             + ' style="border:1px solid ' + (on ? ACC : 'var(--border2)') + ';'
             + 'background:' + (on ? 'var(--accent-dim)' : 'var(--surface)') + ';'
             + 'color:' + (on ? ACC : 'var(--text2)') + ';font-size:11px;padding:6px 9px;'
             + 'border-radius:999px;cursor:pointer;font-family:inherit;min-height:34px;'
-            + 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+            + 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+            + (at && !on ? ';opacity:.55' : '') + '">'
+            + (at ? '<span style="font-family:JetBrains Mono,monospace;font-size:9px;'
+                    + 'color:' + ACC + ';margin-right:5px">' + esc(at) + '</span>' : '')
             + esc(t.text.slice(0, 22)) + '</button>';
         }).join('');
   }
@@ -7574,7 +7609,10 @@ window.addEventListener('beforeunload', () => {
     _armed = null;
     draw();
     if (!wasArmed) edit(nb2.id);            /* 빈 칸이면 바로 입력 */
-    else toast('배정했어 — ' + hhmm(nb2.from));
+    else {
+      var _n = (assignedRich()[String(nb2.text || '').trim()] || {}).n || 1;
+      toast('배정했어 — ' + hhmm(nb2.from) + (_n > 1 ? ' (' + _n + '칸째)' : ''));
+    }
   }
 
   /* 블록 안에서 바로 고친다. focus 는 이 제스처 안에서 부른다(모바일 키보드) */
@@ -7682,7 +7720,7 @@ window.addEventListener('beforeunload', () => {
       var tag = document.createElement('span');
       tag.className = 'tb-when';
       tag.textContent = map[hit];
-      tag.title = '타임박스 ' + map[hit] + ' 에 배정됨';
+      tag.title = assignedTitle(hit);
       tag.style.cssText = 'flex-shrink:0;font-size:10px;font-weight:700;color:' + ACC + ';'
         + 'background:var(--accent-dim);border-radius:5px;padding:1px 6px;margin-left:6px;'
         + 'font-family:JetBrains Mono,monospace';
