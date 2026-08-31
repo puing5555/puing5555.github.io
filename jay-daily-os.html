@@ -6997,6 +6997,10 @@ window.addEventListener('beforeunload', () => {
     +   'transition:text-decoration-color 220ms ease,color 220ms ease}'
     + '.tb-block.tb-done{opacity:.55}'
     + '.tb-block.tb-done .tb-label{text-decoration-color:var(--text2)}'
+      /* 이월 — 비워진 채로 남는다. 점선 + 더 옅게. */
+    + '.tb-block.tb-defer{opacity:.4;border-style:dashed !important;'
+    +   'background:transparent !important}'
+    + '.tb-block.tb-defer .tb-label{text-decoration-color:var(--text2)}'
     + '.tb-block.tb-done .tb-label{color:var(--text2)}';
     document.head.appendChild(st);
   }
@@ -7164,6 +7168,8 @@ window.addEventListener('beforeunload', () => {
 
   /* 오늘 이미 배정된 할 일 → { 문구: {at,from,right,order} }.
      정렬에 시각(from)과 좌/우(right)가 필요해서 문자열만으론 부족하다. */
+  /* 배정 지도 — 이월된 것도 그대로 담는다. 오늘 목록엔 없지만 블록은 남아 있고,
+     그 블록에 뱃지·정렬이 붙어야 하기 때문이다. */
   function assignedRich(){
     var m = {};
     blocks().forEach(function(b, i){
@@ -7206,6 +7212,18 @@ window.addEventListener('beforeunload', () => {
     if (i < 0) return false;
     return !!((getDay().tasks || [])[i] || {}).done;
   }
+  /* 오늘 목록에서 빠졌나 (내일·이번주·나중에로 넘어감). 완료와는 다른 상태다. */
+  function isDeferred(txt){
+    var i = taskIndexOf(txt);
+    if (i < 0) return false;
+    var t = (getDay().tasks || [])[i] || {};
+    return !t.done && !!t.when && t.when !== 'today';
+  }
+  function whenOf(txt){
+    var i = taskIndexOf(txt);
+    return i < 0 ? null : ((getDay().tasks || [])[i] || {}).when || 'today';
+  }
+  window._tbIsDeferred = isDeferred;
   /* 블록에서 완료를 토글한다. 앱의 toggleTask 를 그대로 쓴다 —
      저장·목록 갱신·타임라인 재렌더가 전부 그 경로에 물려 있다. */
   function toggleByText(txt){
@@ -7220,6 +7238,41 @@ window.addEventListener('beforeunload', () => {
   }
   window._tbIsDone = isDone;
   window._tbToggleDone = toggleByText;
+
+  var WHEN_KR = { tomorrow: '내일', week: '이번주', later: '나중에', today: '오늘' };
+
+  /* 이월된 블록을 내일 같은 시각에 하나 만들어 둔다 (d).
+     다시 배정하기 번거로우니 시각을 이어주되, **내일 그 칸이 이미 차 있으면
+     만들지 않는다** — 겹쳐 그리면 둘 다 못 읽는다. 그 경우 미배정으로 남는다.
+     moved 표식으로 한 번만 옮긴다 (되돌렸다가 다시 미뤄도 두 번 안 생긴다). */
+  function carryBlocks(){
+    var all = readAll();
+    var list = all.days[_date] || [];
+    var moved = 0;
+    list.forEach(function(b){
+      if (!b.task || b.moved) return;
+      if (!isDeferred(b.text)) return;
+      var tgt = shiftDay(_date, 1);
+      var dst = all.days[tgt] || (all.days[tgt] = []);
+      var hit = dst.some(function(x){
+        return x.from < b.from + b.dur && b.from < x.from + x.dur;   /* 겹침 */
+      });
+      b.moved = tgt;
+      if (hit) { b.movedFree = false; moved++; return; }   /* 칸이 찼다 → 미배정 */
+      dst.push({ id: uid(), from: b.from, dur: b.dur, text: b.text, task: true });
+      b.movedFree = true;
+      moved++;
+    });
+    if (moved) writeAll(all);
+    return moved;
+  }
+  function shiftDay(k, n){
+    var d = new Date(+k.slice(0, 4), +k.slice(5, 7) - 1, +k.slice(8, 10));
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+      + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  window._tbCarry = carryBlocks;
 
   function drawChips(){
     var day = getDay();
@@ -7318,14 +7371,17 @@ window.addEventListener('beforeunload', () => {
       /* 완료한 일은 뒤로 물러난다. 테두리는 --muted 로 깔고 나서 흐려야
          0.55 를 먹인 뒤에도 배경과 구분된다 (머리말 참고). */
       var done = !!b.task && isDone(b.text);
+      var defer = !done && !!b.task && isDeferred(b.text);
       if (done) el.className += ' tb-done';
-      var bcol = done ? 'var(--muted)' : (b.task ? ACC : 'var(--border2)');
+      if (defer) el.className += ' tb-defer';
+      var bcol = (done || defer) ? 'var(--muted)' : (b.task ? ACC : 'var(--border2)');
       el.style.cssText = 'position:absolute;left:' + lft + ';right:' + rgt + ';box-sizing:border-box;'
         + 'top:' + g.top + 'px;height:' + g.h + 'px;'
         + 'background:var(--surface);border:1.5px solid ' + bcol + ';'
         + 'border-radius:8px;padding:3px 8px;color:var(--text);'
         + 'overflow:hidden;cursor:grab';
-      el.title = (b.text || '') + (done ? ' — 완료' : '');
+      el.title = (b.text || '')
+        + (done ? ' — 완료' : (defer ? ' — ' + WHEN_KR[whenOf(b.text)] + '로 미룸' : ''));
 
       /* 높이 안에 몇 줄이 들어가는지 먼저 계산한다. 그 줄 수로만 끊으면
          글자가 세로로 반 잘리는 일이 없다. */
@@ -7380,6 +7436,7 @@ window.addEventListener('beforeunload', () => {
     if (!mount()) return;
     migrate();
     ensureCss();
+    try { carryBlocks(); } catch(e){ console.warn('[타임박스] 이월 실패', e); }
     drawHead();
     drawChips();
     drawGrid();
@@ -7766,13 +7823,16 @@ window.addEventListener('beforeunload', () => {
   /* ── 오늘 집계 ────────────────────────────────────────────────────── */
   function todayStats() {
     var day = (typeof getDay === 'function') ? getDay() : null;
-    var list = (day && day.tasks) || [];
+    var all = (day && day.tasks) || [];
+    /* 오늘 하기로 한 것만 분모다. 미룬 건 빠진다 (머리말 ① 참고). */
+    var list = all.filter(function (t) { return !t.when || t.when === 'today'; });
     var done = 0, carried = 0;
     list.forEach(function (t) {
       if (t.done) done++;
       if (t.carriedFrom) carried++;
     });
     return { n: list.length, done: done, carried: carried,
+             deferred: all.length - list.length,
              pct: list.length ? done / list.length : 0 };
   }
 
@@ -7781,6 +7841,7 @@ window.addEventListener('beforeunload', () => {
     var s = todayStats(), d = read(), k = today();
     var prev = d.days[k] || {};
     d.days[k] = { n: s.n, done: s.done, carried: s.carried,
+                  deferred: s.deferred || 0,
                   ok: s.n > 0 && s.pct >= GOAL,
                   cheered: !!prev.cheered };
     write(d);
@@ -7910,7 +7971,9 @@ window.addEventListener('beforeunload', () => {
           + mean + '건</span>'
         : '<span class="ps-dim">🔥 연속 0일 · 최고 ' + st.best + '일 · 최근 평균 '
           + mean + '건</span>';
-      el.title = '하루 완료율 ' + Math.round(GOAL * 100) + '% 이상이면 성공.'
+      el.title = '분모는 오늘 하기로 한 것만 — 내일로 미룬 건 빠진다'
+        + (s.deferred ? ' (오늘 ' + s.deferred + '건 미룸)' : '') + '.\n'
+        + '하루 완료율 ' + Math.round(GOAL * 100) + '% 이상이면 성공.'
         + ' 미끄러진 날은 주 1회까지 복구된다.'
         + ' 최근 평균은 판정에 안 쓴다 — 분모가 줄고 있는지 보라고 붙였다.';
 
