@@ -7060,6 +7060,18 @@ window.addEventListener('beforeunload', () => {
     + '.tb-block.tb-defer{opacity:.4;border-style:dashed !important;'
     +   'background:transparent !important}'
     + '.tb-block.tb-defer .tb-label{text-decoration-color:var(--text2)}'
+      /* 한 칸 더 — 평소엔 거의 안 보인다. 데스크톱만 hover 로 진해진다.
+         모바일은 hover 가 없으니 늘 이 옅기 그대로다. */
+    + '.tb-plus{position:absolute;top:2px;right:3px;width:15px;height:15px;'
+    +   'display:flex;align-items:center;justify-content:center;'
+    +   'font-size:13px;line-height:1;font-weight:700;color:var(--text2);'
+    +   'opacity:.25;cursor:pointer;touch-action:none;z-index:4;border-radius:4px;'
+    +   'transition:opacity 140ms ease,background-color 140ms ease}'
+    + '.tb-block.tb-half .tb-plus{width:12px;height:12px;font-size:11px;top:1px;right:2px}'
+    + '@media (hover:hover){.tb-plus:hover{opacity:1;background:var(--surface2)}}'
+    + '.tb-block.tb-arming{border-width:2px !important;'
+    +   'box-shadow:0 0 0 2px var(--accent-dim)}'
+    + '.tb-block.tb-arming .tb-plus{opacity:1;color:' + ACC + '}'
     + '.tb-block.tb-done .tb-label{color:var(--text2)}';
     document.head.appendChild(st);
   }
@@ -7478,6 +7490,9 @@ window.addEventListener('beforeunload', () => {
       var defer = !done && !!b.task && isDeferred(b.text);
       if (done) el.className += ' tb-done';
       if (defer) el.className += ' tb-defer';
+      if (g.half) el.className += ' tb-half';
+      if (b.task && _armed && String(b.text || '').trim() === _armed)
+        el.className += ' tb-arming';
       var bcol = (done || defer) ? 'var(--muted)' : (b.task ? ACC : 'var(--border2)');
       el.style.cssText = 'position:absolute;left:' + lft + ';right:' + rgt + ';box-sizing:border-box;'
         + 'top:' + g.top + 'px;height:' + g.h + 'px;'
@@ -7506,9 +7521,29 @@ window.addEventListener('beforeunload', () => {
         + 'font-size:' + fsz + 'px;line-height:' + lh + 'px;'
         + 'max-height:' + (lines * lh) + 'px;'
         /* 2줄 이상일 때 자연스럽게 — 세로 가운데가 아니라 위에서 시작한다 */
-        + 'align-self:flex-start;vertical-align:top';
+        + 'align-self:flex-start;vertical-align:top'
+        /* + 버튼이 앉을 자리만 비운다. 반쪽은 폭이 좁으니 더 적게. */
+        + (b.task ? ';padding-right:' + (g.half ? 12 : 15) + 'px' : '');
       lab.textContent = txt;
       el.appendChild(lab);
+      /* 한 칸 더 — 그 자리에서 배정 모드로 들어간다.
+         격자가 pointerdown/up 을 위임으로 받으므로 여기서 전부 막는다.
+         안 막으면 누를 때마다 편집창이 열리거나 새 블록이 생긴다. */
+      if (b.task) {
+        var plus = document.createElement('div');
+        plus.className = 'tb-plus';
+        plus.textContent = '+';
+        plus.title = '이 할 일을 다른 칸에도 배정';
+        ['pointerdown', 'pointermove', 'click', 'dblclick'].forEach(function(ev){
+          plus.addEventListener(ev, function(e){ e.stopPropagation(); e.preventDefault(); });
+        });
+        plus.addEventListener('pointerup', function(e){
+          e.stopPropagation(); e.preventDefault();
+          window._tbArm(String(b.text || '').trim());
+        });
+        el.appendChild(plus);
+      }
+
       var grip = document.createElement('div');
       grip.className = 'tb-grip';
       grip.style.cssText = 'position:absolute;left:0;right:0;bottom:-3px;height:10px;'
@@ -7659,7 +7694,13 @@ window.addEventListener('beforeunload', () => {
 
     /* 탭 — click 에 안 기댄다 (터치에서 삼켜진다) */
     var b = blockAt(p);
-    if (b) { edit(b.id); return; }
+    if (b) {
+      /* 배정 모드 중에 이미 찬 칸을 누르면 **모드 취소**다.
+         한 번의 탭은 한 가지 일만 한다 — 취소하면서 편집까지 열지 않는다. */
+      if (_armed) { window._tbArm(null); return; }
+      edit(b.id);
+      return;
+    }
     var nb2 = { id: uid(), from: slotAt(p), dur: unit(),
                 text: _armed || '', task: !!_armed };
     var list2 = blocks(); list2.push(nb2); setBlocks(list2);
@@ -7719,9 +7760,29 @@ window.addEventListener('beforeunload', () => {
   window._tbArm = function(t){
     _armed = (t === null || t === undefined) ? null : ((_armed === t) ? null : t);
     drawChips();
+    drawGrid();                       /* 원본 블록에 강조 테두리 */
     /* 무장 표시는 좌측 목록에도 걸린다 — 배정된 항목은 칩에 없기 때문 */
     try { stampTasks(); } catch(e){}
+    armOutside(!!_armed);
   };
+
+  /* 바깥을 누르면 모드 취소. 무장 중에만 듣는다. */
+  var _outside = null;
+  function armOutside(on){
+    if (!on) {
+      if (_outside) { document.removeEventListener('pointerdown', _outside, true); _outside = null; }
+      return;
+    }
+    if (_outside) return;
+    _outside = function(ev){
+      var t = ev.target;
+      if (_grid && _grid.contains(t)) return;            /* 격자 안은 격자가 처리 */
+      if (_chips && _chips.contains(t)) return;          /* 칩·안내줄도 예외 */
+      if (t.closest && t.closest('#taskList')) return;   /* 좌측 목록도 진입점이다 */
+      window._tbArm(null);
+    };
+    document.addEventListener('pointerdown', _outside, true);
+  }
   window._tbUnit = function(u){
     var d = readAll();
     if (UNITS.indexOf(u) < 0) return;
