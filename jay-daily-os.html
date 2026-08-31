@@ -6638,9 +6638,13 @@ window.addEventListener('beforeunload', () => {
       /* 높이 안에 몇 줄이 들어가는지 먼저 계산한다. 그 줄 수로만 끊으면
          글자가 세로로 반 잘리는 일이 없다. */
       var txt = b.text || '(비어 있음)';
-      var boxH = Math.max(12, durPx(b.dur)) - 6;     /* 위아래 padding 3px씩 */
-      var fsz = txt.length > 18 ? 11 : 12;           /* 긴 제목은 한 단계 작게 */
-      var lh = Math.round(fsz * 1.3);
+      /* ⚠ 실제로 그려지는 높이(g.h)로 계산한다. 예전엔 durPx(b.dur) 를 썼는데,
+         좌표계를 좌/우 분할로 바꾸면서 30분 블록이 28px → 56px 가 됐는데도
+         이 줄만 안 따라와서 "공간은 남는데 한 줄로 자르는" 버그가 됐다.
+         (그때 "2줄 넣으려면 9px 필요"라고 했던 건 옛 28px 기준이라 틀린 계산이었다) */
+      var boxH = g.h - 6;                            /* 위아래 padding 3px씩 */
+      var fsz = 12;                                  /* 폰트는 안 줄인다 */
+      var lh = Math.round(fsz * 1.3);                /* 16px */
       var lines = Math.max(1, Math.floor(boxH / lh));
       var lab = document.createElement('div');
       lab.className = 'tb-label';
@@ -6648,7 +6652,9 @@ window.addEventListener('beforeunload', () => {
         + '-webkit-line-clamp:' + lines + ';line-clamp:' + lines + ';overflow:hidden;'
         + 'text-overflow:ellipsis;word-break:break-word;'
         + 'font-size:' + fsz + 'px;line-height:' + lh + 'px;'
-        + 'max-height:' + (lines * lh) + 'px';
+        + 'max-height:' + (lines * lh) + 'px;'
+        /* 2줄 이상일 때 자연스럽게 — 세로 가운데가 아니라 위에서 시작한다 */
+        + 'align-self:flex-start;vertical-align:top';
       lab.textContent = txt;
       el.appendChild(lab);
       var grip = document.createElement('div');
