@@ -6415,6 +6415,32 @@ window.addEventListener('beforeunload', () => {
   }
   function uid(){ return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
+  /* 설치기는 이 조각의 SCRIPT 구획만 가져간다. 전환·취소선처럼 상태로 바뀌는
+     규칙은 인라인 style 로 못 쓰니 여기서 한 번만 심는다. */
+  function ensureCss(){
+    if (document.getElementById('tbCss')) return;
+    var st = document.createElement('style');
+    st.id = 'tbCss';
+    st.textContent =
+      '.tb-block{transition:opacity 220ms ease,border-color 220ms ease}'
+      /* 취소선은 **늘 걸어두고 색만 바꾼다** — 그래야 전환이 미끄러진다.
+         (line-through 를 켜고 끄면 즉시 점프한다) */
+    + '.tb-label{text-decoration:line-through;text-decoration-color:transparent;'
+    +   'text-decoration-thickness:1.5px;'
+    +   'transition:text-decoration-color 220ms ease,color 220ms ease}'
+    + '.tb-block.tb-done{opacity:.55}'
+    + '.tb-block.tb-done .tb-label{text-decoration-color:var(--text2)}'
+    + '.tb-check{position:absolute;top:3px;right:3px;width:16px;height:16px;'
+    +   'border-radius:50%;border:1.5px solid var(--border2);background:var(--surface);'
+    +   'display:flex;align-items:center;justify-content:center;'
+    +   'font-size:10px;font-weight:800;line-height:1;color:transparent;'
+    +   'cursor:pointer;touch-action:none;z-index:3;'
+    +   'transition:background-color 160ms ease,border-color 160ms ease,color 160ms ease}'
+    + '.tb-block.tb-done .tb-check{background:var(--muted);border-color:var(--muted);'
+    +   'color:#fff}';
+    document.head.appendChild(st);
+  }
+
   function hhmm(min){
     var m = ((min % 1440) + 1440) % 1440;
     return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
@@ -6599,6 +6625,42 @@ window.addEventListener('beforeunload', () => {
   window._tbAssigned = assignedMap;
   window._tbAssignedRich = assignedRich;
 
+  /* ── 완료 상태 ────────────────────────────────────────────────────────
+     블록의 문구로 오늘 할 일을 되찾아 완료 여부를 본다. 배정은 칩에서 오므로
+     보통 문구가 정확히 같다. 손으로 고쳐 쓴 경우를 위해 포함 관계도 본다. */
+  function taskIndexOf(txt){
+    var day = getDay(), list = (day && day.tasks) || [];
+    var t = String(txt || '').trim();
+    if (!t) return -1;
+    var idx = -1, best = 0;
+    for (var i = 0; i < list.length; i++) {
+      var xt = String(list[i].text || '').trim();
+      if (!xt) continue;
+      if (xt === t) return i;                       /* 정확히 같으면 그것 */
+      if (t.indexOf(xt) >= 0 && xt.length > best) { idx = i; best = xt.length; }
+    }
+    return idx;
+  }
+  function isDone(txt){
+    var i = taskIndexOf(txt);
+    if (i < 0) return false;
+    return !!((getDay().tasks || [])[i] || {}).done;
+  }
+  /* 블록에서 완료를 토글한다. 앱의 toggleTask 를 그대로 쓴다 —
+     저장·목록 갱신·타임라인 재렌더가 전부 그 경로에 물려 있다. */
+  function toggleByText(txt){
+    var i = taskIndexOf(txt);
+    if (i < 0) return false;
+    if (typeof window.toggleTask === 'function') { window.toggleTask(i); return true; }
+    var day = getDay();
+    day.tasks[i].done = !day.tasks[i].done;
+    if (typeof save === 'function') save();
+    if (typeof window.renderTasks === 'function') window.renderTasks();
+    return true;
+  }
+  window._tbIsDone = isDone;
+  window._tbToggleDone = toggleByText;
+
   function drawChips(){
     var day = getDay();
     var done = assignedMap();
@@ -6693,12 +6755,17 @@ window.addEventListener('beforeunload', () => {
       var rgt = g.half
         ? (g.right ? '4px' : 'calc(100% - (' + MID_PCT + ') + 2px)')
         : '4px';
+      /* 완료한 일은 뒤로 물러난다. 테두리는 --muted 로 깔고 나서 흐려야
+         0.55 를 먹인 뒤에도 배경과 구분된다 (머리말 참고). */
+      var done = !!b.task && isDone(b.text);
+      if (done) el.className += ' tb-done';
+      var bcol = done ? 'var(--muted)' : (b.task ? ACC : 'var(--border2)');
       el.style.cssText = 'position:absolute;left:' + lft + ';right:' + rgt + ';box-sizing:border-box;'
         + 'top:' + g.top + 'px;height:' + g.h + 'px;'
-        + 'background:var(--surface);border:1.5px solid ' + (b.task ? ACC : 'var(--border2)') + ';'
+        + 'background:var(--surface);border:1.5px solid ' + bcol + ';'
         + 'border-radius:8px;padding:3px 8px;color:var(--text);'
         + 'overflow:hidden;cursor:grab';
-      el.title = b.text || '';                 /* 호버하면 전체 제목 */
+      el.title = (b.text || '') + (done ? ' — 완료' : '');
 
       /* 높이 안에 몇 줄이 들어가는지 먼저 계산한다. 그 줄 수로만 끊으면
          글자가 세로로 반 잘리는 일이 없다. */
@@ -6719,9 +6786,29 @@ window.addEventListener('beforeunload', () => {
         + 'font-size:' + fsz + 'px;line-height:' + lh + 'px;'
         + 'max-height:' + (lines * lh) + 'px;'
         /* 2줄 이상일 때 자연스럽게 — 세로 가운데가 아니라 위에서 시작한다 */
-        + 'align-self:flex-start;vertical-align:top';
+        + 'align-self:flex-start;vertical-align:top'
+        /* 할 일 블록엔 오른쪽 위에 체크 버튼이 앉는다 — 그 자리를 비워둔다 */
+        + (b.task ? ';padding-right:18px' : '');
       lab.textContent = txt;
       el.appendChild(lab);
+      /* 블록에서도 완료를 토글한다 (c).
+         격자는 pointerdown/up 을 위임으로 받는다 — 여기서 막지 않으면
+         누를 때마다 드래그가 시작되거나 편집창이 열린다. */
+      if (b.task) {
+        var chk = document.createElement('div');
+        chk.className = 'tb-check';
+        chk.textContent = '✓';
+        chk.title = done ? '완료 해제' : '완료로 표시';
+        ['pointerdown', 'pointermove', 'click'].forEach(function(ev){
+          chk.addEventListener(ev, function(e){ e.stopPropagation(); e.preventDefault(); });
+        });
+        chk.addEventListener('pointerup', function(e){
+          e.stopPropagation(); e.preventDefault();
+          toggleByText(b.text);
+        });
+        el.appendChild(chk);
+      }
+
       var grip = document.createElement('div');
       grip.className = 'tb-grip';
       grip.style.cssText = 'position:absolute;left:0;right:0;bottom:-3px;height:10px;'
@@ -6752,6 +6839,7 @@ window.addEventListener('beforeunload', () => {
   function draw(){
     if (!mount()) return;
     migrate();
+    ensureCss();
     drawHead();
     drawChips();
     drawGrid();
