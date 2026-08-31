@@ -11477,6 +11477,36 @@ async function renderCoach(force){
     return 'f-' + Math.random().toString(36).slice(2, 8);
   }
 
+  /* 값을 점으로 그린다. DOM 에는 점만, 앱에는 진짜 값. */
+  var VDESC = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  function dotMask(el){
+    if (el.__dot) return;
+    el.__dot = 1;
+    var real = VDESC.get.call(el);
+    var shown = false;                     /* 지금 진짜 값을 그리고 있나 */
+
+    var paint = function(){
+      VDESC.set.call(el, shown ? real : new Array(real.length + 1).join('\u2022'));
+    };
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get: function(){ return shown ? VDESC.get.call(el) : real; },
+      set: function(v){ real = String(v == null ? '' : v); paint(); },
+    });
+    el.addEventListener('focus', function(){
+      shown = true; VDESC.set.call(el, real);
+    });
+    el.addEventListener('blur', function(){
+      real = VDESC.get.call(el);           /* 편집한 값을 거둔다 */
+      shown = false; paint();
+    });
+    el.addEventListener('input', function(){
+      if (shown) real = VDESC.get.call(el);
+    });
+    paint();
+  }
+  window._igDot = dotMask;
+
   function harden(el){
     if (!el || el.__ig) return;
     el.__ig = 1;
@@ -11486,8 +11516,7 @@ async function renderCoach(force){
       if (MASK_OK) {
         el.setAttribute('data-was-password', '1');
         el.type = 'text';
-        el.style.webkitTextSecurity = 'disc';
-        el.style.textSecurity = 'disc';
+        dotMask(el);
         /* 폰트가 바뀌면 점 모양이 달라진다 — 원래 폰트를 유지한다 */
         if (!el.style.fontFamily) el.style.fontFamily = 'inherit';
       }
@@ -11537,6 +11566,12 @@ async function renderCoach(force){
       passwords: all.filter(function(e){ return (e.getAttribute('type') || '').toLowerCase() === 'password'; }).length,
       masked: all.filter(function(e){ return e.getAttribute('data-was-password') === '1'; }).length,
       maskSupported: MASK_OK,
+      /* 크롬이 '비밀번호 칸'으로 볼 만한 것 — 0 이어야 한다 */
+      credLike: [].slice.call(document.querySelectorAll('input')).filter(function(i){
+        var st = getComputedStyle(i);
+        return i.type === 'password'
+          || st.webkitTextSecurity === 'disc' || st.textSecurity === 'disc';
+      }).length,
     };
   };
 
