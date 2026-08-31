@@ -6523,16 +6523,28 @@ window.addEventListener('beforeunload', () => {
       + '</div>';
   }
 
-  /* 오늘 이미 배정된 할 일 → { 정규화문구: "HH:MM" } */
-  function assignedMap(){
+  /* 오늘 이미 배정된 할 일 → { 문구: {at,from,right,order} }.
+     정렬에 시각(from)과 좌/우(right)가 필요해서 문자열만으론 부족하다. */
+  function assignedRich(){
     var m = {};
-    blocks().forEach(function(b){
+    blocks().forEach(function(b, i){
       var t = String(b.text || '').trim();
-      if (t) m[t] = hhmm(b.from);
+      if (!t) return;
+      var g = blockGeom(b);
+      var cur = { at: hhmm(b.from), from: b.from, right: g.right ? 1 : 0, order: i };
+      /* 같은 문구가 여러 번 배정됐으면 가장 이른 것을 대표로 */
+      if (!m[t] || cur.from < m[t].from) m[t] = cur;
     });
     return m;
   }
+  /* { 문구: "HH:MM" } — 뱃지·칩이 쓰는 얇은 형태 */
+  function assignedMap(){
+    var r = {}, x = assignedRich();
+    Object.keys(x).forEach(function(k){ r[k] = x[k].at; });
+    return r;
+  }
   window._tbAssigned = assignedMap;
+  window._tbAssignedRich = assignedRich;
 
   function drawChips(){
     var day = getDay();
@@ -6690,7 +6702,7 @@ window.addEventListener('beforeunload', () => {
     drawHead();
     drawChips();
     drawGrid();
-    try { stampTasks(); } catch(e){}
+    try { stampTasks(); orderTasks(); } catch(e){}
   }
 
   /* ── 조작 ─────────────────────────────────────────────────────────── */
@@ -6918,13 +6930,83 @@ window.addEventListener('beforeunload', () => {
       (slot.parentNode || row).insertBefore(tag, slot.nextSibling);
     });
   }
+
+  /* 행 하나가 어느 배정에 걸리는지 — 가장 긴(=구체적인) 문구가 이긴다 */
+  function rowAssign(row, info, keys){
+    var el = row.querySelector('.task-text');
+    var txt = (el ? el.textContent : row.textContent) || '';
+    var hit = null;
+    keys.forEach(function(k){
+      if (k && txt.indexOf(k) >= 0 && (!hit || k.length > hit.length)) hit = k;
+    });
+    return hit ? info[hit] : null;
+  }
+
+  /* 배정 시각 오름차순으로 목록을 다시 세운다 (머리말 참고) */
+  function orderTasks(){
+    var host = document.getElementById('taskList');
+    if (!host) return 0;
+    var rows = [].slice.call(host.querySelectorAll('.task-card'));
+    if (rows.length < 2) return 0;
+
+    var info = assignedRich(), keys = Object.keys(info);
+    var meta = rows.map(function(row, i){
+      return { row: row, i: i, done: row.classList.contains('done'),
+               a: rowAssign(row, info, keys),
+               rect: row.getBoundingClientRect() };
+    });
+
+    var sorted = meta.slice().sort(function(p, q){
+      var gp = p.done ? 2 : (p.a ? 0 : 1);      /* 0 배정 · 1 미배정 · 2 완료 */
+      var gq = q.done ? 2 : (q.a ? 0 : 1);
+      if (gp !== gq) return gp - gq;
+      if (gp === 0) {
+        if (p.a.from !== q.a.from) return p.a.from - q.a.from;      /* 시각 */
+        if (p.a.right !== q.a.right) return p.a.right - q.a.right;  /* 좌 → 우 */
+        if (p.a.order !== q.a.order) return p.a.order - q.a.order;  /* 배정 순 */
+      }
+      return p.i - q.i;                                              /* 입력순 */
+    });
+
+    var moved = 0;
+    sorted.forEach(function(m, k){ if (m.i !== k) moved++; });
+    if (!moved) return 0;
+
+    sorted.forEach(function(m){ host.appendChild(m.row); });
+
+    /* FLIP — 옛 자리로 되돌린 뒤 제자리로 미끄러뜨린다 */
+    var quiet = window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!quiet) {
+      var shift = [];
+      sorted.forEach(function(m){
+        var dy = m.rect.top - m.row.getBoundingClientRect().top;
+        if (!dy) return;
+        m.row.style.transition = 'none';
+        m.row.style.transform = 'translateY(' + dy + 'px)';
+        shift.push(m.row);
+      });
+      void host.offsetHeight;                          /* 강제 리플로우 */
+      shift.forEach(function(r){
+        r.style.transition = 'transform 180ms cubic-bezier(.2,.7,.3,1)';
+        r.style.transform = '';
+      });
+      setTimeout(function(){
+        shift.forEach(function(r){ r.style.transition = ''; r.style.transform = ''; });
+      }, 240);
+    }
+    return moved;
+  }
+
   window._tbStampTasks = stampTasks;
+  window._tbOrderTasks = orderTasks;
 
   if (typeof window.renderTasks === 'function') {
     var _origRenderTasks = window.renderTasks;
     window.renderTasks = function(){
       var r = _origRenderTasks.apply(this, arguments);
-      try { stampTasks(); } catch(e){ console.warn('[타임박스] 뱃지 실패', e); }
+      try { stampTasks(); orderTasks(); }
+      catch(e){ console.warn('[타임박스] 뱃지/정렬 실패', e); }
       return r;
     };
   }
