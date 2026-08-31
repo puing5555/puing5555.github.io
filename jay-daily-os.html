@@ -5978,6 +5978,14 @@ window.addEventListener('beforeunload', () => {
   var JACCARD = 0.7;
   var DICE = 0.75;         /* 글자 2-gram 유사도 — 조사 차이를 넘긴다 */
   var BACKUP_KEY = 'jay_tasks_backup';
+  var TOMB_KEY = 'jay_taskTombstones';   /* 지운 문구의 지문 — 부활 금지 */
+  var LOG_KEY = 'jay_taskLog';           /* 출처 기록 (관찰용) */
+  var LOG_MAX = 300;
+
+  /* jay_ 로 시작하지만 동기화 트리거는 안 만든다 — 앱이 잡아둔 원본 setItem 을 쓴다.
+     (이게 없어서 tomb() 이 ReferenceError 로 조용히 죽고 있었다 — 2026-09-01) */
+  var setLocal = (typeof _origSetItem === 'function')
+      ? _origSetItem : localStorage.setItem.bind(localStorage);
 
   function norm(s){
     return String(s == null ? '' : s).toLowerCase()
@@ -6024,6 +6032,56 @@ window.addEventListener('beforeunload', () => {
   }
   window._taskSimilar = same;   /* 테스트가 판정기만 따로 본다 */
 
+  function fp(t){ return norm(t); }                 /* 지문 = 정규화 문구 */
+
+  function tombs(){
+    try { return JSON.parse(localStorage.getItem(TOMB_KEY) || '{}') || {}; } catch(e){ return {}; }
+  }
+  function tomb(text, why){
+    if (!text) return;
+    var t = tombs(), k = fp(text);
+    if (!k) return;
+    t[k] = { text: text, at: new Date().toISOString(), why: why || '삭제',
+             n: ((t[k] || {}).n || 0) + 1 };
+    var keys = Object.keys(t);
+    if (keys.length > 400) {                       /* 오래된 것부터 버린다 */
+      keys.sort(function(a, b){ return String(t[a].at) < String(t[b].at) ? -1 : 1; });
+      keys.slice(0, keys.length - 400).forEach(function(k2){ delete t[k2]; });
+    }
+    try { setLocal(TOMB_KEY, JSON.stringify(t)); } catch(e){}
+  }
+  function untomb(text){
+    var t = tombs(), hit = false;
+    Object.keys(t).forEach(function(k){
+      if (k === fp(text) || same(text, t[k].text)) { delete t[k]; hit = true; }
+    });
+    if (hit) { try { setLocal(TOMB_KEY, JSON.stringify(t)); } catch(e){} }
+  }
+  window._taskTombstones = tombs;
+
+  function logTask(text, via, note){
+    try {
+      var l = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+      l.push({ at: new Date().toISOString(), text: String(text || '').slice(0, 80),
+               via: via, note: note || '' });
+      setLocal(LOG_KEY, JSON.stringify(l.slice(-LOG_MAX)));
+    } catch(e){}
+  }
+  window._taskLog = function(n){
+    try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]').slice(-(n || 50)); }
+    catch(e){ return []; }
+  };
+
+  /* JAY가 직접 넣는 중인가. 이 창이 열려 있을 때만 새 할일이 살아남는다. */
+  var _byUser = 0;
+  function asUser(fn){
+    return function(){
+      _byUser++;
+      try { return fn.apply(this, arguments); }
+      finally { setTimeout(function(){ _byUser = Math.max(0, _byUser - 1); }, 0); }
+    };
+  }
+
   /* 같은 칸(when·done) 안에서만 묶는다. 오늘 것과 내일 것은 다른 계획이다. */
   function bucketOf(t){
     return (t && t.done ? '1' : '0') + '|' + String((t && t.when) || 'today');
@@ -6058,11 +6116,53 @@ window.addEventListener('beforeunload', () => {
   /* ── ① 저장 길목에서 잡는다 ─────────────────────────────────────────── */
   var _origSave = save;
   var _busy = false;
+  var _known = null;            /* 직전 저장 때의 할일 지문 — 새로 생긴 걸 가린다 */
+
+  function screen(d){
+    if (!d || !Array.isArray(d.tasks)) return;
+    var t = tombs(), keep = [], dropped = [];
+    var seen = _known;
+    d.tasks.forEach(function(x){
+      var k = fp(x.text);
+      var isNew = seen && !seen[k];
+      if (isNew) logTask(x.text, _byUser > 0 ? '사용자 추가' : '자동/알 수 없음');
+
+      /* 지문 검사는 **모든 항목**에 건다. "새로 생긴 것"만 보면, 우회 저장 경로가
+         스냅샷을 안 갱신했을 때 부활이 새 것으로 안 보여 빠져나간다.
+         정확 일치로만 봐도 안 된다 — 재생성은 늘 변주로 온다
+         ("앱 출시 작업 30분" → "앱 출시 작업을 30분"). 병합과 같은 잣대를 쓴다. */
+      var hitKey = t[k] ? k : null;
+      if (!hitKey) {
+        var ks = Object.keys(t);
+        for (var j = 0; j < ks.length; j++) {
+          if (same(x.text, t[ks[j]].text)) { hitKey = ks[j]; break; }
+        }
+      }
+      if (hitKey) {
+        dropped.push({ t: x, why: '삭제한 문구 재등록' });
+        return;
+      }
+      keep.push(x);
+    });
+    if (dropped.length) {
+      dropped.forEach(function(o){
+        console.warn('[할일] 부활 차단 — ' + (o.t.text || '').slice(0, 30) + ' (' + o.why + ')');
+        logTask(o.t.text, '차단', o.why);
+      });
+      d.tasks.length = 0;
+      keep.forEach(function(x){ d.tasks.push(x); });
+    }
+    var now = {};
+    d.tasks.forEach(function(x){ now[fp(x.text)] = 1; });
+    _known = now;
+  }
+
   window.save = function(){
     if (!_busy) {
       _busy = true;
       try {
         var d = getDay();
+        screen(d);
         if (d && Array.isArray(d.tasks) && d.tasks.length > 1) {
           var r = merge(d.tasks);
           if (r.removed.length) {
@@ -6119,6 +6219,80 @@ window.addEventListener('beforeunload', () => {
     };
   }
 
+  /* ── ① 삭제하면 지문을 남긴다 (부활 금지) ─────────────────────────── */
+  if (typeof window.deleteTask === 'function') {
+    var _origDel = window.deleteTask;
+    window.deleteTask = function(i){
+      try {
+        var t = ((getDay() || {}).tasks || [])[i];
+        if (t) { tomb(t.text, 'JAY가 삭제'); logTask(t.text, '삭제'); }
+      } catch(e){}
+      return _origDel.apply(this, arguments);
+    };
+  }
+
+  /* ── ② JAY가 직접 넣는 경로에만 통행증을 준다 ─────────────────────── */
+  ['saveTask', 'openAddTask'].forEach(function(n){
+    if (typeof window[n] === 'function') window[n] = asUser(window[n]);
+  });
+  if (typeof window.saveTask === 'function') {
+    var _origSaveTask = window.saveTask;
+    window.saveTask = function(){
+      try {
+        var v = (document.getElementById('newTaskText') || {}).value;
+        if (v) untomb(v.trim());        /* 직접 다시 넣었으면 지문을 푼다 */
+      } catch(e){}
+      return _origSaveTask.apply(this, arguments);
+    };
+  }
+
+  /* ── ③ AI 세션 분석이 만든 할일은 되돌린다 ────────────────────────── */
+  if (typeof window.analyzeSessionAndSave === 'function') {
+    var _origAnalyze = window.analyzeSessionAndSave;
+    window.analyzeSessionAndSave = async function(){
+      var before = ((getDay() || {}).tasks || []).slice();
+      var r = await _origAnalyze.apply(this, arguments);
+      try {
+        var d = getDay();
+        if (d && Array.isArray(d.tasks) && d.tasks.length > before.length) {
+          var added = d.tasks.filter(function(x){ return before.indexOf(x) < 0; });
+          d.tasks.length = 0;
+          before.forEach(function(x){ d.tasks.push(x); });
+          added.forEach(function(x){
+            console.warn('[할일] AI 세션 분석이 만든 할일을 되돌렸다 — '
+              + (x.text || '').slice(0, 30));
+            logTask(x.text, '차단', 'AI 세션 분석');
+          });
+          _origSave();
+          if (typeof renderTasks === 'function') renderTasks();
+        }
+      } catch(e){ console.warn('[할일] AI 경로 되돌리기 실패', e); }
+      return r;
+    };
+  }
+
+  /* ── ④ "앱 출시" 같은 계열을 한 번에 정리하고 지문을 남긴다 ───────── */
+  window._taskPurge = function(needle, silent){
+    var d = getDay();
+    if (!d || !Array.isArray(d.tasks)) return 0;
+    var n = norm(needle), hit = [], keep = [];
+    d.tasks.forEach(function(t){
+      if (n && norm(t.text).indexOf(n) >= 0) hit.push(t); else keep.push(t);
+    });
+    if (!hit.length) {
+      if (!silent) toast('그런 할일이 없어');
+      return 0;
+    }
+    backup(hit);
+    hit.forEach(function(t){ tomb(t.text, '일괄 정리: ' + needle); logTask(t.text, '일괄 삭제'); });
+    d.tasks.length = 0;
+    keep.forEach(function(t){ d.tasks.push(t); });
+    _origSave();
+    if (typeof renderTasks === 'function') renderTasks();
+    if (!silent) toast(hit.length + '건 지우고 다시 안 생기게 막았어');
+    return hit.length;
+  };
+
   /* 켜질 때 한 번 조용히 정리한다 — 이미 쌓인 것부터 걷어낸다 */
   try {
     var n0 = window._taskDedupeNow(true);
@@ -6144,6 +6318,9 @@ window.addEventListener('beforeunload', () => {
   var DEF_END = 26 * 60;         /* 다음날 02:00 */
   /* ⚠ 칸 높이는 **시간당** 고정이다. 모드를 바꿔도 같은 높이라 화면이 안 흔들린다. */
   var HOUR_PX = 56;
+  var LABEL_PX = 42;             /* 시각 라벨이 차지하는 왼쪽 폭 */
+  /* 칸 본문(라벨 오른쪽)의 한가운데 — 세로 점선과 30분 블록이 여기를 기준으로 선다 */
+  var MID_PCT = 'calc(' + LABEL_PX + 'px + (100% - ' + LABEL_PX + 'px) / 2)';
   var ANCHORS = [[8 * 60, '아침 앵커'], [13 * 60, '점심 앵커'], [21 * 60, '저녁 앵커']];
 
   var esc = (typeof coEsc === 'function') ? coEsc : function(s){
@@ -6367,13 +6544,12 @@ window.addEventListener('beforeunload', () => {
       lab.textContent = hhmm(m);
       cell.appendChild(lab);
       if (u === 30) {
-        /* 반 칸 점선 — 칸을 쪼개는 게 아니라 안에 선만 긋는다 */
+        /* 세로 점선 — 칸을 좌/우로 가른다. 왼쪽이 :00~:30, 오른쪽이 :30~:60.
+           종이 플래너가 이렇게 생겼다 (2026-09-01 정정: 예전엔 가로로 그었다). */
         var half = document.createElement('div');
         half.className = 'tb-half';
-        /* 50% 로 두면 칸 높이가 바뀌어도 늘 한가운데다 (칸 테두리 1px 만큼의
-           오차는 눈에 안 보이고, 하드코딩보다 안전하다) */
-        half.style.cssText = 'position:absolute;left:42px;right:0;top:50%;'
-          + 'border-top:1px dashed var(--border);pointer-events:none';
+        half.style.cssText = 'position:absolute;top:0;bottom:0;left:' + MID_PCT + ';'
+          + 'border-left:1px dashed var(--border);pointer-events:none';
         cell.appendChild(half);
       }
       _grid.appendChild(cell);
@@ -6398,8 +6574,18 @@ window.addEventListener('beforeunload', () => {
       var el = document.createElement('div');
       el.className = 'tb-block';
       el.dataset.id = b.id;
-      el.style.cssText = 'position:absolute;left:46px;right:4px;box-sizing:border-box;'
-        /* 점선은 무시하고 실제 길이만큼 — 30분이면 반 칸, 1시간이면 한 칸 */
+      /* 30분짜리는 그 시각이 속한 반쪽(좌 :00~:30 / 우 :30~:60)에 넣는다.
+         30분을 넘으면 칸 전체 폭을 쓴다 (한 시간 이상은 좌우로 못 쪼갠다). */
+      var halfSlot = (b.dur <= 30) && (unit() === 30);
+      var rightHalf = halfSlot && ((b.from % 60) >= 30);
+      var lft = halfSlot
+        ? (rightHalf ? 'calc(' + MID_PCT + ' + 2px)' : (LABEL_PX + 4) + 'px')
+        : (LABEL_PX + 4) + 'px';
+      var rgt = halfSlot
+        ? (rightHalf ? '4px' : 'calc(100% - (' + MID_PCT + ') + 2px)')
+        : '4px';
+      el.style.cssText = 'position:absolute;left:' + lft + ';right:' + rgt + ';box-sizing:border-box;'
+        /* 세로 길이는 실제 시간만큼 — 30분=반 칸 높이, 1시간=한 칸 */
         + 'top:' + yOf(b.from) + 'px;height:' + Math.max(12, durPx(b.dur)) + 'px;'
         + 'background:var(--surface);border:1.5px solid ' + (b.task ? ACC : 'var(--border2)') + ';'
         + 'border-radius:8px;padding:3px 8px;font-size:12px;color:var(--text);'
