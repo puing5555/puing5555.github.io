@@ -604,6 +604,59 @@ body {
 
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
+  #psBar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 0 2px 10px; font-size: 12px;
+  }
+  #psTrack {
+    position: relative; flex: 1 1 140px; min-width: 120px; height: 8px;
+    background: var(--surface2); border-radius: 99px; overflow: hidden;
+  }
+  #psFill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background: var(--accent); border-radius: 99px;
+    transition: width 320ms cubic-bezier(.2,.7,.3,1), background-color 320ms ease;
+  }
+  #psBar.ps-hit #psFill { background: var(--green); }
+  #psNum {
+    flex-shrink: 0; font-family: JetBrains Mono, monospace;
+    font-size: 12px; font-weight: 800; color: var(--text2);
+  }
+  #psBar.ps-hit #psNum { color: var(--green); }
+  #psCarry {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--yellow);
+    background: rgba(224,123,0,.12); border-radius: 5px; padding: 1px 6px;
+  }
+  #psStreak {
+    flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 700;
+    color: var(--text2); white-space: nowrap;
+  }
+  #psStreak .ps-fire { font-weight: 800; color: var(--accent); }
+  #psStreak .ps-dim { color: var(--muted); font-weight: 600; }
+
+  /* 80% 를 처음 넘은 순간 — 한 번만, 짧게 */
+  @keyframes psPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(0,170,102,.45); }
+    100% { box-shadow: 0 0 0 9px rgba(0,170,102,0); }
+  }
+  #psTrack.ps-pulse { animation: psPulse 620ms ease-out 1; border-radius: 99px; }
+
+  /* 지난 할일 뷰의 등록 개수 추이 */
+  #psTrend { padding: 2px 2px 10px; font-size: 11px; color: var(--muted); }
+  #psTrend .ps-bars { display: flex; align-items: flex-end; gap: 3px; height: 22px; margin-top: 4px; }
+  #psTrend .ps-b { width: 14px; background: var(--border2); border-radius: 2px 2px 0 0; }
+  #psTrend .ps-b.ps-ok { background: var(--green); }
+  #psTrend .ps-lbl { display: flex; gap: 3px; margin-top: 2px; font-size: 9px;
+                     font-family: JetBrains Mono, monospace; color: var(--muted); }
+  #psTrend .ps-lbl span { width: 14px; text-align: center; }
+
+  @media (max-width: 560px) {
+    #psStreak { margin-left: 0; width: 100%; }
+  }
+</style>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<style>
 /* 데스크톱에서는 없는 것처럼 둔다 */
 #navToggle, #rightToggle { display: none; }
 #navScrim, #rightScrim { display: none; }
@@ -6926,8 +6979,12 @@ window.addEventListener('beforeunload', () => {
       tag.style.cssText = 'flex-shrink:0;font-size:10px;font-weight:700;color:' + ACC + ';'
         + 'background:var(--accent-dim);border-radius:5px;padding:1px 6px;margin-left:6px;'
         + 'font-family:JetBrains Mono,monospace';
-      var slot = row.querySelector('div, span') || row;
-      (slot.parentNode || row).insertBefore(tag, slot.nextSibling);
+      /* ⚠ 반드시 .task-text **뒤**에 넣는다. 예전엔 querySelector('div, span')
+         으로 첫 div 를 잡았는데 그게 .task-pri 라 뱃지가 체크박스 앞에 끼었고,
+         남은 폭이 밀려 제목이 한 글자씩 세로로 눌렸다 (라이브 스샷에서 잡음). */
+      var slot = row.querySelector('.task-text');
+      if (!slot) return;
+      slot.parentNode.insertBefore(tag, slot.nextSibling);
     });
   }
 
@@ -7029,6 +7086,272 @@ window.addEventListener('beforeunload', () => {
   }, 60000);
 
   console.log('[타임박스] 켜짐 — 시당 한 칸 · 눈금 ' + unit() + '분');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function () {
+  'use strict';
+
+  var KEY  = 'jay_streak';
+  var GOAL = 0.8;                       /* 하루 완료율 80% 이상 = 성공 */
+
+  /* localStorage.setItem 은 앱이 이미 감싸서 Gist 푸시를 예약한다 — 그대로 쓴다 */
+  function read() {
+    try {
+      var d = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (!d || typeof d !== 'object') throw 0;
+      if (!d.days) d.days = {};
+      if (!d.freezes) d.freezes = {};
+      if (typeof d.best !== 'number') d.best = 0;
+      return d;
+    } catch (e) { return { v: 1, days: {}, freezes: {}, best: 0 }; }
+  }
+  function write(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} }
+
+  /* ── 날짜 ─────────────────────────────────────────────────────────────
+     앱의 TODAY_KEY 와 **같은 경계**를 쓴다 (머리말 ② 참고). */
+  function keyOf(dt) {
+    return dt.toISOString().slice(0, 10).replace(/-/g, '');
+  }
+  function today() {
+    return (typeof TODAY_KEY === 'string') ? TODAY_KEY : keyOf(new Date());
+  }
+  function toDate(k) {
+    return new Date(Date.UTC(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6, 8)));
+  }
+  function shift(k, n) {
+    var d = toDate(k); d.setUTCDate(d.getUTCDate() + n); return keyOf(d);
+  }
+  /* 복구 허용 단위 — 월요일 시작 주 "YYYY-Www" */
+  function weekOf(k) {
+    var d = toDate(k);
+    var dow = (d.getUTCDay() + 6) % 7;                 /* 월=0 */
+    d.setUTCDate(d.getUTCDate() - dow + 3);            /* 그 주 목요일 */
+    var y = d.getUTCFullYear();
+    var jan4 = new Date(Date.UTC(y, 0, 4));
+    var w = 1 + Math.round((d - jan4) / 604800000);
+    return y + '-W' + String(w).padStart(2, '0');
+  }
+
+  /* ── 오늘 집계 ────────────────────────────────────────────────────── */
+  function todayStats() {
+    var day = (typeof getDay === 'function') ? getDay() : null;
+    var list = (day && day.tasks) || [];
+    var done = 0, carried = 0;
+    list.forEach(function (t) {
+      if (t.done) done++;
+      if (t.carriedFrom) carried++;
+    });
+    return { n: list.length, done: done, carried: carried,
+             pct: list.length ? done / list.length : 0 };
+  }
+
+  /* 오늘 기록을 갱신한다. 과거 키는 절대 안 건드린다 — 지나간 날은 확정이다. */
+  function recordToday() {
+    var s = todayStats(), d = read(), k = today();
+    var prev = d.days[k] || {};
+    d.days[k] = { n: s.n, done: s.done, carried: s.carried,
+                  ok: s.n > 0 && s.pct >= GOAL,
+                  cheered: !!prev.cheered };
+    write(d);
+    return { data: d, stats: s };
+  }
+
+  /* ── 스트릭 계산 ──────────────────────────────────────────────────────
+     오늘부터 거꾸로 걷는다. 오늘은 아직 안 끝났으니 실패해도 끊지 않고 넘어간다.
+     실패한 과거 날은 그 주의 복구권이 남아 있으면 한 번 메꾼다. */
+  function computeStreak(d) {
+    d = d || read();
+    var k = today(), cur = 0, usedNow = null, first = true;
+    var spent = {};                                    /* 이번 계산에서 쓴 주 */
+    Object.keys(d.freezes || {}).forEach(function (w) { spent[w] = d.freezes[w]; });
+
+    for (var guard = 0; guard < 400; guard++) {
+      var rec = d.days[k];
+      var ok = !!(rec && rec.ok);
+      if (ok) { cur++; }
+      else if (first) { /* 오늘은 아직 진행 중 — 실패로 안 친다 */ }
+      else {
+        var w = weekOf(k);
+        if (spent[w] && spent[w] !== k) break;          /* 그 주 복구는 이미 씀 */
+        if (!spent[w]) { spent[w] = k; usedNow = usedNow || k; }
+        cur++;                                          /* 복구로 메꾼다 */
+      }
+      first = false;
+      k = shift(k, -1);
+      if (k < '20260801') break;                        /* 기록 시작 이전 */
+      if (!d.days[k] && !hasAnyBefore(d, k)) break;
+    }
+
+    var best = Math.max(d.best || 0, cur);
+    return { cur: cur, best: best, freezes: spent, usedNow: usedNow };
+  }
+  /* k 이전에 기록이 하나라도 있나 — 없으면 더 걸어봐야 헛수고다 */
+  function hasAnyBefore(d, k) {
+    var keys = Object.keys(d.days);
+    for (var i = 0; i < keys.length; i++) if (keys[i] <= k) return true;
+    return false;
+  }
+
+  /* 최근 7일 평균 등록 개수 — 판정엔 안 쓴다. 분모가 줄면 눈에 보이라고. */
+  function avg7(d) {
+    d = d || read();
+    var k = today(), sum = 0, cnt = 0;
+    for (var i = 0; i < 7; i++) {
+      var rec = d.days[k];
+      if (rec) { sum += rec.n || 0; cnt++; }
+      k = shift(k, -1);
+    }
+    return cnt ? Math.round((sum / cnt) * 10) / 10 : 0;
+  }
+
+  /* 최근 N일 (날짜 오름차순) — 추이 줄이 쓴다 */
+  function recent(d, n) {
+    d = d || read();
+    var out = [], k = today();
+    for (var i = 0; i < n; i++) { out.unshift({ k: k, rec: d.days[k] || null }); k = shift(k, -1); }
+    return out;
+  }
+
+  /* ── 화면 ─────────────────────────────────────────────────────────── */
+  function host() {
+    var panel = document.getElementById('panel-today');
+    if (!panel) return null;
+    var bar = document.getElementById('psBar');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'psBar';
+    bar.innerHTML = '<div id="psTrack"><div id="psFill"></div></div>'
+      + '<span id="psNum">0/0 · 0%</span>'
+      + '<span id="psCarry" style="display:none"></span>'
+      + '<span id="psStreak"></span>';
+    var chips = panel.querySelector('.chip-row');
+    if (chips && chips.nextSibling) panel.insertBefore(bar, chips.nextSibling);
+    else panel.insertBefore(bar, panel.firstChild);
+    return bar;
+  }
+
+  var _painting = false;
+  function paint() {
+    if (_painting) return;
+    _painting = true;
+    try {
+      var bar = host();
+      if (!bar) return;
+      var r = recordToday(), s = r.stats, d = r.data;
+      var st = computeStreak(d);
+
+      /* 복구를 새로 썼거나 최고 기록이 갱신됐으면 남긴다 */
+      var dirty = false;
+      if (st.best > (d.best || 0)) { d.best = st.best; dirty = true; }
+      if (st.usedNow) {
+        Object.keys(st.freezes).forEach(function (w) {
+          if (d.freezes[w] !== st.freezes[w]) { d.freezes[w] = st.freezes[w]; dirty = true; }
+        });
+      }
+
+      var pct = Math.round(s.pct * 100);
+      document.getElementById('psFill').style.width = pct + '%';
+      document.getElementById('psNum').textContent = s.done + '/' + s.n + ' · ' + pct + '%';
+
+      var carry = document.getElementById('psCarry');
+      if (s.carried > 0) { carry.style.display = ''; carry.textContent = '이월 ' + s.carried; }
+      else carry.style.display = 'none';
+
+      var hit = s.n > 0 && s.pct >= GOAL;
+      bar.classList.toggle('ps-hit', hit);
+
+      /* 80% 를 처음 넘은 순간 — 하루 한 번만 */
+      if (hit && !d.days[today()].cheered) {
+        d.days[today()].cheered = true; dirty = true;
+        var tr = document.getElementById('psTrack');
+        tr.classList.remove('ps-pulse');
+        void tr.offsetWidth;
+        tr.classList.add('ps-pulse');
+        setTimeout(function () { tr.classList.remove('ps-pulse'); }, 700);
+        if (typeof showToast === 'function') showToast('🔥 오늘 80% 넘었다');
+      }
+
+      var mean = avg7(d);
+      var el = document.getElementById('psStreak');
+      el.innerHTML = st.cur > 0
+        ? '<span class="ps-fire">🔥 연속 ' + st.cur + '일</span>'
+          + '<span class="ps-dim"> · 최고 ' + st.best + '일 · 최근 평균 '
+          + mean + '건</span>'
+        : '<span class="ps-dim">🔥 연속 0일 · 최고 ' + st.best + '일 · 최근 평균 '
+          + mean + '건</span>';
+      el.title = '하루 완료율 ' + Math.round(GOAL * 100) + '% 이상이면 성공.'
+        + ' 미끄러진 날은 주 1회까지 복구된다.'
+        + ' 최근 평균은 판정에 안 쓴다 — 분모가 줄고 있는지 보라고 붙였다.';
+
+      if (dirty) write(d);
+    } finally { _painting = false; }
+  }
+
+  /* ── "지난 할일" 뷰의 등록 개수 추이 한 줄 ──────────────────────────── */
+  function paintTrend() {
+    var listEl = document.getElementById('taskList');
+    if (!listEl || !listEl.parentNode) return;
+    var old = document.getElementById('psTrend');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    if (typeof taskFilter !== 'undefined' && taskFilter !== 'past') return;
+
+    var d = read(), days = recent(d, 14);
+    var max = days.reduce(function (m, x) { return Math.max(m, (x.rec && x.rec.n) || 0); }, 0);
+    var box = document.createElement('div');
+    box.id = 'psTrend';
+    if (!max) {
+      box.textContent = '등록 개수 추이 — 아직 쌓인 기록이 없다 (오늘부터 쌓인다)';
+    } else {
+      var bars = days.map(function (x) {
+        var n = (x.rec && x.rec.n) || 0;
+        var h = Math.max(2, Math.round((n / max) * 22));
+        return '<div class="ps-b' + (x.rec && x.rec.ok ? ' ps-ok' : '') + '"'
+          + ' style="height:' + h + 'px" title="' + x.k.slice(4, 6) + '/' + x.k.slice(6, 8)
+          + ' — 등록 ' + n + '건' + (x.rec ? ', 완료 ' + x.rec.done + '건' : '') + '"></div>';
+      }).join('');
+      var lbls = days.map(function (x, i) {
+        return '<span>' + (i % 3 === 0 ? +x.k.slice(6, 8) : '') + '</span>';
+      }).join('');
+      box.innerHTML = '등록 개수 추이 (최근 14일 · 최근 평균 ' + avg7(d) + '건)'
+        + ' — 완료율만 오르고 등록이 줄면 여기서 보인다'
+        + '<div class="ps-bars">' + bars + '</div>'
+        + '<div class="ps-lbl">' + lbls + '</div>';
+    }
+    listEl.parentNode.insertBefore(box, listEl);
+  }
+
+  /* ── 앱 함수에 얹기 ───────────────────────────────────────────────── */
+  function wrap(name, after) {
+    if (typeof window[name] !== 'function') return;
+    var orig = window[name];
+    window[name] = function () {
+      var r = orig.apply(this, arguments);
+      try { after(); } catch (e) { console.warn('[완료율] ' + name, e); }
+      return r;
+    };
+  }
+  wrap('renderTasks', function () { paint(); paintTrend(); });
+  wrap('renderPastTasks', paintTrend);
+  wrap('updateStat', paint);
+  wrap('filterTasks', function () { paint(); paintTrend(); });
+
+  /* 테스트/디버그용 */
+  window._psPaint   = function () { paint(); paintTrend(); };
+  window._psStats   = todayStats;
+  window._psRead    = read;
+  window._psWrite   = write;
+  window._psStreak  = function () { return computeStreak(read()); };
+  window._psAvg7    = function () { return avg7(read()); };
+  window._psToday   = today;
+  window._psShift   = shift;
+  window._psWeekOf  = weekOf;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(window._psPaint, 400); });
+  } else setTimeout(window._psPaint, 400);
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
