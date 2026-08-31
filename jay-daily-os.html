@@ -5792,7 +5792,7 @@ window.addEventListener('beforeunload', () => {
       imgs.forEach(function (im) {
         var d = document.createElement('div');
         d.className = 'dy-dead';
-        d.textContent = '사진 저장소가 연결 안 됐어';
+        d.textContent = '사진 링크가 아직 안 붙었어 (봇이 곧 붙인다)';
         im.replaceWith(d);
       });
       return;
@@ -5897,10 +5897,12 @@ window.addEventListener('beforeunload', () => {
       ? (when ? when + ' · ' + src + (e.pending ? ' · 올리는 중' : '') : src)
       : '';
     var photos = ((e || {}).photos || []).map(function (p) {
-      if (p.path) return '<img data-path="' + esc(p.path) + '" alt="" loading="lazy">';
-      var u = p.url || p.href || '';        /* 옛 형태 — 직접 URL */
-      return u ? '<img src="' + esc(u) + '" alt="" loading="lazy" '
-        + 'onclick="_dyView(\'' + esc(u) + '\')">' : '';
+      /* 봇이 서명해 넣어둔 url 을 그대로 쓴다 — 브라우저엔 키가 없다.
+         url 이 아직 없으면(갱신 전) path 로 자리만 잡는다. */
+      var u = p.url || p.href || '';
+      if (u) return '<img src=\'' + esc(u) + '\' alt=\'\' loading=\'lazy\' '
+        + 'onclick=\'_dyView(\\\'' + esc(u) + '\\\')\'>';
+      return p.path ? '<img data-path=\'' + esc(p.path) + '\' alt=\'\' loading=\'lazy\'>' : '';
     }).join('');
     return '<div class="dy-entry" data-k="' + k + '">'
       + '<div class="dy-date">' + md(k)
@@ -5930,8 +5932,8 @@ window.addEventListener('beforeunload', () => {
            : '<div class="dy-meta"></div>')
       + (((e || {}).photos || []).length
           ? '<div class="dy-photos">' + ((e.photos || []).map(function (p) {
-              return p.path ? '<img data-path="' + esc(p.path) + '" alt="" loading="lazy">'
-                            : (p.url ? '<img src="' + esc(p.url) + '" alt="">' : '');
+              return p.url ? '<img src=\'' + esc(p.url) + '\' alt=\'\' loading=\'lazy\'>'
+                           : (p.path ? '<img data-path=\'' + esc(p.path) + '\' alt=\'\'>' : '');
             }).join('')) + '</div>'
           : '')
       + '<textarea id="dyInput" class="dy-paper" rows="1" '
