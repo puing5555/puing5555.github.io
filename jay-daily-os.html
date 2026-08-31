@@ -6423,12 +6423,36 @@ window.addEventListener('beforeunload', () => {
   function slotCount(){ return Math.max(1, Math.round((endMin() - startMin()) / unit())); }
   /* 세로 위치는 **시간 비례**다. 눈금과 무관하므로 모드를 바꿔도 안 움직인다. */
   function yOf(min){ return ((min - startMin()) / 60) * HOUR_PX; }
-  function minOf(y){
-    var i = Math.floor(y / unitPx());
-    i = Math.max(0, Math.min(slotCount() - 1, i));
-    return startMin() + i * unit();
-  }
   function durPx(dur){ return (dur / 60) * HOUR_PX; }
+
+  /* 칸 본문의 가운데 X (픽셀). 세로 점선이 서 있는 자리와 같다. */
+  function midPx(){
+    var w = _grid ? _grid.clientWidth : 0;
+    return LABEL_PX + Math.max(0, w - LABEL_PX) / 2;
+  }
+
+  /* 클릭 지점 → 시작 분.
+     Y 는 시(時)만 고르고, 반쪽은 X 가 고른다. */
+  function slotAt(p){
+    var i = Math.floor(p.y / HOUR_PX);
+    i = Math.max(0, Math.min(hourCount() - 1, i));
+    var m = startMin() + i * 60;
+    if (unit() === 30 && p.x >= midPx()) m += 30;
+    return m;
+  }
+
+  /* 블록 한 개의 자리. 렌더와 히트 판정이 **같은 함수**를 쓴다 —
+     둘이 갈라지면 "보이는 곳"과 "눌리는 곳"이 어긋난다. */
+  function blockGeom(b){
+    var half = (b.dur <= 30) && (unit() === 30);
+    var hourStart = b.from - (b.from % 60);
+    return {
+      half: half,
+      right: half && ((b.from % 60) >= 30),
+      top: half ? yOf(hourStart) : yOf(b.from),      /* 좌·우는 같은 top */
+      h: half ? HOUR_PX : Math.max(12, durPx(b.dur)),
+    };
+  }
 
   function mount(){
     var host = document.getElementById('scheduleList');
@@ -6499,15 +6523,26 @@ window.addEventListener('beforeunload', () => {
       + '</div>';
   }
 
+  /* 오늘 이미 배정된 할 일 → { 정규화문구: "HH:MM" } */
+  function assignedMap(){
+    var m = {};
+    blocks().forEach(function(b){
+      var t = String(b.text || '').trim();
+      if (t) m[t] = hhmm(b.from);
+    });
+    return m;
+  }
+  window._tbAssigned = assignedMap;
+
   function drawChips(){
     var day = getDay();
+    var done = assignedMap();
     var open = ((day && day.tasks) || []).filter(function(t){
-      return !t.done && (t.when === 'today' || !t.when);
+      return !t.done && (t.when === 'today' || !t.when) && !done[String(t.text || '').trim()];
     });
-    if (!open.length) {
-      _chips.innerHTML = '<div style="font-size:11px;color:var(--muted)">배정할 할 일이 없어</div>';
-      return;
-    }
+    /* 배정이 끝나면 이 줄은 할 일이 없다 — 안내문도 같이 접는다.
+       왼쪽 "할 일" 목록이 이미 전체를 보여주므로 여기 빈 문구를 남길 이유가 없다. */
+    if (!open.length) { _chips.innerHTML = ''; return; }
     _chips.innerHTML =
       '<div style="width:100%;font-size:11px;color:var(--muted);margin-bottom:2px">'
       + (_armed ? '칸을 누르면 <b style="color:' + ACC + '">' + esc(_armed) + '</b> 배정'
@@ -6584,22 +6619,38 @@ window.addEventListener('beforeunload', () => {
       el.className = 'tb-block';
       el.dataset.id = b.id;
       /* 30분짜리는 그 시각이 속한 반쪽(좌 :00~:30 / 우 :30~:60)에 넣는다.
+         좌·우는 **같은 top, 같은 height** — 폭만 절반이다.
          30분을 넘으면 칸 전체 폭을 쓴다 (한 시간 이상은 좌우로 못 쪼갠다). */
-      var halfSlot = (b.dur <= 30) && (unit() === 30);
-      var rightHalf = halfSlot && ((b.from % 60) >= 30);
-      var lft = halfSlot
-        ? (rightHalf ? 'calc(' + MID_PCT + ' + 2px)' : (LABEL_PX + 4) + 'px')
+      var g = blockGeom(b);
+      var lft = g.half
+        ? (g.right ? 'calc(' + MID_PCT + ' + 2px)' : (LABEL_PX + 4) + 'px')
         : (LABEL_PX + 4) + 'px';
-      var rgt = halfSlot
-        ? (rightHalf ? '4px' : 'calc(100% - (' + MID_PCT + ') + 2px)')
+      var rgt = g.half
+        ? (g.right ? '4px' : 'calc(100% - (' + MID_PCT + ') + 2px)')
         : '4px';
       el.style.cssText = 'position:absolute;left:' + lft + ';right:' + rgt + ';box-sizing:border-box;'
-        /* 세로 길이는 실제 시간만큼 — 30분=반 칸 높이, 1시간=한 칸 */
-        + 'top:' + yOf(b.from) + 'px;height:' + Math.max(12, durPx(b.dur)) + 'px;'
+        + 'top:' + g.top + 'px;height:' + g.h + 'px;'
         + 'background:var(--surface);border:1.5px solid ' + (b.task ? ACC : 'var(--border2)') + ';'
-        + 'border-radius:8px;padding:3px 8px;font-size:12px;color:var(--text);'
-        + 'overflow:hidden;cursor:grab;line-height:1.35';
-      el.textContent = b.text || '(비어 있음)';
+        + 'border-radius:8px;padding:3px 8px;color:var(--text);'
+        + 'overflow:hidden;cursor:grab';
+      el.title = b.text || '';                 /* 호버하면 전체 제목 */
+
+      /* 높이 안에 몇 줄이 들어가는지 먼저 계산한다. 그 줄 수로만 끊으면
+         글자가 세로로 반 잘리는 일이 없다. */
+      var txt = b.text || '(비어 있음)';
+      var boxH = Math.max(12, durPx(b.dur)) - 6;     /* 위아래 padding 3px씩 */
+      var fsz = txt.length > 18 ? 11 : 12;           /* 긴 제목은 한 단계 작게 */
+      var lh = Math.round(fsz * 1.3);
+      var lines = Math.max(1, Math.floor(boxH / lh));
+      var lab = document.createElement('div');
+      lab.className = 'tb-label';
+      lab.style.cssText = 'display:-webkit-box;-webkit-box-orient:vertical;'
+        + '-webkit-line-clamp:' + lines + ';line-clamp:' + lines + ';overflow:hidden;'
+        + 'text-overflow:ellipsis;word-break:break-word;'
+        + 'font-size:' + fsz + 'px;line-height:' + lh + 'px;'
+        + 'max-height:' + (lines * lh) + 'px';
+      lab.textContent = txt;
+      el.appendChild(lab);
       var grip = document.createElement('div');
       grip.className = 'tb-grip';
       grip.style.cssText = 'position:absolute;left:0;right:0;bottom:-3px;height:10px;'
@@ -6633,15 +6684,20 @@ window.addEventListener('beforeunload', () => {
     drawHead();
     drawChips();
     drawGrid();
+    try { stampTasks(); } catch(e){}
   }
 
   /* ── 조작 ─────────────────────────────────────────────────────────── */
-  function blockAt(y){
-    var list = blocks();
+  function blockAt(p){
+    var list = blocks(), mid = midPx();
     for (var i = list.length - 1; i >= 0; i--) {
-      var top = yOf(list[i].from);
-      var h = Math.max(12, durPx(list[i].dur));
-      if (y >= top && y < top + h) return list[i];
+      var g = blockGeom(list[i]);
+      if (p.y < g.top || p.y >= g.top + g.h) continue;
+      if (g.half) {                       /* 반쪽은 좌/우까지 맞아야 한다 */
+        if (g.right && p.x < mid) continue;
+        if (!g.right && p.x >= mid) continue;
+      }
+      return list[i];
     }
     return null;
   }
@@ -6650,16 +6706,16 @@ window.addEventListener('beforeunload', () => {
     if (ev.target && ev.target.tagName === 'INPUT') return;   /* 입력 중 */
     _moved = false;
     var p = local(ev);
-    var b = blockAt(p.y);
+    var b = blockAt(p);
     ev.preventDefault();
     try { _grid.setPointerCapture(ev.pointerId); } catch(e){}
     if (b) {
-      var top = yOf(b.from);
-      var h = Math.max(12, durPx(b.dur));
-      var mode = (p.y >= top + h - 10) ? 'resize' : 'move';
-      _drag = { kind: mode, id: b.id, y0: p.y, from0: b.from, dur0: b.dur };
+      var g = blockGeom(b);
+      var mode = (p.y >= g.top + g.h - 10) ? 'resize' : 'move';
+      _drag = { kind: mode, id: b.id, y0: p.y, x0: p.x,
+                from0: b.from, dur0: b.dur };
     } else {
-      _drag = { kind: 'new', y0: p.y, from: minOf(p.y) };
+      _drag = { kind: 'new', y0: p.y, x0: p.x, from: slotAt(p) };
     }
   }
 
@@ -6670,17 +6726,30 @@ window.addEventListener('beforeunload', () => {
     if (!_moved) return;
     var u = unit();
     if (_drag.kind === 'new') {
-      var a = Math.min(_drag.from, minOf(p.y)), z = Math.max(_drag.from, minOf(p.y));
-      _drag.preview = { from: a, dur: (z - a) + u };
-      paintPreview(_drag.preview);
+      var cur = slotAt(p);
+      var a = Math.min(_drag.from, cur), z = Math.max(_drag.from, cur);
+      /* 같은 칸 안에서 끝나면 반쪽(또는 좌→우로 한 칸).
+         칸을 넘어가면 지나온 칸 수만큼 통째로 잡는다 — 종이에 세로로 긋는 느낌. */
+      var ha = Math.floor((a - startMin()) / 60), hz = Math.floor((z - startMin()) / 60);
+      var pv;
+      if (ha === hz) pv = { from: a, dur: (a === z) ? u : 60 };
+      else pv = { from: startMin() + ha * 60, dur: (hz - ha + 1) * 60 };
+      _drag.preview = pv;
+      paintPreview(pv);
     } else {
       var list = blocks();
       var b = list.filter(function(x){ return x.id === _drag.id; })[0];
       if (!b) return;
-      var d = Math.round((p.y - _drag.y0) / unitPx()) * u;   /* 눈금 단위로 스냅 */
       if (_drag.kind === 'move') {
-        b.from = Math.max(startMin(), Math.min(endMin() - b.dur, _drag.from0 + d));
+        /* 세로는 시(時) 단위로 옮기고, 반쪽은 지금 포인터의 X 가 정한다.
+           (옛 코드는 세로 이동만으로 :00 ↔ :30 을 바꿔서 오른쪽 블록이 밀렸다) */
+        var cells = Math.round((p.y - _drag.y0) / HOUR_PX);
+        var half = (b.dur <= 30) && (u === 30);
+        var hour = (_drag.from0 - (_drag.from0 % 60)) + cells * 60;
+        var want = half ? (hour + (p.x >= midPx() ? 30 : 0)) : hour;
+        b.from = Math.max(startMin(), Math.min(endMin() - b.dur, want));
       } else {
+        var d = Math.round((p.y - _drag.y0) / unitPx()) * u;
         b.dur = Math.max(u, Math.min(endMin() - b.from, _drag.dur0 + d));
       }
       setBlocks(list);
@@ -6697,8 +6766,15 @@ window.addEventListener('beforeunload', () => {
         + ';border-radius:8px;background:var(--accent-dim);pointer-events:none;z-index:4';
       _grid.appendChild(el);
     }
-    el.style.top = yOf(pv.from) + 'px';
-    el.style.height = durPx(pv.dur) + 'px';
+    var g = blockGeom({ from: pv.from, dur: pv.dur });
+    el.style.top = g.top + 'px';
+    el.style.height = g.h + 'px';
+    el.style.left = g.half
+      ? (g.right ? 'calc(' + MID_PCT + ' + 2px)' : (LABEL_PX + 4) + 'px')
+      : (LABEL_PX + 4) + 'px';
+    el.style.right = g.half
+      ? (g.right ? '4px' : 'calc(100% - (' + MID_PCT + ') + 2px)')
+      : '4px';
   }
 
   function onUp(ev){
@@ -6722,9 +6798,9 @@ window.addEventListener('beforeunload', () => {
     if (_moved) { _moved = false; drawGrid(); return; }   /* 이동·리사이즈 끝 */
 
     /* 탭 — click 에 안 기댄다 (터치에서 삼켜진다) */
-    var b = blockAt(p.y);
+    var b = blockAt(p);
     if (b) { edit(b.id); return; }
-    var nb2 = { id: uid(), from: minOf(p.y), dur: unit(),
+    var nb2 = { id: uid(), from: slotAt(p), dur: unit(),
                 text: _armed || '', task: !!_armed };
     var list2 = blocks(); list2.push(nb2); setBlocks(list2);
     var wasArmed = !!_armed;
@@ -6802,8 +6878,50 @@ window.addEventListener('beforeunload', () => {
   };
   window._tbRender = draw;
   window._tbState = function(){ return { date: _date, all: readAll(), armed: _armed }; };
+  /* 테스트가 좌표 판정을 직접 확인할 수 있게 열어둔다 (픽셀 클릭은 스크롤에 취약하다) */
+  window._tbSlotAt = function(p){ return slotAt(p); };
+  window._tbMidPx = function(){ return midPx(); };
 
   /* 삭제 — 블록을 비우면 사라지므로 별도 버튼은 두지 않는다(설명은 힌트로) */
+
+  /* ── 왼쪽 "할 일" 목록에 배정 시각 뱃지 ───────────────────────────────
+     배정했다고 할 일이 사라지면 안 된다. 목록엔 그대로 두되 상태만 보이게 한다. */
+  function stampTasks(){
+    var host = document.getElementById('taskList');
+    if (!host) return;
+    var map = assignedMap();
+    [].slice.call(host.querySelectorAll('.tb-when')).forEach(function(x){
+      if (x.parentNode) x.parentNode.removeChild(x);
+    });
+    if (!Object.keys(map).length) return;
+    [].slice.call(host.children).forEach(function(row){
+      var txt = (row.textContent || '');
+      var hit = null;
+      Object.keys(map).forEach(function(k){
+        if (k && txt.indexOf(k) >= 0 && (!hit || k.length > hit.length)) hit = k;
+      });
+      if (!hit) return;
+      var tag = document.createElement('span');
+      tag.className = 'tb-when';
+      tag.textContent = map[hit];
+      tag.title = '타임박스 ' + map[hit] + ' 에 배정됨';
+      tag.style.cssText = 'flex-shrink:0;font-size:10px;font-weight:700;color:' + ACC + ';'
+        + 'background:var(--accent-dim);border-radius:5px;padding:1px 6px;margin-left:6px;'
+        + 'font-family:JetBrains Mono,monospace';
+      var slot = row.querySelector('div, span') || row;
+      (slot.parentNode || row).insertBefore(tag, slot.nextSibling);
+    });
+  }
+  window._tbStampTasks = stampTasks;
+
+  if (typeof window.renderTasks === 'function') {
+    var _origRenderTasks = window.renderTasks;
+    window.renderTasks = function(){
+      var r = _origRenderTasks.apply(this, arguments);
+      try { stampTasks(); } catch(e){ console.warn('[타임박스] 뱃지 실패', e); }
+      return r;
+    };
+  }
 
   /* ── 앱의 renderSchedule 자리를 차지한다 ──────────────────────────── */
   var _orig = window.renderSchedule;
