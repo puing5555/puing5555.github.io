@@ -6138,11 +6138,12 @@ window.addEventListener('beforeunload', () => {
   }
 
   var KEY = 'jay_timebox';
-  var UNITS = [20, 30, 60];
+  var UNITS = [30, 60];          /* 20분은 뺐다 — 종이 플래너엔 없는 눈금이다 */
   var DEF_UNIT = 30;
   var DEF_START = 6 * 60;        /* 06:00 */
   var DEF_END = 26 * 60;         /* 다음날 02:00 */
-  var SLOT_PX = { 20: 26, 30: 34, 60: 56 };
+  /* ⚠ 칸 높이는 **시간당** 고정이다. 모드를 바꿔도 같은 높이라 화면이 안 흔들린다. */
+  var HOUR_PX = 56;
   var ANCHORS = [[8 * 60, '아침 앵커'], [13 * 60, '점심 앵커'], [21 * 60, '저녁 앵커']];
 
   var esc = (typeof coEsc === 'function') ? coEsc : function(s){
@@ -6156,6 +6157,7 @@ window.addEventListener('beforeunload', () => {
     try {
       var d = JSON.parse(localStorage.getItem(KEY) || 'null') || {};
       d.v = 1;
+      /* 옛 20분 설정이 남아 있으면 30분으로 올린다 (2026-09-01에 옵션을 뺐다) */
       d.unit = UNITS.indexOf(d.unit) >= 0 ? d.unit : DEF_UNIT;
       d.start = (typeof d.start === 'number') ? d.start : DEF_START;
       d.end = (typeof d.end === 'number') ? d.end : DEF_END;
@@ -6236,16 +6238,20 @@ window.addEventListener('beforeunload', () => {
   var _moved = false;
 
   function unit(){ return readAll().unit; }
-  function slotPx(){ return SLOT_PX[unit()] || 34; }
   function startMin(){ return readAll().start; }
   function endMin(){ return readAll().end; }
+  function hourCount(){ return Math.max(1, Math.round((endMin() - startMin()) / 60)); }
+  /* 눈금 한 칸의 픽셀 — 30분이면 반 칸(28px), 60분이면 한 칸(56px) */
+  function unitPx(){ return HOUR_PX * unit() / 60; }
   function slotCount(){ return Math.max(1, Math.round((endMin() - startMin()) / unit())); }
-  function yOf(min){ return ((min - startMin()) / unit()) * slotPx(); }
+  /* 세로 위치는 **시간 비례**다. 눈금과 무관하므로 모드를 바꿔도 안 움직인다. */
+  function yOf(min){ return ((min - startMin()) / 60) * HOUR_PX; }
   function minOf(y){
-    var i = Math.floor(y / slotPx());
+    var i = Math.floor(y / unitPx());
     i = Math.max(0, Math.min(slotCount() - 1, i));
     return startMin() + i * unit();
   }
+  function durPx(dur){ return (dur / 60) * HOUR_PX; }
 
   function mount(){
     var host = document.getElementById('scheduleList');
@@ -6343,25 +6349,34 @@ window.addEventListener('beforeunload', () => {
   }
 
   function drawGrid(){
-    var u = unit(), sp = slotPx(), n = slotCount();
-    _grid.style.height = (n * sp) + 'px';
+    var u = unit(), n = hourCount();
+    _grid.style.height = (n * HOUR_PX) + 'px';
     _grid.innerHTML = '';
 
-    /* 칸 배경 + 시간 라벨 */
+    /* 시(時)마다 큰 칸 하나. 30분 모드면 그 안에 가로 점선으로 반을 가른다. */
     for (var i = 0; i < n; i++) {
-      var m = startMin() + i * u;
-      var onHour = (m % 60) === 0;
-      var row = document.createElement('div');
-      row.style.cssText = 'position:absolute;left:0;right:0;height:' + sp + 'px;top:' + (i * sp)
-        + 'px;border-top:1px solid ' + (onHour ? 'var(--border2)' : 'var(--border)')
-        + ';box-sizing:border-box';
+      var m = startMin() + i * 60;
+      var cell = document.createElement('div');
+      cell.className = 'tb-hour';
+      cell.style.cssText = 'position:absolute;left:0;right:0;box-sizing:border-box;'
+        + 'height:' + HOUR_PX + 'px;top:' + (i * HOUR_PX) + 'px;'
+        + 'border-top:1px solid var(--border2)';
       var lab = document.createElement('div');
-      lab.style.cssText = 'position:absolute;left:0;top:1px;width:42px;font-size:10px;'
-        + 'font-family:JetBrains Mono,monospace;color:' + (onHour ? 'var(--text2)' : 'var(--muted)')
-        + ';pointer-events:none';
-      lab.textContent = onHour ? hhmm(m) : '';
-      row.appendChild(lab);
-      _grid.appendChild(row);
+      lab.style.cssText = 'position:absolute;left:0;top:2px;width:42px;font-size:11px;'
+        + 'font-family:JetBrains Mono,monospace;color:var(--text2);pointer-events:none';
+      lab.textContent = hhmm(m);
+      cell.appendChild(lab);
+      if (u === 30) {
+        /* 반 칸 점선 — 칸을 쪼개는 게 아니라 안에 선만 긋는다 */
+        var half = document.createElement('div');
+        half.className = 'tb-half';
+        /* 50% 로 두면 칸 높이가 바뀌어도 늘 한가운데다 (칸 테두리 1px 만큼의
+           오차는 눈에 안 보이고, 하드코딩보다 안전하다) */
+        half.style.cssText = 'position:absolute;left:42px;right:0;top:50%;'
+          + 'border-top:1px dashed var(--border);pointer-events:none';
+        cell.appendChild(half);
+      }
+      _grid.appendChild(cell);
     }
 
     /* 루틴 고스트 — 클릭 대상 아님 */
@@ -6370,7 +6385,7 @@ window.addEventListener('beforeunload', () => {
       var el = document.createElement('div');
       el.className = 'tb-ghost';
       el.style.cssText = 'position:absolute;left:46px;right:4px;pointer-events:none;'
-        + 'top:' + yOf(g.from) + 'px;height:' + ((g.dur / unit()) * slotPx()) + 'px;'
+        + 'top:' + yOf(g.from) + 'px;height:' + durPx(g.dur) + 'px;'
         + 'border:1px dashed var(--border2);border-radius:7px;background:var(--surface2);'
         + 'opacity:.55;font-size:10px;color:var(--muted);padding:2px 6px;box-sizing:border-box;'
         + 'overflow:hidden';
@@ -6384,7 +6399,8 @@ window.addEventListener('beforeunload', () => {
       el.className = 'tb-block';
       el.dataset.id = b.id;
       el.style.cssText = 'position:absolute;left:46px;right:4px;box-sizing:border-box;'
-        + 'top:' + yOf(b.from) + 'px;height:' + Math.max(sp, (b.dur / u) * sp) + 'px;'
+        /* 점선은 무시하고 실제 길이만큼 — 30분이면 반 칸, 1시간이면 한 칸 */
+        + 'top:' + yOf(b.from) + 'px;height:' + Math.max(12, durPx(b.dur)) + 'px;'
         + 'background:var(--surface);border:1.5px solid ' + (b.task ? ACC : 'var(--border2)') + ';'
         + 'border-radius:8px;padding:3px 8px;font-size:12px;color:var(--text);'
         + 'overflow:hidden;cursor:grab;line-height:1.35';
@@ -6429,7 +6445,7 @@ window.addEventListener('beforeunload', () => {
     var list = blocks();
     for (var i = list.length - 1; i >= 0; i--) {
       var top = yOf(list[i].from);
-      var h = Math.max(slotPx(), (list[i].dur / unit()) * slotPx());
+      var h = Math.max(12, durPx(list[i].dur));
       if (y >= top && y < top + h) return list[i];
     }
     return null;
@@ -6444,7 +6460,7 @@ window.addEventListener('beforeunload', () => {
     try { _grid.setPointerCapture(ev.pointerId); } catch(e){}
     if (b) {
       var top = yOf(b.from);
-      var h = Math.max(slotPx(), (b.dur / unit()) * slotPx());
+      var h = Math.max(12, durPx(b.dur));
       var mode = (p.y >= top + h - 10) ? 'resize' : 'move';
       _drag = { kind: mode, id: b.id, y0: p.y, from0: b.from, dur0: b.dur };
     } else {
@@ -6466,7 +6482,7 @@ window.addEventListener('beforeunload', () => {
       var list = blocks();
       var b = list.filter(function(x){ return x.id === _drag.id; })[0];
       if (!b) return;
-      var d = Math.round((p.y - _drag.y0) / slotPx()) * u;
+      var d = Math.round((p.y - _drag.y0) / unitPx()) * u;   /* 눈금 단위로 스냅 */
       if (_drag.kind === 'move') {
         b.from = Math.max(startMin(), Math.min(endMin() - b.dur, _drag.from0 + d));
       } else {
@@ -6487,7 +6503,7 @@ window.addEventListener('beforeunload', () => {
       _grid.appendChild(el);
     }
     el.style.top = yOf(pv.from) + 'px';
-    el.style.height = ((pv.dur / unit()) * slotPx()) + 'px';
+    el.style.height = durPx(pv.dur) + 'px';
   }
 
   function onUp(ev){
@@ -6611,7 +6627,7 @@ window.addEventListener('beforeunload', () => {
     drawGrid();
   }, 60000);
 
-  console.log('[타임박스] 켜짐 — 칸 ' + unit() + '분');
+  console.log('[타임박스] 켜짐 — 시당 한 칸 · 눈금 ' + unit() + '분');
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
@@ -9807,6 +9823,98 @@ async function renderCoach(force){
   };
 
   console.log('[subs] 구독 메뉴 켜짐 — 대기 ' + Object.keys(readQ()).length + '건');
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
+(function(){
+  var MASK_OK = (function(){
+    try {
+      var d = document.createElement('input');
+      return ('webkitTextSecurity' in d.style) || ('textSecurity' in d.style);
+    } catch(e){ return false; }
+  })();
+
+  var IGN = {
+    autocomplete: 'off',
+    autocorrect: 'off',
+    autocapitalize: 'off',
+    spellcheck: 'false',
+    'data-lpignore': 'true',
+    'data-form-type': 'other',
+  };
+
+  function nameFor(el){
+    var id = el.id || '';
+    if (id) return 'f-' + id.replace(/[^\w-]/g, '');
+    return 'f-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function harden(el){
+    if (!el || el.__ig) return;
+    el.__ig = 1;
+
+    /* 비밀번호 칸을 없앤다 — 이게 크롬 저장 팝업의 뿌리다 */
+    if (el.tagName === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'password') {
+      if (MASK_OK) {
+        el.setAttribute('data-was-password', '1');
+        el.type = 'text';
+        el.style.webkitTextSecurity = 'disc';
+        el.style.textSecurity = 'disc';
+        /* 폰트가 바뀌면 점 모양이 달라진다 — 원래 폰트를 유지한다 */
+        if (!el.style.fontFamily) el.style.fontFamily = 'inherit';
+      }
+    }
+
+    Object.keys(IGN).forEach(function(k){
+      try { el.setAttribute(k, IGN[k]); } catch(e){}
+    });
+    try { el.setAttribute('data-1p-ignore', ''); } catch(e){}
+    try { el.setAttribute('data-bwignore', ''); } catch(e){}
+    /* 이름이 없으면 크롬이 주변 라벨로 종류를 추측한다 — 중립적인 이름을 준다 */
+    if (!el.getAttribute('name')) {
+      try { el.setAttribute('name', nameFor(el)); } catch(e){}
+    }
+  }
+
+  function sweep(root){
+    var n = 0;
+    try {
+      (root || document).querySelectorAll('input, textarea').forEach(function(el){
+        if (!el.__ig) { harden(el); n++; }
+      });
+    } catch(e){}
+    return n;
+  }
+
+  var first = sweep(document);
+
+  /* 앱은 화면 대부분을 innerHTML 로 다시 그린다 — 새로 생긴 칸도 잡아야 한다 */
+  var pending = null;
+  try {
+    new MutationObserver(function(){
+      if (pending) return;
+      pending = setTimeout(function(){ pending = null; sweep(document); }, 120);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  } catch(e){ console.warn('[입력가드] 감시 실패', e); }
+
+  document.addEventListener('DOMContentLoaded', function(){ sweep(document); });
+  window.addEventListener('load', function(){ sweep(document); });
+
+  window._inputGuardSweep = function(){ return sweep(document); };
+  window._inputGuardState = function(){
+    var all = [].slice.call(document.querySelectorAll('input, textarea'));
+    return {
+      total: all.length,
+      hardened: all.filter(function(e){ return e.__ig; }).length,
+      passwords: all.filter(function(e){ return (e.getAttribute('type') || '').toLowerCase() === 'password'; }).length,
+      masked: all.filter(function(e){ return e.getAttribute('data-was-password') === '1'; }).length,
+      maskSupported: MASK_OK,
+    };
+  };
+
+  console.log('[입력가드] 켜짐 — 처음 ' + first + '칸 처리 · 가림 지원 ' + MASK_OK);
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
