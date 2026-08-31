@@ -604,6 +604,107 @@ body {
 
 <!-- TONY-COACH-TAB:BEGIN -->
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&display=swap');
+
+  #panel-diary { background: var(--bg); }
+  #dyWrap {
+    max-width: 620px; margin: 0 auto; padding: 34px 26px 120px;
+  }
+
+  /* ── 머리: 연속 기록 ── */
+  #dyHead { margin-bottom: 30px; }
+  #dyStreak {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted); margin-bottom: 14px;
+  }
+  #dyStreak .dy-fire { font-size: 15px; font-weight: 800; color: var(--accent); }
+  #dyGrid { display: flex; flex-direction: column; gap: 3px; }
+  #dyGrid .dy-row { display: flex; gap: 3px; }
+  #dyGrid .dy-cell {
+    width: 11px; height: 11px; border-radius: 2px;
+    background: var(--surface2); border: 1px solid transparent;
+  }
+  #dyGrid .dy-cell.on   { background: var(--accent); }
+  #dyGrid .dy-cell.soft { background: var(--accent-dim); }
+  #dyGrid .dy-cell.pic  { box-shadow: inset 0 0 0 1.5px var(--surface); border-color: var(--green); }
+  #dyGrid .dy-cell.today { border-color: var(--text2); }
+  #dyGrid .dy-cell.gap  { background: transparent; }
+  #dyMonths { display: flex; gap: 3px; font-size: 9px; color: var(--muted);
+              margin-bottom: 3px; font-family: JetBrains Mono, monospace; }
+
+  /* ── 쓰는 자리 = 읽는 자리 ── */
+  .dy-entry { margin: 0 0 40px; }
+  .dy-date {
+    font-family: 'Noto Serif KR', serif;
+    font-size: 26px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.3px; margin-bottom: 2px;
+  }
+  .dy-date .dy-dow { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .dy-meta { font-size: 11px; color: var(--muted); margin-bottom: 14px;
+             font-family: JetBrains Mono, monospace; }
+
+  /* 괘선 — 본문 줄높이에 맞춘 얇은 가로선. 과하지 않게 아주 옅게. */
+  .dy-paper {
+    font-family: 'Noto Serif KR', serif;
+    font-size: 16px; line-height: 32px; color: var(--text);
+    background-image: linear-gradient(to bottom,
+      transparent 0 31px, var(--border) 31px 32px);
+    background-size: 100% 32px;
+    background-attachment: local;
+    padding: 0; margin: 0; white-space: pre-wrap; word-break: break-word;
+  }
+  .dy-learned {
+    font-family: 'Noto Serif KR', serif;
+    font-size: 14px; line-height: 26px; color: var(--text2);
+    margin-top: 14px; padding-left: 12px; border-left: 2px solid var(--accent-dim);
+  }
+  .dy-learned b { font-weight: 600; color: var(--muted); font-size: 11px;
+                  display: block; letter-spacing: .5px; }
+
+  /* 입력 — 폼처럼 보이지 않게. 테두리 없음, 같은 괘선 위. */
+  #dyInput {
+    width: 100%; border: none; outline: none; resize: none; overflow: hidden;
+    /* ⚠ background 단축을 쓰면 .dy-paper 의 괘선(background-image)까지 지워진다.
+       그러면 입력칸만 종이 결을 잃어서 "쓰는 자리 = 읽는 자리" 가 깨진다. */
+    background-color: transparent; display: block; box-sizing: border-box;
+  }
+  #dyInput::placeholder { color: var(--muted); opacity: .75; }
+  #dyBar { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+           font-size: 11px; color: var(--muted); }
+  #dySave {
+    padding: 6px 16px; border-radius: 999px; border: none;
+    background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+  }
+  #dySave[disabled] { background: var(--surface2); color: var(--muted); cursor: default; }
+
+  .dy-sep { height: 1px; background: var(--border2); opacity: .6;
+            margin: 0 0 34px; border: 0; }
+  .dy-jump { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 26px; }
+  .dy-jump button {
+    padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border2);
+    background: transparent; color: var(--text2); font-size: 11px; cursor: pointer;
+    font-family: JetBrains Mono, monospace;
+  }
+  .dy-jump button.on { background: var(--accent-dim); border-color: var(--accent);
+                       color: var(--accent); font-weight: 700; }
+  .dy-empty { font-family: 'Noto Serif KR', serif; color: var(--muted);
+              font-size: 15px; line-height: 30px; }
+  .dy-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  .dy-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+               gap: 8px; margin-top: 16px; }
+  .dy-photos img { width: 100%; border-radius: 8px; display: block; cursor: zoom-in; }
+
+  @media (max-width: 560px) {
+    #dyWrap { padding: 22px 18px 120px; }
+    .dy-date { font-size: 22px; }
+    .dy-paper { font-size: 15px; }
+  }
+</style>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<style>
   #psBar {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     padding: 0 2px 10px; font-size: 12px;
@@ -927,6 +1028,11 @@ body {
       <span class="nav-icon">📄</span> 문서
     </button>
 <!-- TONY-COACH-TAB:BEGIN -->
+    <button class="nav-btn" onclick="switchPanel('diary',this)">
+      <span class="nav-icon">📔</span> 일기장
+    </button>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
     <button class="nav-btn" onclick="switchPanel('motiv',this)">
       <span class="nav-icon">🔥</span> 동기부여
     </button>
@@ -1129,6 +1235,11 @@ body {
 <!-- TONY-COACH-TAB:BEGIN -->
     <div id="panel-motiv" class="panel" style="padding:20px 24px;overflow-y:auto">
       <div id="motivBody"></div>
+    </div>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+    <div id="panel-diary" class="panel" style="padding:0;overflow-y:auto">
+      <div id="dyRoot"></div>
     </div>
 <!-- TONY-COACH-TAB:END -->
 
@@ -1541,7 +1652,7 @@ function switchPanel(name, el) {
     }
   }
   currentPanel = name;
-  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', cal:'📅 달력', goals:'🎯 목표', poker:'🃏 포커', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서', coach:'🏋️ 코치', motiv:'🔥 동기부여' };
+  const titles = { dump:'🧠 브레인덤프', today:'📋 오늘', cal:'📅 달력', goals:'🎯 목표', poker:'🃏 포커', routine:'🔁 루틴', memo:'🗂️ 메모', docs:'📄 문서', coach:'🏋️ 코치', motiv:'🔥 동기부여', diary:'📔 일기장' };
   document.getElementById('mainTitle').textContent = titles[name] || name;
   if (name === 'today') renderTasks();
   if (name === 'cal') renderCal();
@@ -1551,6 +1662,7 @@ function switchPanel(name, el) {
   if (name === 'memo') renderMemo();
   if (name === 'coach') renderCoach();
   if (name === 'motiv') renderMotiv();
+  if (name === 'diary') renderDiary();
   if (name === 'docs') renderDocs();
 }
 
@@ -5497,6 +5609,307 @@ window.addEventListener('beforeunload', () => {
 
 <!-- TONY-COACH-TAB:BEGIN -->
 <script>
+(function () {
+  'use strict';
+
+  var FILE = 'diary.json';
+  var QUEUE = 'jay_diaryQueue';           /* 앱 → 봇 큐 (jay_ 라 Gist 로 실려 간다) */
+  var _data = null;                        /* {entries, best, freezes} */
+  var _err = '';
+  var _month = null;                       /* 'YYYY-MM' 또는 null = 전체 */
+
+  /* ── 날짜 ─────────────────────────────────────────────────────────── */
+  var DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  function key(d){
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+      + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function today(){ return key(new Date()); }
+  function parse(k){ return new Date(+k.slice(0, 4), +k.slice(5, 7) - 1, +k.slice(8, 10)); }
+  function shift(k, n){ var d = parse(k); d.setDate(d.getDate() + n); return key(d); }
+  function weekOf(k){
+    var d = parse(k);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 3);      /* 그 주 목요일 */
+    var jan4 = new Date(d.getFullYear(), 0, 4);
+    return d.getFullYear() + '-W' + String(1 + Math.round((d - jan4) / 604800000)).padStart(2, '0');
+  }
+
+  /* ── 큐 (앱에서 쓴 것) ────────────────────────────────────────────── */
+  function queue(){
+    try { return JSON.parse(localStorage.getItem(QUEUE) || '{}') || {}; }
+    catch (e) { return {}; }
+  }
+  function enqueue(date, text, learned){
+    var q = queue();
+    q['dy' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)] = {
+      date: date, text: text, learned: learned || '',
+      at: new Date().toISOString(),
+    };
+    /* 봇이 반영하면 diary.applied 에 ack 가 돌아온다 — 그때 큐에서 지운다 */
+    var app = (_data && _data.applied) || {};
+    Object.keys(q).forEach(function (id) { if (app[id]) delete q[id]; });
+    localStorage.setItem(QUEUE, JSON.stringify(q));
+  }
+  /* 서버본 + 아직 안 실린 큐를 합친 화면용 항목 */
+  function entries(){
+    var out = {};
+    var src = (_data && _data.entries) || {};
+    Object.keys(src).forEach(function (k) { out[k] = Object.assign({}, src[k]); });
+    var app = (_data && _data.applied) || {};
+    Object.keys(queue()).forEach(function (id) {
+      if (app[id]) return;
+      var e = queue()[id];
+      if (!e || !e.date) return;
+      var cur = out[e.date];
+      if (cur && String(cur.text || '').indexOf(e.text) >= 0) return;
+      out[e.date] = {
+        date: e.date,
+        text: cur && cur.text ? (cur.text + '\n\n' + e.text) : e.text,
+        learned: e.learned || (cur && cur.learned) || '',
+        at: e.at, source: 'app', pending: true,
+        photos: (cur && cur.photos) || [],
+      };
+    });
+    return out;
+  }
+  function wrote(k, ents){ var e = (ents || entries())[k]; return !!(e && String(e.text || '').trim()); }
+
+  /* ── 연속 기록 — 봇(diary.py)과 같은 규칙 ──────────────────────────── */
+  function streak(){
+    var ents = entries(), keys = Object.keys(ents).filter(function (k) { return wrote(k, ents); });
+    if (!keys.length) return { cur: 0, best: (_data && _data.best) || 0, wroteToday: false };
+    var first = keys.sort()[0];
+    var spent = Object.assign({}, (_data && _data.freezes) || {});
+    var k = today(), cur = 0, isFirst = true;
+    while (k >= first) {
+      if (wrote(k, ents)) cur++;
+      else if (isFirst) { /* 오늘은 아직 안 끝났다 */ }
+      else {
+        var w = weekOf(k);
+        if (spent[w] && spent[w] !== k) break;
+        spent[w] = k; cur++;                       /* 주 1회 복구 */
+      }
+      isFirst = false;
+      k = shift(k, -1);
+    }
+    return { cur: cur, best: Math.max((_data && _data.best) || 0, cur),
+             wroteToday: wrote(today(), ents) };
+  }
+
+  /* ── 읽기 ─────────────────────────────────────────────────────────── */
+  async function fetchDiary(){
+    if (typeof coachToken !== 'function' || typeof coachResolve !== 'function')
+      throw new Error('동기화 설정이 아직 안 붙었어. 페이지를 새로고침해줘.');
+    var token = coachToken();
+    if (!token) throw new Error(
+      '앱 동기화 토큰이 아직 없어. 우측 상단 동기화 아이콘에서 토큰을 넣으면 일기장도 같이 연결돼.');
+    var r = await coachResolve(token);
+    var f = ((r.gist || {}).files || {})[FILE];
+    if (!f) return { v: 1, entries: {}, best: 0, freezes: {} };   /* 아직 한 줄도 없음 */
+    var txt = f.truncated && f.raw_url ? await (await fetch(f.raw_url)).text() : f.content;
+    try { return JSON.parse(txt || '{}'); } catch (e) { return { entries: {} }; }
+  }
+
+  /* ── 화면 ─────────────────────────────────────────────────────────── */
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+    });
+  }
+  function md(k){ return +k.slice(5, 7) + '월 ' + (+k.slice(8, 10)) + '일'; }
+
+  function heatmap(ents){
+    /* 최근 26주. 세로 = 요일, 가로 = 주 — 한 달치가 한눈에 들어온다. */
+    var end = parse(today());
+    end.setDate(end.getDate() + (6 - ((end.getDay() + 6) % 7)));   /* 그 주 일요일 */
+    var days = [];
+    for (var i = 26 * 7 - 1; i >= 0; i--) {
+      var d = new Date(end); d.setDate(d.getDate() - i);
+      days.push(key(d));
+    }
+    var rows = '';
+    for (var r = 0; r < 7; r++) {
+      var cells = '';
+      for (var c = 0; c < 26; c++) {
+        var k = days[c * 7 + r];
+        var e = ents[k];
+        var has = !!(e && String(e.text || '').trim());
+        var pic = !!(e && (e.photos || []).length);
+        var cls = 'dy-cell'
+          + (has ? (e.pending ? ' soft' : ' on') : '')
+          + (pic ? ' pic' : '')
+          + (k === today() ? ' today' : '')
+          + (k > today() ? ' gap' : '');
+        cells += '<div class="' + cls + '" title="' + k
+          + (has ? ' · 썼음' : '') + (pic ? ' · 사진' : '') + '"></div>';
+      }
+      rows += '<div class="dy-row">' + cells + '</div>';
+    }
+    return '<div id="dyGrid">' + rows + '</div>';
+  }
+
+  function entryHtml(k, e){
+    var d = parse(k);
+    var body = e && String(e.text || '').trim();
+    var when = e && e.at ? String(e.at).slice(11, 16) : '';
+    var src = e && e.source === 'app' ? '앱' : '토니';
+    var meta = body
+      ? (when ? when + ' · ' + src + (e.pending ? ' · 올리는 중' : '') : src)
+      : '';
+    var photos = ((e || {}).photos || []).map(function (p) {
+      var u = p.url || p.href || '';
+      return u ? '<img src="' + esc(u) + '" alt="" loading="lazy" '
+        + 'onclick="_dyView(\'' + esc(u) + '\')">' : '';
+    }).join('');
+    return '<div class="dy-entry" data-k="' + k + '">'
+      + '<div class="dy-date">' + md(k)
+      + '<span class="dy-dow">' + DOW[d.getDay()] + '</span></div>'
+      + (meta ? '<div class="dy-meta">' + esc(meta) + '</div>' : '<div class="dy-meta"></div>')
+      + (body ? '<div class="dy-paper">' + esc(body) + '</div>'
+              : '<div class="dy-empty">비어 있는 날.</div>')
+      + (e && e.learned ? '<div class="dy-learned"><b>배운 것</b>' + esc(e.learned) + '</div>' : '')
+      + (photos ? '<div class="dy-photos">' + photos + '</div>' : '')
+      + '</div>';
+  }
+
+  function writerHtml(ents){
+    var k = today();
+    var e = ents[k];
+    var has = !!(e && String(e.text || '').trim());
+    var d = parse(k);
+    return '<div class="dy-entry">'
+      + '<div class="dy-date">' + md(k)
+      + '<span class="dy-dow">' + DOW[d.getDay()] + ' · 오늘</span></div>'
+      + (has ? '<div class="dy-meta">' + esc((e.at || '').slice(11, 16))
+               + (e.pending ? ' · 올리는 중' : '') + '</div>'
+               + '<div class="dy-paper">' + esc(e.text) + '</div>'
+             : '<div class="dy-meta"></div>')
+      + '<textarea id="dyInput" class="dy-paper" rows="1" '
+      + 'placeholder="' + (has ? '하나 더 떠올랐으면 여기에.' : '한 줄만 써도 돼.') + '"></textarea>'
+      + '<div id="dyBar"><button id="dySave" disabled>담기</button>'
+      + '<span id="dyHint">' + (has ? '이어서 붙는다 — 먼저 쓴 건 안 지워져.'
+                                    : '길게 쓰고 싶으면 그냥 계속 쓰면 돼.') + '</span></div>'
+      + '</div>';
+  }
+
+  function months(ents){
+    var set = {};
+    Object.keys(ents).forEach(function (k) { set[k.slice(0, 7)] = 1; });
+    var list = Object.keys(set).sort().reverse().slice(0, 14);
+    if (!list.length) return '';
+    return '<div class="dy-jump">'
+      + '<button data-m="" class="' + (_month ? '' : 'on') + '">전체</button>'
+      + list.map(function (m) {
+          return '<button data-m="' + m + '" class="' + (_month === m ? 'on' : '') + '">'
+            + m.slice(2).replace('-', '/') + '</button>';
+        }).join('')
+      + '</div>';
+  }
+
+  function render(){
+    var root = document.getElementById('dyRoot');
+    if (!root) return;
+    if (_err) {
+      root.innerHTML = '<div id="dyWrap"><div class="dy-empty">' + esc(_err) + '</div></div>';
+      return;
+    }
+    if (!_data) {
+      root.innerHTML = '<div id="dyWrap"><div class="dy-empty">불러오는 중…</div></div>';
+      return;
+    }
+    var ents = entries();
+    var st = streak();
+    var keys = Object.keys(ents).filter(function (k) { return k < today(); })
+      .filter(function (k) { return !_month || k.slice(0, 7) === _month; })
+      .sort().reverse().slice(0, 200);
+
+    root.innerHTML = '<div id="dyWrap">'
+      + '<div id="dyHead">'
+      +   '<div id="dyStreak">'
+      +     '<span class="dy-fire">🔥 연속 ' + st.cur + '일</span>'
+      +     '<span>최고 ' + st.best + '일</span>'
+      +     '<span>· ' + (st.wroteToday ? '오늘 썼다' : '오늘은 아직') + '</span>'
+      +   '</div>'
+      +   heatmap(ents)
+      + '</div>'
+      + writerHtml(ents)
+      + '<hr class="dy-sep">'
+      + months(ents)
+      + (keys.length ? keys.map(function (k) { return entryHtml(k, ents[k]); }).join('')
+                     : '<div class="dy-empty">지난 일기는 아직 없어.</div>')
+      + '</div>';
+
+    bindWriter();
+    [].slice.call(root.querySelectorAll('.dy-jump button')).forEach(function (b) {
+      b.addEventListener('click', function () {
+        _month = b.getAttribute('data-m') || null;
+        render();
+      });
+    });
+  }
+
+  /* 입력칸 — 한 줄로 열리고 쓰는 만큼 늘어난다 */
+  function bindWriter(){
+    var ta = document.getElementById('dyInput');
+    var btn = document.getElementById('dySave');
+    if (!ta || !btn) return;
+    var grow = function () {
+      ta.style.height = 'auto';                    /* 먼저 풀어야 줄어들 수도 있다 */
+      ta.style.height = Math.max(32, ta.scrollHeight) + 'px';
+      btn.disabled = !ta.value.trim();
+    };
+    ta.addEventListener('input', grow);
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+    });
+    btn.addEventListener('click', commit);
+    grow();
+  }
+
+  function commit(){
+    var ta = document.getElementById('dyInput');
+    if (!ta) return;
+    var body = ta.value.trim();
+    if (!body) return;
+    enqueue(today(), body, '');
+    ta.value = '';
+    render();
+    if (typeof showToast === 'function') showToast('📔 일기에 담았어');
+  }
+
+  window._dyView = function (url) {
+    var o = document.createElement('div');
+    o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.86);'
+      + 'display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+    o.innerHTML = '<img src="' + url + '" style="max-width:96vw;max-height:96vh">';
+    o.addEventListener('click', function () { o.remove(); });
+    document.body.appendChild(o);
+  };
+
+  var _loading = false;
+  window.renderDiary = async function (force) {
+    render();
+    if (_loading || (_data && !force)) return;
+    _loading = true;
+    try { _data = await fetchDiary(); _err = ''; }
+    catch (e) { _err = e && e.message ? e.message : String(e); }
+    _loading = false;
+    render();
+  };
+
+  /* 테스트/디버그 */
+  window._dyData = function (){ return _data; };
+  window._dySet = function (d){ _data = d; _err = ''; render(); };
+  window._dyEntries = entries;
+  window._dyStreak = streak;
+  window._dyQueue = queue;
+  window._dyToday = today;
+  window._dyCommit = commit;
+})();
+</script>
+<!-- TONY-COACH-TAB:END -->
+<!-- TONY-COACH-TAB:BEGIN -->
+<script>
 (function(){
   /* 앱의 동기화 계층이 없으면 얹을 것도 없다 */
   if(typeof _syncPushNow !== 'function' || typeof _collectSyncData !== 'function'){
@@ -6430,14 +6843,7 @@ window.addEventListener('beforeunload', () => {
     +   'transition:text-decoration-color 220ms ease,color 220ms ease}'
     + '.tb-block.tb-done{opacity:.55}'
     + '.tb-block.tb-done .tb-label{text-decoration-color:var(--text2)}'
-    + '.tb-check{position:absolute;top:3px;right:3px;width:16px;height:16px;'
-    +   'border-radius:50%;border:1.5px solid var(--border2);background:var(--surface);'
-    +   'display:flex;align-items:center;justify-content:center;'
-    +   'font-size:10px;font-weight:800;line-height:1;color:transparent;'
-    +   'cursor:pointer;touch-action:none;z-index:3;'
-    +   'transition:background-color 160ms ease,border-color 160ms ease,color 160ms ease}'
-    + '.tb-block.tb-done .tb-check{background:var(--muted);border-color:var(--muted);'
-    +   'color:#fff}';
+    + '.tb-block.tb-done .tb-label{color:var(--text2)}';
     document.head.appendChild(st);
   }
 
@@ -6786,29 +7192,9 @@ window.addEventListener('beforeunload', () => {
         + 'font-size:' + fsz + 'px;line-height:' + lh + 'px;'
         + 'max-height:' + (lines * lh) + 'px;'
         /* 2줄 이상일 때 자연스럽게 — 세로 가운데가 아니라 위에서 시작한다 */
-        + 'align-self:flex-start;vertical-align:top'
-        /* 할 일 블록엔 오른쪽 위에 체크 버튼이 앉는다 — 그 자리를 비워둔다 */
-        + (b.task ? ';padding-right:18px' : '');
+        + 'align-self:flex-start;vertical-align:top';
       lab.textContent = txt;
       el.appendChild(lab);
-      /* 블록에서도 완료를 토글한다 (c).
-         격자는 pointerdown/up 을 위임으로 받는다 — 여기서 막지 않으면
-         누를 때마다 드래그가 시작되거나 편집창이 열린다. */
-      if (b.task) {
-        var chk = document.createElement('div');
-        chk.className = 'tb-check';
-        chk.textContent = '✓';
-        chk.title = done ? '완료 해제' : '완료로 표시';
-        ['pointerdown', 'pointermove', 'click'].forEach(function(ev){
-          chk.addEventListener(ev, function(e){ e.stopPropagation(); e.preventDefault(); });
-        });
-        chk.addEventListener('pointerup', function(e){
-          e.stopPropagation(); e.preventDefault();
-          toggleByText(b.text);
-        });
-        el.appendChild(chk);
-      }
-
       var grip = document.createElement('div');
       grip.className = 'tb-grip';
       grip.style.cssText = 'position:absolute;left:0;right:0;bottom:-3px;height:10px;'
