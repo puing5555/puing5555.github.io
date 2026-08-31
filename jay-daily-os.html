@@ -5680,6 +5680,9 @@ window.addEventListener('beforeunload', () => {
   /* ── ① 부팅 시점의 dirty 만 진짜다 ──────────────────────────────────────
      이 줄은 init() 보다 먼저 실행된다. 지금 값이 이전 세션의 미푸시 여부다. */
   var dirtyAtBoot = localStorage.getItem(DIRTY);
+  var PENDING = 'jay_sync_pending';   /* 받아둘 원격 시각 — 기기 전용 */
+  var _booted = false;                /* 부팅 동기화가 끝났나 */
+  setTimeout(function(){ _booted = true; }, 8000);
 
   function deviceId(){
     var d = localStorage.getItem(DEV);
@@ -5723,37 +5726,97 @@ window.addEventListener('beforeunload', () => {
     var g = await _gistApi('gists/' + id);
     if (!g) return null;
     var f = g.files && g.files[FILE];
-    var out = { updated_at: g.updated_at, data: null };
+    /* stamp = **앱 파일 안의** updated_at. gist 시각(updated_at)은 봇이 다른 파일을
+       써도 바뀌므로 신선도 판정에 쓰면 안 된다. */
+    var out = { updated_at: g.updated_at, stamp: null, data: null };
     if (f) {
       var txt = f.content;
       if (f.truncated && f.raw_url) { try { txt = await (await fetch(f.raw_url)).text(); } catch(_){} }
-      try { var p = JSON.parse(txt || '{}'); out.data = (p && p.data) || null; } catch(_){}
+      try {
+        var p = JSON.parse(txt || '{}');
+        out.data = (p && p.data) || null;
+        out.stamp = (p && p.updated_at) || null;
+      } catch(_){}
     }
     return out;
   }
 
-  /* ── ③ pull 전에 진짜 dirty 만 남긴다 ───────────────────────────────── */
+  /* ── ③ pull — 앱의 "gist 시각" 오판만 걷어낸다 ───────────────────────
+     앱(과 data-guard)의 pull 체인은 그대로 쓴다. 시딩 가드·플러시 같은 게
+     거기 들어 있어서, 통째로 갈아치우면 그것들이 통과 못 한다(2026-09-01에
+     실제로 그랬다 — 푸시가 시딩 가드에 막혀 되돌아왔다).
+
+     대신 판정 재료만 고친다: 앱 파일 안의 updated_at 으로 봐서 받을 게 없으면,
+     LAST 를 gist 시각까지 올려둔다. 그러면 앱의 gist-시각 비교가 "안 새롭다"가
+     되어 location.reload() 가 안 걸린다. */
   var _origPull = _syncPullOnLoad;
+
+  function sameAsLocal(remoteData){
+    try {
+      var mine = _collectSyncData();
+      var a = Object.keys(mine).sort(), b = Object.keys(remoteData || {}).sort();
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (a[i] !== b[i] || mine[a[i]] !== remoteData[a[i]]) return false;
+      }
+      return true;
+    } catch(e){ return false; }
+  }
+
+  async function calmStaleReload(){
+    if (typeof _syncToken !== 'function' || !_syncToken()) return;
+    var last = localStorage.getItem(LAST);
+    if (!last || !localStorage.getItem(GID)) return;      /* 첫 연결은 앱에 맡긴다 */
+    var snap = await remoteSnapshot();
+    if (!snap) return;
+    var stamp = snap.stamp || null;
+    var fresher = stamp && (new Date(stamp) > new Date(last));
+    if (fresher && !sameAsLocal(snap.data)) {
+      if (!_booted) return;              /* 부팅 동기화 — 앱이 받아서 그리게 둔다 */
+      /* 사용 중이다. 여기서 적용하면 탭이 튀고, 아직 안 올라간 수정이 덮인다.
+         받아둘 게 있다고 표시만 하고 조용히 넘어간다. */
+      setLocal(PENDING, stamp);
+      if (snap.updated_at) setLocal(LAST, snap.updated_at);   /* 앱을 조용히 시킨다 */
+      try { _setSyncState('pending'); } catch(e){}
+      if (!window.__syncPendingToldOnce) {
+        window.__syncPendingToldOnce = true;
+        toast('다른 기기에 새 데이터가 있어 — 동기화 아이콘에서 받아줘');
+      }
+      console.log('[동기화] 사용 중이라 적용을 보류했다 — ' + stamp);
+      return;
+    }
+    if (!fresher) { try { localStorage.removeItem(PENDING); } catch(e){} }
+    if (snap.updated_at && new Date(snap.updated_at) > new Date(last)) {
+      setLocal(LAST, snap.updated_at);
+      console.log('[동기화] 앱 파일은 그대로다 — 새로고침 막고 시각만 맞춘다 ('
+        + (stamp || '시각 없음') + ')');
+    }
+  }
+
   _syncPullOnLoad = function(){
     var real = (dirtyAtBoot === '1');    /* 이전 세션에서 진짜로 못 올린 변경 */
     var lastBefore = localStorage.getItem(LAST);
-    if (real) {
-      /* 그래도 pull-first 다 — 버리지 않고 스태시해 두고 원격을 정본으로 받는다 */
-      stashLocal('이전 세션 미푸시 변경 — pull 우선');
-    }
+    if (real) stashLocal('이전 세션 미푸시 변경 — pull 우선');
     localStorage.removeItem(DIRTY);      /* init() 이 만든 소음 제거 */
-    dirtyAtBoot = null;                  /* 이번 로드에서 한 번만 */
-    var r = _origPull.apply(this, arguments);
+    dirtyAtBoot = null;
 
-    /* 원격이 더 최신이었으면 앱이 적용 후 location.reload() 한다 → 아래는 안 돈다.
-       돌았다는 건 원격이 안 밀렸다는 뜻 — 미룬 변경을 30초 기다리지 말고 바로 올린다. */
-    if (real) setTimeout(function(){
-      if (localStorage.getItem(LAST) === lastBefore) {
-        setLocal(DIRTY, '1');
-        try { _syncPushNow(); } catch(e){ console.warn('[동기화] 미푸시 플러시 실패', e); }
-      }
-    }, 1200);
-    return r;
+    var self = this, args = arguments;
+    var go = function(){
+      var r = _origPull.apply(self, args);
+      /* 원격이 더 최신이었으면 앱이 적용 후 location.reload() 한다 → 아래는 안 돈다.
+         돌았다는 건 원격이 안 밀렸다는 뜻 — 미룬 변경을 30초 기다리지 말고 바로 올린다. */
+      if (real) setTimeout(function(){
+        if (localStorage.getItem(LAST) === lastBefore) {
+          setLocal(DIRTY, '1');
+          try { _syncPushNow(); } catch(e){ console.warn('[동기화] 미푸시 플러시 실패', e); }
+        }
+      }, 1200);
+      return r;
+    };
+    return calmStaleReload().then(go, function(e){
+      console.warn('[동기화] 신선도 확인 실패 — 그대로 진행', e);
+      return go();
+    });
   };
 
   /* ── ② 푸시 직전 compare-and-swap — 뒤처진 기기는 못 덮는다 ─────────── */
@@ -5766,7 +5829,8 @@ window.addEventListener('beforeunload', () => {
         var last = localStorage.getItem(LAST);
         if (last && localStorage.getItem(GID) && typeof _syncToken === 'function' && _syncToken()) {
           var snap = await remoteSnapshot();
-          if (snap && snap.updated_at && new Date(snap.updated_at) > new Date(last)) {
+          var st = snap && (snap.stamp || snap.updated_at);
+          if (st && new Date(st) > new Date(last) && !sameAsLocal(snap && snap.data)) {
             console.warn('[동기화] 원격이 더 최신 — 푸시 중단하고 먼저 받는다 ('
               + last + ' → ' + snap.updated_at + ')');
             toast('서버에 더 최신 데이터가 있어 — 먼저 받아올게');
@@ -5784,7 +5848,13 @@ window.addEventListener('beforeunload', () => {
         console.warn('[동기화] 원격 확인 실패 — 그대로 진행', e);
       }
     }
-    return _origPush.apply(this, arguments);
+    var r = await _origPush.apply(this, arguments);
+    /* 앱은 LAST 에 gist 시각을 넣는다. 그러면 봇이 다른 파일을 쓰는 순간
+       "원격이 더 최신"이 되어 리로드가 걸린다. 우리가 방금 쓴 시점으로 덮는다. */
+    try {
+      if (localStorage.getItem(LAST)) setLocal(LAST, new Date().toISOString());
+    } catch(e){}
+    return r;
   };
 
   /* ── ⑤ 수동 복구 ──────────────────────────────────────────────────── */
@@ -5799,8 +5869,9 @@ window.addEventListener('beforeunload', () => {
         toast('서버 데이터가 비어 있어 — 아무것도 안 했어'); return;
       }
       _applySyncData(snap.data);
-      setLocal(LAST, snap.updated_at);
+      setLocal(LAST, snap.stamp || snap.updated_at);
       localStorage.removeItem(DIRTY);
+      try { localStorage.removeItem(PENDING); } catch(e){}
       toast('✅ 서버 데이터로 맞췄어 — 새로고침할게');
       setTimeout(function(){ location.reload(); }, 700);
     } catch(e){ console.warn(e); toast('받기 실패 — 잠시 뒤 다시 해줘'); }
@@ -5860,6 +5931,14 @@ window.addEventListener('beforeunload', () => {
     box.innerHTML =
       '<div style="font-size:11px;font-weight:800;color:var(--text);margin-bottom:6px">기기별 마지막 동기화</div>'
       + rows
+      + (localStorage.getItem(PENDING)
+         ? '<div style="margin-top:10px;font-size:11px;color:' + ACC + '">'
+           + '다른 기기에 새 데이터가 있어 ('
+           + new Date(localStorage.getItem(PENDING)).toLocaleString('ko-KR') + ')</div>'
+           + '<div style="margin-top:6px">'
+           + btn('_syncForcePull()', '↓ 새 데이터 받기', 'border-color:' + ACC + ';color:' + ACC)
+           + '</div>'
+         : '')
       + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
       + btn('_syncForcePull()', '↓ 서버에서 다시 받기')
       + btn('_syncForcePush()', '↑ 이 기기로 서버 덮어쓰기')
@@ -6452,6 +6531,16 @@ window.addEventListener('beforeunload', () => {
     el.innerHTML = '';
     var inp = document.createElement('input');
     inp.type = 'text';
+    /* 비밀번호 관리자 오인 방지 — 이 페이지엔 type=password 칸이 여럿 있고
+       <form>이 없어서 크롬이 전체를 한 폼처럼 본다 (2026-09-01) */
+    inp.name = 'timebox-note';
+    inp.setAttribute('autocomplete', 'off');
+    inp.setAttribute('autocorrect', 'off');
+    inp.setAttribute('autocapitalize', 'off');
+    inp.setAttribute('spellcheck', 'false');
+    inp.setAttribute('data-lpignore', 'true');
+    inp.setAttribute('data-1p-ignore', '');
+    inp.setAttribute('data-form-type', 'other');
     inp.value = b.text || '';
     inp.style.cssText = 'width:100%;border:none;background:transparent;color:var(--text);'
       + 'font-size:12px;font-family:inherit;outline:none;padding:0';
@@ -6523,235 +6612,6 @@ window.addEventListener('beforeunload', () => {
   }, 60000);
 
   console.log('[타임박스] 켜짐 — 칸 ' + unit() + '분');
-})();
-</script>
-<!-- TONY-COACH-TAB:END -->
-<!-- TONY-COACH-TAB:BEGIN -->
-<script>
-(function(){
-  if (typeof _syncPushNow !== 'function' || typeof _syncPullOnLoad !== 'function'
-      || typeof _collectSyncData !== 'function' || typeof _applySyncData !== 'function') {
-    console.warn('[동기화] 앱 동기화 함수를 못 찾았다 — 가드 미설치');
-    return;
-  }
-
-  var DIRTY = 'jay_sync_dirty', LAST = 'jay_sync_last_push', GID = 'jay_sync_gist_id';
-  var FILE  = (typeof SYNC_FILENAME === 'string') ? SYNC_FILENAME : 'jay-daily-os-data.json';
-  var DEV   = 'jay_sync_device';        /* 기기 식별자 — jay_sync_ 라 동기화 제외(기기 전용) */
-  var STASH = 'jay_sync_stash';         /* 버리기 전 로컬 백업 — 역시 기기 전용 */
-  var REG   = 'jay_syncDevices';        /* 기기 장부 — jay_sync_ 가 아니라 동기화에 실린다 */
-
-  var setLocal = (typeof _origSetItem === 'function')
-      ? _origSetItem : localStorage.setItem.bind(localStorage);
-  var toast = function(m){ try { showToast(m); } catch(_){} };
-
-  /* ── ① 부팅 시점의 dirty 만 진짜다 ──────────────────────────────────────
-     이 줄은 init() 보다 먼저 실행된다. 지금 값이 이전 세션의 미푸시 여부다. */
-  var dirtyAtBoot = localStorage.getItem(DIRTY);
-
-  function deviceId(){
-    var d = localStorage.getItem(DEV);
-    if (!d) {
-      var ua = navigator.userAgent || '';
-      var kind = /iPhone|iPod/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad'
-               : /Android/.test(ua) ? 'Android' : /Macintosh/.test(ua) ? 'Mac'
-               : /Windows/.test(ua) ? 'PC' : '기기';
-      d = kind + '-' + Math.random().toString(36).slice(2, 6);
-      setLocal(DEV, d);
-    }
-    return d;
-  }
-
-  function readReg(){
-    try { return JSON.parse(localStorage.getItem(REG) || '{}') || {}; } catch(_){ return {}; }
-  }
-  /* 장부는 병합한다 — 통짜 덮어쓰기면 다른 기기 기록이 사라진다 */
-  function touchReg(remoteReg){
-    var reg = readReg();
-    if (remoteReg) Object.keys(remoteReg).forEach(function(k){
-      if (!reg[k] || String(remoteReg[k].at || '') > String(reg[k].at || '')) reg[k] = remoteReg[k];
-    });
-    reg[deviceId()] = { at: new Date().toISOString() };
-    setLocal(REG, JSON.stringify(reg));   /* setLocal — 푸시 루프를 안 만든다 */
-  }
-
-  function stashLocal(why){
-    try {
-      setLocal(STASH, JSON.stringify({
-        at: new Date().toISOString(), why: why || '', data: _collectSyncData(),
-      }));
-      console.warn('[동기화] 로컬을 버리기 전에 스태시했다 — ' + why);
-    } catch(e){ console.warn('[동기화] 스태시 실패', e); }
-  }
-
-  /* 원격 파일을 읽어 {updated_at, data} 로 돌려준다 */
-  async function remoteSnapshot(){
-    var id = localStorage.getItem(GID);
-    if (!id) return null;
-    var g = await _gistApi('gists/' + id);
-    if (!g) return null;
-    var f = g.files && g.files[FILE];
-    var out = { updated_at: g.updated_at, data: null };
-    if (f) {
-      var txt = f.content;
-      if (f.truncated && f.raw_url) { try { txt = await (await fetch(f.raw_url)).text(); } catch(_){} }
-      try { var p = JSON.parse(txt || '{}'); out.data = (p && p.data) || null; } catch(_){}
-    }
-    return out;
-  }
-
-  /* ── ③ pull 전에 진짜 dirty 만 남긴다 ───────────────────────────────── */
-  var _origPull = _syncPullOnLoad;
-  _syncPullOnLoad = function(){
-    var real = (dirtyAtBoot === '1');    /* 이전 세션에서 진짜로 못 올린 변경 */
-    var lastBefore = localStorage.getItem(LAST);
-    if (real) {
-      /* 그래도 pull-first 다 — 버리지 않고 스태시해 두고 원격을 정본으로 받는다 */
-      stashLocal('이전 세션 미푸시 변경 — pull 우선');
-    }
-    localStorage.removeItem(DIRTY);      /* init() 이 만든 소음 제거 */
-    dirtyAtBoot = null;                  /* 이번 로드에서 한 번만 */
-    var r = _origPull.apply(this, arguments);
-
-    /* 원격이 더 최신이었으면 앱이 적용 후 location.reload() 한다 → 아래는 안 돈다.
-       돌았다는 건 원격이 안 밀렸다는 뜻 — 미룬 변경을 30초 기다리지 말고 바로 올린다. */
-    if (real) setTimeout(function(){
-      if (localStorage.getItem(LAST) === lastBefore) {
-        setLocal(DIRTY, '1');
-        try { _syncPushNow(); } catch(e){ console.warn('[동기화] 미푸시 플러시 실패', e); }
-      }
-    }, 1200);
-    return r;
-  };
-
-  /* ── ② 푸시 직전 compare-and-swap — 뒤처진 기기는 못 덮는다 ─────────── */
-  var _origPush = _syncPushNow;          /* data-guard 의 무게 가드까지 포함된 것 */
-  var _forcing = false;
-
-  _syncPushNow = async function(){
-    if (!_forcing) {
-      try {
-        var last = localStorage.getItem(LAST);
-        if (last && localStorage.getItem(GID) && typeof _syncToken === 'function' && _syncToken()) {
-          var snap = await remoteSnapshot();
-          if (snap && snap.updated_at && new Date(snap.updated_at) > new Date(last)) {
-            console.warn('[동기화] 원격이 더 최신 — 푸시 중단하고 먼저 받는다 ('
-              + last + ' → ' + snap.updated_at + ')');
-            toast('서버에 더 최신 데이터가 있어 — 먼저 받아올게');
-            if (localStorage.getItem(DIRTY) === '1') stashLocal('원격이 더 최신 — 푸시 대신 받기');
-            localStorage.removeItem(DIRTY);
-            return _syncPullOnLoad();
-          }
-          if (snap && snap.data) { try { touchReg(JSON.parse(snap.data[REG] || 'null')); } catch(_){ touchReg(null); } }
-          else touchReg(null);
-        } else {
-          touchReg(null);
-        }
-      } catch(e){
-        /* 원격 확인 실패는 저장을 막을 이유가 못 된다 — 원래 경로로 간다 */
-        console.warn('[동기화] 원격 확인 실패 — 그대로 진행', e);
-      }
-    }
-    return _origPush.apply(this, arguments);
-  };
-
-  /* ── ⑤ 수동 복구 ──────────────────────────────────────────────────── */
-  window._syncForcePull = async function(){
-    if (!confirm('이 기기의 데이터를 버리고 서버 것으로 맞출까?\n버리는 데이터는 이 기기에 백업해 둔다.')) return;
-    try {
-      toast('↓ 서버에서 받는 중…');
-      stashLocal('수동 강제 받기');
-      var id = await _ensureGistId();
-      var snap = await remoteSnapshot(id);
-      if (!snap || !snap.data || !Object.keys(snap.data).length) {
-        toast('서버 데이터가 비어 있어 — 아무것도 안 했어'); return;
-      }
-      _applySyncData(snap.data);
-      setLocal(LAST, snap.updated_at);
-      localStorage.removeItem(DIRTY);
-      toast('✅ 서버 데이터로 맞췄어 — 새로고침할게');
-      setTimeout(function(){ location.reload(); }, 700);
-    } catch(e){ console.warn(e); toast('받기 실패 — 잠시 뒤 다시 해줘'); }
-  };
-
-  window._syncForcePush = async function(){
-    if (!confirm('서버를 이 기기 데이터로 덮어쓸까?\n다른 기기에만 있던 최신 변경은 사라진다.')) return;
-    try {
-      toast('↑ 서버에 올리는 중…');
-      touchReg(null);
-      _forcing = true;                 /* 우리 CAS만 건너뛴다 — 무게 가드는 그대로 */
-      await _origPush.call(window);
-      _forcing = false;
-      toast('✅ 서버를 이 기기 데이터로 맞췄어');
-      renderPanel();
-    } catch(e){ _forcing = false; console.warn(e); toast('올리기 실패 — 잠시 뒤 다시 해줘'); }
-  };
-
-  window._syncRestoreStash = function(){
-    var raw = localStorage.getItem(STASH);
-    if (!raw) { toast('되돌릴 백업이 없어'); return; }
-    var s; try { s = JSON.parse(raw); } catch(_){ toast('백업을 못 읽었어'); return; }
-    if (!s || !s.data || !Object.keys(s.data).length) { toast('백업이 비어 있어'); return; }
-    if (!confirm('이 기기에 남겨둔 백업(' + new Date(s.at).toLocaleString('ko-KR') + ')으로 되돌릴까?')) return;
-    _applySyncData(s.data);
-    toast('백업으로 되돌렸어 — 새로고침할게');
-    setTimeout(function(){ location.reload(); }, 700);
-  };
-
-  /* ── ④ 모달에 기기 장부 + 버튼 ────────────────────────────────────── */
-  function renderPanel(){
-    var info = document.getElementById('syncModalInfo');
-    if (!info) return;
-    var box = document.getElementById('syncGuardPanel');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'syncGuardPanel';
-      box.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid var(--border2)';
-      info.parentNode.insertBefore(box, info.nextSibling);
-    }
-    var reg = readReg(), me = deviceId();
-    var rows = Object.keys(reg).sort().map(function(k){
-      var at = reg[k] && reg[k].at ? new Date(reg[k].at).toLocaleString('ko-KR') : '기록 없음';
-      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;'
-        + 'color:var(--text2);padding:2px 0">'
-        + '<span>' + (k === me ? '▸ ' : '') + k + (k === me ? ' (이 기기)' : '') + '</span>'
-        + '<span style="color:var(--muted)">' + at + '</span></div>';
-    }).join('') || '<div style="font-size:11px;color:var(--muted)">아직 기록 없음</div>';
-
-    var stash = localStorage.getItem(STASH);
-    var btn = function(fn, label, extra){
-      return '<button onclick="' + fn + '" style="flex:1 1 auto;border:1px solid var(--border2);'
-        + 'background:var(--surface);color:var(--text2);font-size:12px;padding:9px 10px;'
-        + 'border-radius:9px;cursor:pointer;font-family:inherit;min-height:40px;' + (extra || '') + '">'
-        + label + '</button>';
-    };
-    box.innerHTML =
-      '<div style="font-size:11px;font-weight:800;color:var(--text);margin-bottom:6px">기기별 마지막 동기화</div>'
-      + rows
-      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
-      + btn('_syncForcePull()', '↓ 서버에서 다시 받기')
-      + btn('_syncForcePush()', '↑ 이 기기로 서버 덮어쓰기')
-      + '</div>'
-      + (stash ? '<div style="margin-top:6px">'
-                 + btn('_syncRestoreStash()', '⤺ 이 기기 백업으로 되돌리기', 'color:var(--yellow)')
-                 + '</div>' : '')
-      + '<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">'
-      + '서버가 더 최신이면 이 기기는 자동으로 받아온다(덮어쓰지 않는다). '
-      + '못 올린 변경은 버리기 전에 이 기기에 백업된다.</div>';
-  }
-  window._syncRenderGuardPanel = renderPanel;
-
-  if (typeof window.openSyncModal === 'function') {
-    var _origOpen = window.openSyncModal;
-    window.openSyncModal = function(){
-      var r = _origOpen.apply(this, arguments);
-      try { renderPanel(); } catch(e){ console.warn('[동기화] 패널 렌더 실패', e); }
-      return r;
-    };
-  }
-
-  console.log('[동기화] pull-first 가드 켜짐 · 기기 ' + deviceId()
-    + ' · 부팅 dirty=' + (dirtyAtBoot || '없음'));
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
@@ -9859,7 +9719,11 @@ async function renderCoach(force){
 
     var adder =
       '<div style="display:flex;gap:6px;margin-top:12px">'
-      + '<input id="subChanInput" type="text" inputmode="url" autocomplete="off"'
+      /* ⚠ 크롬이 로그인 폼으로 오인해 "비밀번호 저장" 팝업을 띄웠다 (2026-09-01).
+         페이지에 type=password 칸이 여럿 있고 <form>이 없어서 크롬이 전체를 한 폼처럼
+         묶어 본다. name 을 자격증명처럼 안 보이게 주고, 관리자들 무시 속성을 단다. */
+      + '<input id="subChanInput" name="channel-url" type="text" inputmode="url" '
+      + 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore'
       + ' onkeydown="_subChanKey(event)" placeholder="youtube.com/@채널 또는 @핸들"'
       + ' style="flex:1 1 auto;min-width:0;min-height:40px;border:1px solid var(--border2);'
       + 'border-radius:9px;background:var(--surface2);color:var(--text);font-size:13px;'
