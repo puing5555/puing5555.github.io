@@ -6548,8 +6548,17 @@ window.addEventListener('beforeunload', () => {
            종이 플래너가 이렇게 생겼다 (2026-09-01 정정: 예전엔 가로로 그었다). */
         var half = document.createElement('div');
         half.className = 'tb-half';
-        half.style.cssText = 'position:absolute;top:0;bottom:0;left:' + MID_PCT + ';'
-          + 'border-left:1px dashed var(--border);pointer-events:none';
+        /* ⚠ 색·패턴을 손으로 정한 이유 (2026-09-01, 라이브에서 안 보였다):
+             배경 --surface2 #f0ebe5 vs 옛 색 --border #ede8e3 → ΔRGB 3. 사실상 같은 색.
+           그래서 가로 실선과 같은 --border2 (#e0d9d2) 를 쓴다. 같은 톤이지만
+           3px/3px 로 끊기니 실선보다는 약하게 읽힌다 — 종이 플래너가 그렇다.
+           border:dashed 는 브라우저가 dash 길이를 알아서 정해 더 흐려진다.
+           그래서 gradient 로 패턴을 직접 그린다.
+           top:-1px 는 칸 위 실선과 만나는 지점에서 안 끊기게 하려는 것이다. */
+        half.style.cssText = 'position:absolute;top:-1px;bottom:0;width:1px;'
+          + 'left:' + MID_PCT + ';pointer-events:none;z-index:1;'
+          + 'background:repeating-linear-gradient(to bottom,'
+          + ' var(--border2) 0 3px, transparent 3px 6px)';
         cell.appendChild(half);
       }
       _grid.appendChild(cell);
