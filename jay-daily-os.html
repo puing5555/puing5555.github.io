@@ -694,7 +694,17 @@ body {
 
   .dy-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                gap: 8px; margin-top: 16px; }
-  .dy-photos img { width: 100%; border-radius: 8px; display: block; cursor: zoom-in; }
+  .dy-photos img { width: 100%; border-radius: 8px; display: block; cursor: zoom-in;
+                   background: var(--surface2); min-height: 60px; }
+  .dy-photos .dy-dead { display: flex; align-items: center; justify-content: center;
+    min-height: 90px; border-radius: 8px; background: var(--surface2);
+    font-size: 11px; color: var(--muted); text-align: center; padding: 8px; }
+  #dyPick {
+    margin-left: auto; font-size: 11px; color: var(--muted); cursor: pointer;
+    border: 1px solid var(--border2); border-radius: 999px; padding: 5px 12px;
+    background: transparent; font-family: inherit;
+  }
+  #dyPick[disabled] { opacity: .5; cursor: default; }
 
   @media (max-width: 560px) {
     #dyWrap { padding: 22px 18px 120px; }
@@ -5661,6 +5671,16 @@ window.addEventListener('beforeunload', () => {
       var e = queue()[id];
       if (!e || !e.date) return;
       var cur = out[e.date];
+      if (e.photo) {                        /* 사진만 담긴 큐 항목 */
+        var base = cur || { date: e.date, text: '', learned: '', at: e.at,
+                            source: 'app', pending: true, photos: [] };
+        base.photos = (base.photos || []).slice();
+        if (!base.photos.some(function (x) { return x.path === e.photo.path; }))
+          base.photos.push(e.photo);
+        out[e.date] = base;
+        return;
+      }
+      if (!e.text) return;
       if (cur && String(cur.text || '').indexOf(e.text) >= 0) return;
       out[e.date] = {
         date: e.date,
@@ -5694,6 +5714,95 @@ window.addEventListener('beforeunload', () => {
     }
     return { cur: cur, best: Math.max((_data && _data.best) || 0, cur),
              wroteToday: wrote(today(), ents) };
+  }
+
+  /* ── 사진 저장소 (Supabase private 버킷) ───────────────────────────────
+     경로만 저장돼 있으므로 볼 때마다 서명 URL 을 받는다 (머리말 참고). */
+  var SB_KEY = 'jay_diarySupabase';
+  function sb(){
+    try {
+      var c = JSON.parse(localStorage.getItem(SB_KEY) || 'null');
+      if (c && c.url && c.anon) {
+        return { url: String(c.url).replace(/\/$/, ''), anon: c.anon,
+                 bucket: c.bucket || 'diary-photos' };
+      }
+    } catch (e) {}
+    return null;
+  }
+  window._dySetStore = function (url, anon, bucket){
+    localStorage.setItem(SB_KEY, JSON.stringify({ url: url, anon: anon,
+                                                  bucket: bucket || 'diary-photos' }));
+    _signed = {};
+    render();
+    return sb();
+  };
+
+  var _signed = {};                       /* path → url (이 세션 동안만) */
+  async function signOne(cfg, path){
+    if (_signed[path]) return _signed[path];
+    var r = await fetch(cfg.url + '/storage/v1/object/sign/' + cfg.bucket + '/' + path, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + cfg.anon, apikey: cfg.anon,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: 21600 }),
+    });
+    if (!r.ok) return null;
+    var j = await r.json();
+    if (!j || !j.signedURL) return null;
+    _signed[path] = cfg.url + '/storage/v1' + j.signedURL;
+    return _signed[path];
+  }
+  /* 화면에 뜬 사진들에 URL 을 채워 넣는다. 실패해도 글은 그대로 보인다. */
+  async function fillPhotos(){
+    var cfg = sb();
+    var imgs = [].slice.call(document.querySelectorAll('#dyWrap img[data-path]'));
+    if (!imgs.length) return;
+    if (!cfg) {
+      imgs.forEach(function (im) {
+        var d = document.createElement('div');
+        d.className = 'dy-dead';
+        d.textContent = '사진 저장소가 연결 안 됐어';
+        im.replaceWith(d);
+      });
+      return;
+    }
+    for (var i = 0; i < imgs.length; i++) {
+      var im = imgs[i];
+      try {
+        var u = await signOne(cfg, im.getAttribute('data-path'));
+        if (u) { im.src = u; im.onclick = function (uu){ return function (){ _dyView(uu); }; }(u); }
+        else throw 0;
+      } catch (e) {
+        var d = document.createElement('div');
+        d.className = 'dy-dead';
+        d.textContent = '사진을 못 불러왔어';
+        im.replaceWith(d);
+      }
+    }
+  }
+
+  /* 앱에서 직접 올리기 — 텔레그램 없이도 (3-d).
+     버킷이 private 라 anon 키로 올리려면 Supabase 쪽 insert 정책이 필요하다. */
+  async function uploadPhoto(file){
+    var cfg = sb();
+    if (!cfg) throw new Error('사진 저장소가 아직 연결 안 됐어.');
+    if (file.size > 8 * 1024 * 1024) throw new Error('사진이 너무 커 (8MB 넘음).');
+    var buf = await file.arrayBuffer();
+    var hash = await crypto.subtle.digest('SHA-256', buf);
+    var hex = [].map.call(new Uint8Array(hash), function (b) {
+      return b.toString(16).padStart(2, '0'); }).join('').slice(0, 16);
+    var ext = (file.type === 'image/png') ? '.png' : (file.type === 'image/webp' ? '.webp' : '.jpg');
+    var day = today();
+    var path = day.slice(0, 7) + '/' + day + '/' + hex + ext;
+    var r = await fetch(cfg.url + '/storage/v1/object/' + cfg.bucket + '/' + path, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + cfg.anon, apikey: cfg.anon,
+                 'Content-Type': file.type || 'image/jpeg', 'x-upsert': 'true' },
+      body: buf,
+    });
+    if (!r.ok) throw new Error('업로드 실패 (' + r.status + ')');
+    return { id: hex, path: path, bytes: file.size, mime: file.type,
+             at: new Date().toISOString() };
   }
 
   /* ── 읽기 ─────────────────────────────────────────────────────────── */
@@ -5757,7 +5866,8 @@ window.addEventListener('beforeunload', () => {
       ? (when ? when + ' · ' + src + (e.pending ? ' · 올리는 중' : '') : src)
       : '';
     var photos = ((e || {}).photos || []).map(function (p) {
-      var u = p.url || p.href || '';
+      if (p.path) return '<img data-path="' + esc(p.path) + '" alt="" loading="lazy">';
+      var u = p.url || p.href || '';        /* 옛 형태 — 직접 URL */
       return u ? '<img src="' + esc(u) + '" alt="" loading="lazy" '
         + 'onclick="_dyView(\'' + esc(u) + '\')">' : '';
     }).join('');
@@ -5784,11 +5894,19 @@ window.addEventListener('beforeunload', () => {
                + (e.pending ? ' · 올리는 중' : '') + '</div>'
                + '<div class="dy-paper">' + esc(e.text) + '</div>'
              : '<div class="dy-meta"></div>')
+      + (((e || {}).photos || []).length
+          ? '<div class="dy-photos">' + ((e.photos || []).map(function (p) {
+              return p.path ? '<img data-path="' + esc(p.path) + '" alt="" loading="lazy">'
+                            : (p.url ? '<img src="' + esc(p.url) + '" alt="">' : '');
+            }).join('')) + '</div>'
+          : '')
       + '<textarea id="dyInput" class="dy-paper" rows="1" '
       + 'placeholder="' + (has ? '하나 더 떠올랐으면 여기에.' : '한 줄만 써도 돼.') + '"></textarea>'
       + '<div id="dyBar"><button id="dySave" disabled>담기</button>'
       + '<span id="dyHint">' + (has ? '이어서 붙는다 — 먼저 쓴 건 안 지워져.'
-                                    : '길게 쓰고 싶으면 그냥 계속 쓰면 돼.') + '</span></div>'
+                                    : '길게 쓰고 싶으면 그냥 계속 쓰면 돼.') + '</span>'
+      + '<button id="dyPick" type="button">사진</button>'
+      + '<input id="dyFile" type="file" accept="image/*" multiple hidden></div>'
       + '</div>';
   }
 
@@ -5840,6 +5958,7 @@ window.addEventListener('beforeunload', () => {
       + '</div>';
 
     bindWriter();
+    fillPhotos();
     [].slice.call(root.querySelectorAll('.dy-jump button')).forEach(function (b) {
       b.addEventListener('click', function () {
         _month = b.getAttribute('data-m') || null;
@@ -5864,6 +5983,39 @@ window.addEventListener('beforeunload', () => {
     });
     btn.addEventListener('click', commit);
     grow();
+
+    var pick = document.getElementById('dyPick');
+    var file = document.getElementById('dyFile');
+    if (!pick || !file) return;
+    if (!sb()) { pick.disabled = true; pick.title = '사진 저장소가 아직 연결 안 됐어'; }
+    pick.addEventListener('click', function (){ file.click(); });
+    file.addEventListener('change', async function (){
+      var list = [].slice.call(file.files || []);
+      if (!list.length) return;
+      pick.disabled = true; pick.textContent = '올리는 중…';
+      var added = 0;
+      for (var i = 0; i < list.length; i++) {
+        try { enqueuePhoto(today(), await uploadPhoto(list[i])); added++; }
+        catch (e) {
+          if (typeof showToast === 'function') showToast('📔 ' + (e.message || '업로드 실패'));
+        }
+      }
+      file.value = '';
+      pick.disabled = false; pick.textContent = '사진';
+      if (added) {
+        if (typeof showToast === 'function') showToast('📔 사진 ' + added + '장 담았어');
+        render();
+      }
+    });
+  }
+
+  /* 사진도 큐로 넘긴다 — diary.json 은 봇 소유다 */
+  function enqueuePhoto(date, rec){
+    var q = queue();
+    q['dp' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)] = {
+      date: date, photo: rec, at: new Date().toISOString(),
+    };
+    localStorage.setItem(QUEUE, JSON.stringify(q));
   }
 
   function commit(){
@@ -5905,6 +6057,8 @@ window.addEventListener('beforeunload', () => {
   window._dyQueue = queue;
   window._dyToday = today;
   window._dyCommit = commit;
+  window._dyStore = sb;
+  window._dyFill = fillPhotos;
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
