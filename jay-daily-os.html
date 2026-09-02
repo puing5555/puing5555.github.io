@@ -661,32 +661,33 @@ body {
   .dy-learned b { font-weight: 600; color: var(--muted); font-size: 11px;
                   display: block; letter-spacing: .5px; }
 
-  /* 입력 — 폼처럼 보이지 않게. 테두리 없음, 같은 괘선 위. */
-  #dyInput {
+  /* 입력 — 폼처럼 보이지 않게. 테두리 없음, 같은 괘선 위.
+     ⚠ 쓰는 자리가 오늘 하나가 아니다 (지난 날도 그 자리에서 연다) —
+     그래서 id 가 아니라 **클래스**로 건다. id 는 오늘 칸에만 남겨 둔다. */
+  .dy-in {
     width: 100%; border: none; outline: none; resize: none; overflow: hidden;
     /* ⚠ background 단축을 쓰면 .dy-paper 의 괘선(background-image)까지 지워진다.
        그러면 입력칸만 종이 결을 잃어서 "쓰는 자리 = 읽는 자리" 가 깨진다. */
     background-color: transparent; display: block; box-sizing: border-box;
   }
-  #dyInput::placeholder, #dyLearn::placeholder { color: var(--muted); opacity: .75; }
-  #dyLearn {
+  .dy-in::placeholder, .dy-learn-in::placeholder { color: var(--muted); opacity: .75; }
+  .dy-learn-in {
     width: 100%; border: none; outline: none; resize: none; overflow: hidden;
     background-color: transparent; display: block; box-sizing: border-box;
   }
   /* 배운점은 읽기 화면(.dy-learned)과 같은 결 — 얇은 좌측 선 */
-  #dyLearnBox { margin-top: 16px; padding-left: 12px;
-                border-left: 2px solid var(--accent-dim); }
-  #dyLearnBox .dy-cap { font-size: 11px; font-weight: 600; color: var(--muted);
-                        letter-spacing: .5px; margin-bottom: 2px; }
-  #dyNotice { font-size: 11px; color: var(--yellow); margin-top: 8px; }
-  #dyBar { display: flex; align-items: center; gap: 10px; margin-top: 12px;
-           font-size: 11px; color: var(--muted); }
-  #dySave {
+  .dy-learnbox { margin-top: 16px; padding-left: 12px;
+                 border-left: 2px solid var(--accent-dim); }
+  .dy-learnbox .dy-cap { font-size: 11px; font-weight: 600; color: var(--muted);
+                         letter-spacing: .5px; margin-bottom: 2px; }
+  .dy-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+            font-size: 11px; color: var(--muted); }
+  .dy-save {
     padding: 6px 16px; border-radius: 999px; border: none;
     background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
     cursor: pointer; font-family: inherit;
   }
-  #dySave[disabled] { background: var(--surface2); color: var(--muted); cursor: default; }
+  .dy-save[disabled] { background: var(--surface2); color: var(--muted); cursor: default; }
 
   .dy-sep { height: 1px; background: var(--border2); opacity: .6;
             margin: 0 0 34px; border: 0; }
@@ -702,6 +703,22 @@ body {
               font-size: 15px; line-height: 30px; }
   .dy-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
 
+  /* 지난 날을 나중에 채운다 — **빈 자리 자체가 문이다** (머리말).
+     버튼을 크게 두면 "밀린 숙제" 처럼 보인다. 눌리되 조용하게. */
+  .dy-empty[data-open] { cursor: pointer; }
+  .dy-empty[data-open]:hover { color: var(--text2); }
+  .dy-write, .dy-cancel {
+    padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border2);
+    background: transparent; color: var(--muted); font-size: 11px;
+    cursor: pointer; font-family: inherit;
+  }
+  .dy-write { margin-top: 12px; }
+  .dy-write:hover, .dy-cancel:hover { color: var(--accent); border-color: var(--accent); }
+  .dy-cancel { margin-left: auto; }
+  #dyGrid .dy-cell[data-open] { cursor: pointer; }
+  /* 지난 날을 여는 중이면 날짜가 살짝 산다 — 오늘 칸과 헷갈리지 않게 */
+  .dy-late .dy-date { color: var(--accent); }
+
   .dy-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                gap: 8px; margin-top: 16px; }
   .dy-photos img { width: 100%; border-radius: 8px; display: block; cursor: zoom-in;
@@ -709,12 +726,10 @@ body {
   .dy-photos .dy-dead { display: flex; align-items: center; justify-content: center;
     min-height: 90px; border-radius: 8px; background: var(--surface2);
     font-size: 11px; color: var(--muted); text-align: center; padding: 8px; }
-  #dyPick {
-    margin-left: auto; font-size: 11px; color: var(--muted); cursor: pointer;
-    border: 1px solid var(--border2); border-radius: 999px; padding: 5px 12px;
-    background: transparent; font-family: inherit;
-  }
-  #dyPick[disabled] { opacity: .5; cursor: default; }
+  /* 사진은 텔레그램으로 보낸다 — 여긴 누를 게 없으니 버튼처럼 보이면 안 된다.
+     버튼 모양인데 아무 일도 안 일어나는 게 제일 나쁘다. */
+  #dyPhotoHint { margin-left: auto; font-size: 11px; color: var(--muted);
+                 white-space: nowrap; }
 
   @media (max-width: 560px) {
     #dyWrap { padding: 22px 18px 120px; }
@@ -5651,6 +5666,7 @@ window.addEventListener('beforeunload', () => {
   var _data = null;                        /* {entries, best, freezes} */
   var _err = '';
   var _month = null;                       /* 'YYYY-MM' 또는 null = 전체 */
+  var _edit = null;                        /* 지금 열려 있는 지난 날 (없으면 null) */
 
   /* ── 날짜 ─────────────────────────────────────────────────────────── */
   var DOW = ['일', '월', '화', '수', '목', '금', '토'];
@@ -5673,11 +5689,13 @@ window.addEventListener('beforeunload', () => {
     try { return JSON.parse(localStorage.getItem(QUEUE) || '{}') || {}; }
     catch (e) { return {}; }
   }
-  function enqueue(date, text, learned){
+  function enqueue(date, text, learned, late){
     var q = queue();
     q['dy' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)] = {
       date: date, text: text, learned: learned || '',
       at: new Date().toISOString(),
+      /* late = 그날이 지난 뒤에 채운 것. 봇이 lateWrite 로 남긴다 (머리말). */
+      late: !!late,
     };
     /* 봇이 반영하면 diary.applied 에 ack 가 돌아온다 — 그때 큐에서 지운다 */
     var app = (_data && _data.applied) || {};
@@ -5695,15 +5713,8 @@ window.addEventListener('beforeunload', () => {
       var e = queue()[id];
       if (!e || !e.date) return;
       var cur = out[e.date];
-      if (e.photo) {                        /* 사진만 담긴 큐 항목 */
-        var base = cur || { date: e.date, text: '', learned: '', at: e.at,
-                            source: 'app', pending: true, photos: [] };
-        base.photos = (base.photos || []).slice();
-        if (!base.photos.some(function (x) { return x.path === e.photo.path; }))
-          base.photos.push(e.photo);
-        out[e.date] = base;
-        return;
-      }
+      /* 사진은 큐로 오지 않는다 — 앱은 안 올린다 (머리말). 옛 큐에 사진 항목이
+         남아 있어도 글이 없으니 여기서 흘려보낸다 (봇도 '무시'로 ack 한다). */
       if (!e.text && !e.learned) return;
       if (e.text && cur && String(cur.text || '').indexOf(e.text) >= 0
           && String(cur.learned || '').indexOf(e.learned || '') >= 0) return;
@@ -5718,6 +5729,7 @@ window.addEventListener('beforeunload', () => {
         text: join(cur && cur.text, e.text),
         learned: join(cur && cur.learned, e.learned),
         at: e.at, source: 'app', pending: true,
+        lateWrite: !!(e.late || (cur && cur.lateWrite)),
         photos: (cur && cur.photos) || [],
       };
     });
@@ -5730,7 +5742,13 @@ window.addEventListener('beforeunload', () => {
     var ents = entries(), keys = Object.keys(ents).filter(function (k) { return wrote(k, ents); });
     if (!keys.length) return { cur: 0, best: (_data && _data.best) || 0, wroteToday: false };
     var first = keys.sort()[0];
-    var spent = Object.assign({}, (_data && _data.freezes) || {});
+    /* 나중에 채운 날에 걸려 있던 복구권은 되돌린다 — 늦게 쓰면 그 주 복구권이
+       다시 산다. 안 그러면 채웠는데도 같은 주 다음 결석에서 끊긴다.
+       (봇 diary.streak 과 같은 규칙) */
+    var spent = {}, _fz = (_data && _data.freezes) || {};
+    Object.keys(_fz).forEach(function (w) {
+      if (!wrote(_fz[w], ents)) spent[w] = _fz[w];
+    });
     var k = today(), cur = 0, isFirst = true;
     while (k >= first) {
       if (wrote(k, ents)) cur++;
@@ -5747,107 +5765,20 @@ window.addEventListener('beforeunload', () => {
              wroteToday: wrote(today(), ents) };
   }
 
-  /* ── 사진 저장소 (Supabase private 버킷) ───────────────────────────────
-     경로만 저장돼 있으므로 볼 때마다 서명 URL 을 받는다 (머리말 참고). */
-  var SB_KEY = 'jay_diarySupabase';
-  /* JWT 가운데 조각만 열어 본다. 검증이 아니라 **오입력 방지**용이다 —
-     service_role 키가 브라우저에 들어오는 걸 그 자리에서 잡는다. */
-  function atobSafe(t){
-    try {
-      var p = String(t).split('.')[1] || '';
-      return atob(p.replace(/-/g, '+').replace(/_/g, '/'));
-    } catch (e) { return ''; }
-  }
-  function sb(){
-    try {
-      var c = JSON.parse(localStorage.getItem(SB_KEY) || 'null');
-      if (c && c.url && c.anon) {
-        return { url: String(c.url).replace(/\/$/, ''), anon: c.anon,
-                 bucket: c.bucket || 'diary-photos' };
-      }
-    } catch (e) {}
-    return null;
-  }
-  window._dySetStore = function (url, anon, bucket){
-    /* ⚠ service_role 키는 절대 저장하지 않는다. 브라우저에 있으면 버킷 전체가
-       열리는 것과 같다 — 그러면 private 버킷을 쓴 의미가 없다. */
-    if (/"role"\s*:\s*"service_role"/.test(atobSafe(anon))) {
-      console.error('[일기] service_role 키는 저장하지 않는다. anon 키를 써라.');
-      return null;
-    }
-    localStorage.setItem(SB_KEY, JSON.stringify({ url: url, anon: anon,
-                                                  bucket: bucket || 'diary-photos' }));
-    _signed = {};
-    render();
-    return sb();
-  };
-
-  var _signed = {};                       /* path → url (이 세션 동안만) */
-  async function signOne(cfg, path){
-    if (_signed[path]) return _signed[path];
-    var r = await fetch(cfg.url + '/storage/v1/object/sign/' + cfg.bucket + '/' + path, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + cfg.anon, apikey: cfg.anon,
-                 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expiresIn: 21600 }),
-    });
-    if (!r.ok) return null;
-    var j = await r.json();
-    if (!j || !j.signedURL) return null;
-    _signed[path] = cfg.url + '/storage/v1' + j.signedURL;
-    return _signed[path];
-  }
-  /* 화면에 뜬 사진들에 URL 을 채워 넣는다. 실패해도 글은 그대로 보인다. */
-  async function fillPhotos(){
-    var cfg = sb();
-    var imgs = [].slice.call(document.querySelectorAll('#dyWrap img[data-path]'));
-    if (!imgs.length) return;
-    if (!cfg) {
-      imgs.forEach(function (im) {
-        var d = document.createElement('div');
-        d.className = 'dy-dead';
-        d.textContent = '사진 링크가 아직 안 붙었어 (봇이 곧 붙인다)';
-        im.replaceWith(d);
-      });
-      return;
-    }
-    for (var i = 0; i < imgs.length; i++) {
-      var im = imgs[i];
-      try {
-        var u = await signOne(cfg, im.getAttribute('data-path'));
-        if (u) { im.src = u; im.onclick = function (uu){ return function (){ _dyView(uu); }; }(u); }
-        else throw 0;
-      } catch (e) {
-        var d = document.createElement('div');
-        d.className = 'dy-dead';
-        d.textContent = '사진을 못 불러왔어';
-        im.replaceWith(d);
-      }
-    }
-  }
-
-  /* 앱에서 직접 올리기 — 텔레그램 없이도 (3-d).
-     버킷이 private 라 anon 키로 올리려면 Supabase 쪽 insert 정책이 필요하다. */
-  async function uploadPhoto(file){
-    var cfg = sb();
-    if (!cfg) throw new Error('사진 저장소가 아직 연결 안 됐어.');
-    if (file.size > 8 * 1024 * 1024) throw new Error('사진이 너무 커 (8MB 넘음).');
-    var buf = await file.arrayBuffer();
-    var hash = await crypto.subtle.digest('SHA-256', buf);
-    var hex = [].map.call(new Uint8Array(hash), function (b) {
-      return b.toString(16).padStart(2, '0'); }).join('').slice(0, 16);
-    var ext = (file.type === 'image/png') ? '.png' : (file.type === 'image/webp' ? '.webp' : '.jpg');
-    var day = today();
-    var path = day.slice(0, 7) + '/' + day + '/' + hex + ext;
-    var r = await fetch(cfg.url + '/storage/v1/object/' + cfg.bucket + '/' + path, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + cfg.anon, apikey: cfg.anon,
-                 'Content-Type': file.type || 'image/jpeg', 'x-upsert': 'true' },
-      body: buf,
-    });
-    if (!r.ok) throw new Error('업로드 실패 (' + r.status + ')');
-    return { id: hex, path: path, bytes: file.size, mime: file.type,
-             at: new Date().toISOString() };
+  /* ── 사진 ────────────────────────────────────────────────────────────
+     **표시 전용이다.** 올리는 길은 텔레그램 하나뿐이라 여기엔 업로드도, 서명도,
+     키도 없다 (머리말). 그리는 자리는 photosHtml() 하나다. */
+  function photosHtml(e){
+    var list = ((e || {}).photos || []);
+    if (!list.length) return '';
+    return '<div class="dy-photos">' + list.map(function (p) {
+      var u = p.url || p.href || '';
+      /* 봇이 서명해 넣어둔 url 을 그대로 쓴다 — 브라우저엔 키가 없다. */
+      if (u) return '<img src="' + esc(u) + '" alt="" loading="lazy" '
+        + 'onclick="_dyView(this.src)">';
+      /* 아직 안 붙었을 뿐이다. 사진이 사라진 게 아니라 링크가 없는 상태다. */
+      return '<div class="dy-dead">사진 링크가 아직 안 붙었어 (봇이 곧 붙인다)</div>';
+    }).join('') + '</div>';
   }
 
   /* ── 읽기 ─────────────────────────────────────────────────────────── */
@@ -5894,74 +5825,121 @@ window.addEventListener('beforeunload', () => {
           + (pic ? ' pic' : '')
           + (k === today() ? ' today' : '')
           + (k > today() ? ' gap' : '');
-        cells += '<div class="' + cls + '" title="' + k
-          + (has ? ' · 썼음' : '') + (pic ? ' · 사진' : '') + '"></div>';
+        /* 빈 칸도 문이다 — 눌러서 그날 입력칸을 연다 (머리말). */
+        var open = k <= today() ? ' data-open="' + k + '"' : '';
+        cells += '<div class="' + cls + '"' + open + ' title="' + k
+          + (has ? ' · 썼음' : '') + (pic ? ' · 사진' : '')
+          + (!has && k <= today() ? ' · 눌러서 쓰기' : '') + '"></div>';
       }
       rows += '<div class="dy-row">' + cells + '</div>';
     }
     return '<div id="dyGrid">' + rows + '</div>';
   }
 
+  /* 작성시각 · 출처 · 상태 한 줄. 늦게 쓴 건 '늦게 씀' 으로 구분한다 —
+     스트릭에는 반영하되 제때 쓴 것과 같아 보이면 안 된다 (머리말). */
+  function metaOf(e){
+    if (!e) return '';
+    var when = e.at ? String(e.at).slice(11, 16) : '';
+    var src = e.source === 'app' ? '앱' : '토니';
+    return (when ? when + ' · ' + src : src)
+      + (e.pending ? ' · 올리는 중' : '')
+      + (e.lateWrite ? ' · 늦게 씀' : '');
+  }
+
   function entryHtml(k, e){
     var d = parse(k);
     var body = e && String(e.text || '').trim();
-    var when = e && e.at ? String(e.at).slice(11, 16) : '';
-    var src = e && e.source === 'app' ? '앱' : '토니';
-    var meta = body
-      ? (when ? when + ' · ' + src + (e.pending ? ' · 올리는 중' : '') : src)
-      : '';
-    var photos = ((e || {}).photos || []).map(function (p) {
-      /* 봇이 서명해 넣어둔 url 을 그대로 쓴다 — 브라우저엔 키가 없다.
-         url 이 아직 없으면(갱신 전) path 로 자리만 잡는다. */
-      var u = p.url || p.href || '';
-      if (u) return '<img src=\'' + esc(u) + '\' alt=\'\' loading=\'lazy\' '
-        + 'onclick=\'_dyView(\\\'' + esc(u) + '\\\')\'>';
-      return p.path ? '<img data-path=\'' + esc(p.path) + '\' alt=\'\' loading=\'lazy\'>' : '';
-    }).join('');
+    var meta = body ? metaOf(e) : '';
     return '<div class="dy-entry" data-k="' + k + '">'
       + '<div class="dy-date">' + md(k)
       + '<span class="dy-dow">' + DOW[d.getDay()] + '</span></div>'
       + (meta ? '<div class="dy-meta">' + esc(meta) + '</div>' : '<div class="dy-meta"></div>')
       + (body ? '<div class="dy-paper">' + esc(body) + '</div>'
-              : '<div class="dy-empty">비어 있는 날.</div>')
+              : '<div class="dy-empty" data-open="' + k + '">비어 있는 날 — 지금 쓰기</div>')
       + (e && e.learned ? '<div class="dy-learned"><b>배운 것</b>' + esc(e.learned) + '</div>' : '')
-      + (photos ? '<div class="dy-photos">' + photos + '</div>' : '')
+      + photosHtml(e)
+      + (body ? '<button class="dy-write" type="button" data-open="' + k + '">'
+                + '+ 이어 쓰기</button>' : '')
       + '</div>';
   }
 
-  function writerHtml(ents){
-    var k = today();
+  /* 쓰는 자리. 오늘은 맨 위에 늘 열려 있고, 지난 날은 눌렀을 때 그 자리에 열린다.
+     **id 는 오늘 칸에만 단다** — 바깥에서 잡는 손잡이가 둘이면 어느 쪽인지
+     헷갈린다. 지난 날 칸은 클래스로만 잡는다. */
+  function writerHtml(ents, k){
     var e = ents[k];
+    var isToday = k === today();
     var has = !!(e && String(e.text || '').trim());
     var d = parse(k);
-    return '<div class="dy-entry">'
+    var id = function (n) { return isToday ? ' id="' + n + '"' : ''; };
+    return '<div class="dy-entry dy-writer' + (isToday ? '' : ' dy-late')
+      + '" data-w="' + k + '">'
       + '<div class="dy-date">' + md(k)
-      + '<span class="dy-dow">' + DOW[d.getDay()] + ' · 오늘</span></div>'
-      + (has || (e && e.learned)
-           ? '<div class="dy-meta">' + esc((e.at || '').slice(11, 16))
-             + (e.pending ? ' · 올리는 중' : '') + '</div>'
-             + (has ? '<div class="dy-paper">' + esc(e.text) + '</div>' : '')
-             + (e.learned ? '<div class="dy-learned"><b>배운 것</b>'
-                            + esc(e.learned) + '</div>' : '')
-           : '<div class="dy-meta"></div>')
-      + (((e || {}).photos || []).length
-          ? '<div class="dy-photos">' + ((e.photos || []).map(function (p) {
-              return p.url ? '<img src=\'' + esc(p.url) + '\' alt=\'\' loading=\'lazy\'>'
-                           : (p.path ? '<img data-path=\'' + esc(p.path) + '\' alt=\'\'>' : '');
-            }).join('')) + '</div>'
-          : '')
-      + '<textarea id="dyInput" class="dy-paper" rows="1" '
-      + 'placeholder="' + (has ? '하나 더 떠올랐으면 여기에.' : '한 줄이면 충분해.') + '"></textarea>'
-      + '<div id="dyLearnBox"><div class="dy-cap">오늘 배운점</div>'
-      + '<textarea id="dyLearn" class="dy-paper" rows="1" style="line-height:26px;'
-      + 'font-size:14px;background-size:100% 26px;background-image:none" '
-      + 'placeholder="하나만 건져도 돼."></textarea></div>'
-      + '<div id="dyBar"><button id="dySave" disabled>담기</button>'
-      + '<span id="dyHint">' + (has ? '이어서 붙는다 — 먼저 쓴 건 안 지워져.'
-                                    : '길게 쓰고 싶으면 그냥 계속 쓰면 돼.') + '</span>'
-      + '<button id="dyPick" type="button">사진</button>'
-      + '<input id="dyFile" type="file" accept="image/*" multiple hidden></div>'
-      + '</div>';
+      + '<span class="dy-dow">' + DOW[d.getDay()]
+      + (isToday ? ' · 오늘' : ' · 늦게 쓰는 중') + '</span></div>'
+      + '<div class="dy-meta">'
+      + esc(has || (e && e.learned) ? metaOf(e) : '') + '</div>'
+      + (has ? '<div class="dy-paper">' + esc(e.text) + '</div>' : '')
+      + (e && e.learned ? '<div class="dy-learned"><b>배운 것</b>'
+                          + esc(e.learned) + '</div>' : '')
+      + photosHtml(e)
+      + '<textarea' + id('dyInput') + ' class="dy-in dy-paper" rows="1" placeholder="'
+      + (has ? '하나 더 떠올랐으면 여기에.'
+             : (isToday ? '한 줄이면 충분해.' : '늦었어도 한 줄이면 돼.'))
+      + '"></textarea>'
+      + '<div' + id('dyLearnBox') + ' class="dy-learnbox"><div class="dy-cap">'
+      + (isToday ? '오늘 배운점' : md(k) + ' 배운점') + '</div>'
+      + '<textarea' + id('dyLearn') + ' class="dy-learn-in dy-paper" rows="1" '
+      + 'style="line-height:26px;font-size:14px;background-size:100% 26px;'
+      + 'background-image:none" placeholder="하나만 건져도 돼."></textarea></div>'
+      + '<div' + id('dyBar') + ' class="dy-bar">'
+      + '<button' + id('dySave') + ' class="dy-save" disabled>담기</button>'
+      + '<span' + id('dyHint') + ' class="dy-hint">'
+      + (has ? '이어서 붙는다 — 먼저 쓴 건 안 지워져.'
+             : (isToday ? '길게 쓰고 싶으면 그냥 계속 쓰면 돼.'
+                        : '지난 날에 담는다 — 늦게 씀으로 남는다.')) + '</span>'
+      + (isToday
+          ? '<span id="dyPhotoHint" title="앱은 보여주기만 한다 — 올리는 건 텔레그램">'
+            + '📷 사진은 텔레그램으로</span>'
+          : '<button class="dy-cancel" type="button">닫기</button>')
+      + '</div></div>';
+  }
+
+  /* 목록에 들어갈 지난 날들 — **빈 날도 자리를 남긴다.** 자리가 없으면 나중에
+     채울 길이 없다 (머리말). 첫 기록일부터 어제까지, 아직 없으면 최근 이레. */
+  function pastDays(ents){
+    var keys = Object.keys(ents).sort();
+    var start = keys.length ? keys[0] : shift(today(), -7);
+    if (_edit && _edit < start) start = _edit;
+    var out = [];
+    for (var k = shift(today(), -1); k >= start && out.length < 200; k = shift(k, -1)) {
+      if (!_month || k.slice(0, 7) === _month) out.push(k);
+    }
+    /* 아주 오래된 날을 히트맵에서 열었으면 잘려 나갔을 수 있다 — 그건 끼워 준다 */
+    if (_edit && _edit < today() && out.indexOf(_edit) < 0) {
+      out.push(_edit);
+      out.sort().reverse();
+    }
+    return out;
+  }
+
+  /* 지난 날의 문을 연다. 목록의 빈 자리 · '이어 쓰기' · 히트맵 칸이 다 여기로 온다. */
+  function openDay(k){
+    if (!k || k > today()) return;
+    if (k === today()) {                       /* 오늘 칸은 맨 위에 이미 열려 있다 */
+      var t0 = document.getElementById('dyInput');
+      if (t0) { t0.scrollIntoView({ block: 'center' }); t0.focus(); }
+      return;
+    }
+    if (_month && k.slice(0, 7) !== _month) _month = k.slice(0, 7);   /* 걸러져 있으면 그 달로 */
+    _edit = k;
+    render();
+    var box = document.querySelector('.dy-writer[data-w="' + k + '"]');
+    if (!box) return;
+    box.scrollIntoView({ block: 'center' });
+    var ta = box.querySelector('.dy-in');
+    if (ta) ta.focus();
   }
 
   function months(ents){
@@ -5991,9 +5969,7 @@ window.addEventListener('beforeunload', () => {
     }
     var ents = entries();
     var st = streak();
-    var keys = Object.keys(ents).filter(function (k) { return k < today(); })
-      .filter(function (k) { return !_month || k.slice(0, 7) === _month; })
-      .sort().reverse().slice(0, 200);
+    var days = pastDays(ents);
 
     root.innerHTML = '<div id="dyWrap">'
       + '<div id="dyHead">'
@@ -6004,15 +5980,24 @@ window.addEventListener('beforeunload', () => {
       +   '</div>'
       +   heatmap(ents)
       + '</div>'
-      + writerHtml(ents)
+      + writerHtml(ents, today())
       + '<hr class="dy-sep">'
       + months(ents)
-      + (keys.length ? keys.map(function (k) { return entryHtml(k, ents[k]); }).join('')
-                     : '<div class="dy-empty">지난 일기는 아직 없어.</div>')
+      + (days.length
+           ? days.map(function (k) {
+               /* 열어 둔 날은 읽는 자리 대신 쓰는 자리로 바뀐다 */
+               return k === _edit ? writerHtml(ents, k) : entryHtml(k, ents[k]);
+             }).join('')
+           : '<div class="dy-empty">지난 일기는 아직 없어.</div>')
       + '</div>';
 
-    bindWriter();
-    fillPhotos();
+    bindWriters();
+    [].slice.call(root.querySelectorAll('[data-open]')).forEach(function (el) {
+      el.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        openDay(el.getAttribute('data-open'));
+      });
+    });
     [].slice.call(root.querySelectorAll('.dy-jump button')).forEach(function (b) {
       b.addEventListener('click', function () {
         _month = b.getAttribute('data-m') || null;
@@ -6021,11 +6006,16 @@ window.addEventListener('beforeunload', () => {
     });
   }
 
-  /* 입력칸 — 한 줄로 열리고 쓰는 만큼 늘어난다 */
-  function bindWriter(){
-    var ta = document.getElementById('dyInput');
-    var lr = document.getElementById('dyLearn');
-    var btn = document.getElementById('dySave');
+  /* 입력칸 — 한 줄로 열리고 쓰는 만큼 늘어난다.
+     화면에 쓰는 자리가 둘일 수 있다 (오늘 + 열어 둔 지난 날) — 그래서 칸마다 묶는다. */
+  function bindWriters(){
+    [].slice.call(document.querySelectorAll('.dy-writer')).forEach(bindWriter);
+  }
+  function bindWriter(box){
+    var k = box.getAttribute('data-w');
+    var ta = box.querySelector('.dy-in');
+    var lr = box.querySelector('.dy-learn-in');
+    var btn = box.querySelector('.dy-save');
     if (!ta || !btn) return;
     var fit = function (el, min) {
       el.style.height = 'auto';                    /* 먼저 풀어야 줄어들 수도 있다 */
@@ -6041,107 +6031,35 @@ window.addEventListener('beforeunload', () => {
       if (!el) return;
       el.addEventListener('input', grow);
       el.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(k, box); }
       });
     });
-    btn.addEventListener('click', commit);
+    btn.addEventListener('click', function () { commit(k, box); });
+    var cancel = box.querySelector('.dy-cancel');
+    if (cancel) cancel.addEventListener('click', function () { _edit = null; render(); });
     grow();
-
-    var pick = document.getElementById('dyPick');
-    var file = document.getElementById('dyFile');
-    if (!pick || !file) return;
-    /* ⚠ disabled 로 두면 눌러도 **아무 일도 안 일어난다** — 조용히 죽는 게 제일 나쁘다.
-       그래서 눌리게 두고, 회색으로 보이게 하고, 누르면 그 자리에 이유를 띄운다. */
-    if (!sb()) {
-      pick.setAttribute('data-off', '1');
-      pick.style.opacity = '.5';
-      pick.title = '사진 저장소가 아직 연결 안 됐어 (설정 필요)';
-    }
-    pick.addEventListener('click', function (){
-      if (pick.getAttribute('data-off')) {
-        var bar = document.getElementById('dyBar');
-        var old2 = document.getElementById('dyNotice');
-        if (old2) { old2.remove(); return; }        /* 두 번 누르면 접는다 */
-        var n = document.createElement('div');
-        n.id = 'dyNotice';
-        /* 콘솔을 열게 하지 않는다 — 여기서 바로 연결한다.
-           ⚠ anon 키만 받는다. service_role 키는 봇 전용이고 브라우저에 오면 안 된다. */
-        n.innerHTML = '사진 저장소가 아직 연결되지 않았어 — 글은 그대로 담긴다.'
-          + '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px;'
-          + 'max-width:420px">'
-          + '<input id="dySbUrl" placeholder="https://xxxx.supabase.co" '
-          + 'style="border:1px solid var(--border2);border-radius:8px;padding:6px 9px;'
-          + 'font-size:11px;font-family:inherit;background:var(--surface);color:var(--text)">'
-          + '<input id="dySbAnon" placeholder="anon 키 (service_role 아님)" '
-          + 'style="border:1px solid var(--border2);border-radius:8px;padding:6px 9px;'
-          + 'font-size:11px;font-family:inherit;background:var(--surface);color:var(--text)">'
-          + '<div style="display:flex;gap:6px;align-items:center">'
-          + '<button id="dySbSave" style="padding:5px 14px;border-radius:999px;border:none;'
-          + 'background:var(--accent);color:#fff;font-size:11px;font-weight:700;'
-          + 'cursor:pointer;font-family:inherit">연결</button>'
-          + '<span id="dySbMsg" style="font-size:10px;color:var(--muted)">버킷 diary-photos</span>'
-          + '</div></div>';
-        bar.parentNode.insertBefore(n, bar.nextSibling);
-        var go = document.getElementById('dySbSave');
-        go.addEventListener('click', function(){
-          var u = (document.getElementById('dySbUrl').value || '').trim();
-          var k = (document.getElementById('dySbAnon').value || '').trim();
-          var msg = document.getElementById('dySbMsg');
-          if (!u || !k) { msg.textContent = '둘 다 필요해'; return; }
-          if (/service_role/.test(k) || /"role":"service_role"/.test(atobSafe(k))) {
-            msg.textContent = '⚠ service_role 키다 — anon 키를 넣어야 해';
-            return;
-          }
-          window._dySetStore(u, k, 'diary-photos');
-          if (typeof showToast === 'function') showToast('📔 사진 저장소 연결됨');
-        });
-        return;
-      }
-      file.click();
-    });
-    file.addEventListener('change', async function (){
-      var list = [].slice.call(file.files || []);
-      if (!list.length) return;
-      pick.disabled = true; pick.textContent = '올리는 중…';
-      var added = 0;
-      for (var i = 0; i < list.length; i++) {
-        try { enqueuePhoto(today(), await uploadPhoto(list[i])); added++; }
-        catch (e) {
-          if (typeof showToast === 'function') showToast('📔 ' + (e.message || '업로드 실패'));
-        }
-      }
-      file.value = '';
-      pick.disabled = false; pick.textContent = '사진';
-      if (added) {
-        if (typeof showToast === 'function') showToast('📔 사진 ' + added + '장 담았어');
-        render();
-      }
-    });
   }
 
-  /* 사진도 큐로 넘긴다 — diary.json 은 봇 소유다 */
-  function enqueuePhoto(date, rec){
-    var q = queue();
-    q['dp' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)] = {
-      date: date, photo: rec, at: new Date().toISOString(),
-    };
-    localStorage.setItem(QUEUE, JSON.stringify(q));
-  }
-
-  function commit(){
-    var ta = document.getElementById('dyInput');
-    var lr = document.getElementById('dyLearn');
+  function commit(k, box){
+    k = k || today();
+    box = box || document.querySelector('.dy-writer[data-w="' + k + '"]');
+    if (!box) return;
+    var ta = box.querySelector('.dy-in');
+    var lr = box.querySelector('.dy-learn-in');
     if (!ta) return;
     var body = ta.value.trim();
     var learn = lr ? lr.value.trim() : '';
     if (!body && !learn) return;
-    enqueue(today(), body, learn);
+    var late = k !== today();                /* 그날이 지난 뒤에 채우는 것 */
+    enqueue(k, body, learn, late);
     ta.value = '';
     if (lr) lr.value = '';
+    if (late) _edit = null;                  /* 담았으면 접는다 — 그 자리에 바로 보인다 */
     render();
     if (typeof showToast === 'function')
-      showToast('📔 ' + (body && learn ? '일기와 배운점을 담았어'
-                        : (learn ? '배운점을 담았어' : '일기에 담았어')));
+      showToast('📔 ' + (late ? md(k) + ' 일기에 담았어 (늦게 씀)'
+                        : (body && learn ? '일기와 배운점을 담았어'
+                           : (learn ? '배운점을 담았어' : '일기에 담았어'))));
   }
 
   window._dyView = function (url) {
@@ -6172,9 +6090,11 @@ window.addEventListener('beforeunload', () => {
   window._dyQueue = queue;
   window._dyToday = today;
   window._dyCommit = commit;
-  window._dyStore = sb;
-  window._dyFill = fillPhotos;
-  window._dyCanPhoto = function(){ return !!sb(); };
+  window._dyOpen = openDay;
+  window._dyDays = pastDays;
+  window._dyEditing = function (){ return _edit; };
+  /* 사진 훅은 없다 — 앱은 보여주기만 한다 (머리말). 업로드 경로가 없으니
+     테스트에서 열어볼 저장소 설정도 없다. */
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
