@@ -5551,13 +5551,19 @@ async function _syncPullOnLoad(){
   try{
     const id=await _ensureGistId(), gist=await _gistApi('gists/'+id);
     const remoteUpdated=gist.updated_at, lastPush=localStorage.getItem(SYNC_LAST_KEY);
-    const localEmpty=_bkLocalLooksEmpty(), file=gist.files && gist.files[SYNC_FILENAME];
+    const localData=_collectSyncData(), localEmpty=_bkLocalLooksEmpty(), localDirty=localStorage.getItem(SYNC_DIRTY_KEY)==='1';
+    const localWeight=_syncWeight(localData), file=gist.files && gist.files[SYNC_FILENAME];
     if(file){
       let content=file.content;
       if(file.truncated && file.raw_url){ const rr=await fetch(file.raw_url); if(!rr.ok) throw {code:'remote_pull_failed'}; content=await rr.text(); }
       const parsed=JSON.parse(content), remoteData=parsed && parsed.data && typeof parsed.data==='object' ? parsed.data : {};
-      if(_bkDataHasContent(remoteData) && (localEmpty || !lastPush || new Date((parsed.updated_at||remoteUpdated)) > new Date(lastPush))){
-        if(!localEmpty && lastPush && localStorage.getItem(SYNC_DIRTY_KEY)==='1'){
+      const remoteWeight=_syncWeight(remoteData), remoteMuchRicher=_bkDataHasContent(remoteData) && remoteWeight>=8 && localWeight<remoteWeight*0.5;
+      if(remoteMuchRicher && localDirty){
+        try{ const priorStash=localStorage.getItem('jay_sync_stash'); if(priorStash) _origSetItem('jay_sync_stash_backup_'+Date.now(),priorStash); _origSetItem('jay_sync_stash',JSON.stringify({at:new Date().toISOString(),why:'local data far smaller than Gist',data:localData})); }catch(_){}
+        _setSyncState('error'); showToast('⚠ 서버 데이터가 더 많아 자동 덮어쓰기를 멈췄어. 로컬 변경은 보관했어'); return;
+      }
+      if(_bkDataHasContent(remoteData) && (localEmpty || remoteMuchRicher || !lastPush || new Date((parsed.updated_at||remoteUpdated)) > new Date(lastPush))){
+        if(!localEmpty && lastPush && localDirty){
           _setSyncState('ok'); _syncPushNow(); return;
         }
         if(_applySyncData(remoteData)===false){ _setSyncState('error'); showToast('⚠ 복원 전 백업을 만들지 못해 적용을 멈췄어'); return; }
