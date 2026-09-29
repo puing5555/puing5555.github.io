@@ -5380,9 +5380,9 @@ function deleteCountdown(){
   countdown=null; saveCountdownData(); closeModal('countdownModal'); renderCountdown(); showToast('카운트다운 삭제됨');
 }
 
-// ═══════════ 로컬 자동 백업 (IndexedDB 스냅샷, 최근 7일) + 파일 내보내기/가져오기 ═══════════
+// ═══════════ 로컬 자동 백업 (IndexedDB 스냅샷, 최근 30일) + 파일 내보내기/가져오기 ═══════════
 // 마커 키는 'jay_' 프리픽스를 피해(‘jaybk_’) Gist 동기화 대상에서 제외 → 기기별 독립 유지.
-const _BK_MARKER='jaybk_last_date', _BK_MAX=7, _IDB_NAME='jay_backup', _IDB_STORE='snapshots';
+const _BK_MARKER='jaybk_last_date', _BK_MAX=30, _IDB_NAME='jay_backup', _IDB_STORE='snapshots';
 // 진짜 사용자 데이터가 담기는 키들 — 이게 다 비면 "빈 상태"로 판단(복원 안내 트리거)
 const _CONTENT_KEYS=['jay_allData','jay_goals','jay_memoData','jay_docsData','jay_sessions','jay_currentSession','jay_mmState','jay_routine','jay_poker_sessions','jay_bankroll','jay_poker_learn','jay_countdown','jay_scratchpad','jay_profile'];
 // 기기 전용 키 — 복원/가져오기 시 현재 기기 값을 보존(옛 토큰/키로 덮어쓰지 않음)
@@ -5504,70 +5504,95 @@ async function _ensureGistId(){
   const created=await _gistApi('gists',{ method:'POST', body:JSON.stringify({ description:'JAY Daily OS sync', public:false, files:{ [SYNC_FILENAME]:{ content: JSON.stringify({updated_at:new Date().toISOString(), data:{}}) } } }) });
   id=created.id; _origSetItem(SYNC_GIST_KEY, id); return id;
 }
+function _syncWeight(data){
+  try{ if(window.dataGuard && typeof window.dataGuard.weigh==='function') return window.dataGuard.weigh(data||{}); }catch(_){}
+  let n=0; for(const [k,v] of Object.entries(data||{})){ n++; try{ const x=JSON.parse(v); if(Array.isArray(x)) n+=x.length; else if(x&&Array.isArray(x.els)) n+=x.els.length; else if(x&&x.entries&&typeof x.entries==='object') n+=Object.keys(x.entries).length; else if(x&&typeof x==='object') n+=Object.keys(x).length; }catch(_){ if(_bkValHasContent(v)) n++; } } return n;
+}
 async function _syncPushNow(){
   if(!_syncToken()){ _setSyncState('local'); return; }
   if(!navigator.onLine){ _syncPending=true; _setSyncState('offline'); return; }
   _setSyncState('syncing');
   try{
     const id=await _ensureGistId();
-    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:_collectSyncData() });
-    const res=await _gistApi('gists/'+id,{ method:'PATCH', body:JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } }) });
+    const gist=await _gistApi('gists/'+id);
+    const file=gist && gist.files && gist.files[SYNC_FILENAME];
+    let priorText=null, remoteData={}, remoteStamp=null;
+    if(file){
+      priorText=file.content;
+      if(file.truncated && file.raw_url){ const rr=await fetch(file.raw_url); if(!rr.ok) throw {code:'remote_backup_read_failed'}; priorText=await rr.text(); }
+      let prior; try{ prior=JSON.parse(priorText||'{}'); }catch(_){ throw {code:'remote_json_invalid'}; }
+      remoteData=prior && prior.data && typeof prior.data==='object' ? prior.data : {}; remoteStamp=prior && prior.updated_at || gist.updated_at;
+    }
+    const localData=_collectSyncData();
+    const localHas=_bkDataHasContent(localData), remoteHas=_bkDataHasContent(remoteData);
+    if(!localHas && remoteHas){
+      if(_applySyncData(remoteData)===false){ _setSyncState('error'); showToast('⚠ 복원 전 백업을 만들지 못해 적용을 멈췄어'); return; }
+      _origSetItem(SYNC_LAST_KEY, (remoteStamp||new Date().toISOString()));
+      _setSyncState('ok'); showToast('↓ 이 기기는 비어 있어 서버 데이터를 복원했어'); location.reload(); return;
+    }
+    if(!localHas){ _setSyncState('error'); showToast('⚠ 데이터가 비어 있어 서버에 저장하지 않았어'); return; }
+    const lw=_syncWeight(localData), rw=_syncWeight(remoteData);
+    let approved=0; try{ approved=window.dataGuard.status().deleteAllowance||0; }catch(_){}
+    if(remoteHas && rw>0 && lw+approved<rw*0.5){ _setSyncState('error'); showToast('⚠ 데이터가 절반 이상 줄어 푸시를 막았어. 서버 원본은 그대로야'); console.warn('[보호] 급감 차단', {lw,rw}); return; }
+    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:localData });
+    const files={};
+    if(priorText && remoteHas) files['jay-daily-os-prepush.json']={ content:priorText };
+    files[SYNC_FILENAME]={ content:payload };
+    const res=await _gistApi('gists/'+id,{ method:'PATCH', body:JSON.stringify({ files }) });
     const upd=(res && res.updated_at) ? res.updated_at : new Date().toISOString();
-    _origSetItem(SYNC_LAST_KEY, upd);
-    localStorage.removeItem(SYNC_DIRTY_KEY); // 푸시 완료 → 미푸시 마커 해제
+    _origSetItem(SYNC_LAST_KEY, upd); localStorage.removeItem(SYNC_DIRTY_KEY);
     _syncPending=false; _setSyncState('ok');
-  }catch(e){ _handleSyncErr(e); }
+  }catch(e){ console.warn('[보호] 푸시 전 확인/백업 실패 — 푸시하지 않음',e); _handleSyncErr(e); }
 }
 async function _syncPullOnLoad(){
   if(!_syncToken()){ _setSyncState('local'); return; }
   if(!navigator.onLine){ _setSyncState('offline'); return; }
   _setSyncState('syncing');
   try{
-    const id=await _ensureGistId();
-    const gist=await _gistApi('gists/'+id);
-    const remoteUpdated=gist.updated_at;
-    const lastPush=localStorage.getItem(SYNC_LAST_KEY);
-    const file=gist.files && gist.files[SYNC_FILENAME];
-    if(file && (!lastPush || new Date(remoteUpdated) > new Date(lastPush))){
-      // 보험 가드: 이전에 동기화한 적 있고(lastPush) 미푸시 로컬 변경이 남아 있으면
-      // 원격으로 덮어쓰지 말고 로컬 우선 → 로컬을 즉시 푸시. (역류로 인한 데이터 소실 방지)
-      if(lastPush && localStorage.getItem(SYNC_DIRTY_KEY)==='1'){
-        _setSyncState('ok'); _syncPushNow(); return;
-      }
+    const id=await _ensureGistId(), gist=await _gistApi('gists/'+id);
+    const remoteUpdated=gist.updated_at, lastPush=localStorage.getItem(SYNC_LAST_KEY);
+    const localEmpty=_bkLocalLooksEmpty(), file=gist.files && gist.files[SYNC_FILENAME];
+    if(file){
       let content=file.content;
-      if(file.truncated && file.raw_url){ content=await (await fetch(file.raw_url)).text(); }
-      const parsed=JSON.parse(content);
-      if(parsed && parsed.data && Object.keys(parsed.data).length){
-        _applySyncData(parsed.data);
-        _origSetItem(SYNC_LAST_KEY, remoteUpdated);
-        location.reload(); return;                             // 적용 후 새로고침
+      if(file.truncated && file.raw_url){ const rr=await fetch(file.raw_url); if(!rr.ok) throw {code:'remote_pull_failed'}; content=await rr.text(); }
+      const parsed=JSON.parse(content), remoteData=parsed && parsed.data && typeof parsed.data==='object' ? parsed.data : {};
+      if(_bkDataHasContent(remoteData) && (localEmpty || !lastPush || new Date((parsed.updated_at||remoteUpdated)) > new Date(lastPush))){
+        if(!localEmpty && lastPush && localStorage.getItem(SYNC_DIRTY_KEY)==='1'){
+          _setSyncState('ok'); _syncPushNow(); return;
+        }
+        if(_applySyncData(remoteData)===false){ _setSyncState('error'); showToast('⚠ 복원 전 백업을 만들지 못해 적용을 멈췄어'); return; }
+        _origSetItem(SYNC_LAST_KEY, parsed.updated_at||remoteUpdated);
+        location.reload(); return;
       }
     }
     _setSyncState('ok');
-    if(!localStorage.getItem(SYNC_LAST_KEY)) { _syncPushNow(); return; } // 최초 연결 → 로컬 백업 업로드
-    if(localStorage.getItem(SYNC_DIRTY_KEY)==='1') _syncPushNow();       // 미푸시 로컬 변경 플러시
+    if(localEmpty){ showToast('⚠ 이 기기 데이터가 비어 있어 푸시하지 않았어'); return; }
+    if(!lastPush || localStorage.getItem(SYNC_DIRTY_KEY)==='1') _syncPushNow();
   }catch(e){ _handleSyncErr(e); }
 }
-// beforeunload 강제 푸시 — keepalive fetch로 언로드 중에도 전송 (미푸시 변경 있을 때만)
+// beforeunload에서는 네트워크 쓰기를 하지 않는다. 미푸시 표시는 다음 로드까지 유지.
+// 언로드 중에는 원격 상태 확인과 백업을 보장할 수 없으므로 Gist에 직접 PATCH하지 않는다.
+// dirty 표시는 유지해 다음 정상 로드에서 pull/검증 후 저장한다.
 function _syncFlushOnUnload(){
-  try{
-    if(!_syncToken() || localStorage.getItem(SYNC_DIRTY_KEY)!=='1') return;
-    const id=localStorage.getItem(SYNC_GIST_KEY); if(!id) return;
-    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:_collectSyncData() });
-    fetch('https://api.github.com/gists/'+id, {
-      method:'PATCH', keepalive:true,
-      headers:{ 'Authorization':'Bearer '+_syncToken(), 'Accept':'application/vnd.github+json', 'Content-Type':'application/json' },
-      body: JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } })
-    });
-    // 응답을 못 받으니 lastPush은 갱신하지 않음 → 다음 로드에서 dirty 가드가 로컬을 다시 푸시하며 정리
-  }catch(_){}
+  if(!_syncToken() || localStorage.getItem(SYNC_DIRTY_KEY)!=='1') return;
+  _syncPending=true; _setSyncState('pending');
 }
 function _applySyncData(data){
+  const localData=_collectSyncData();
+  if(_bkDataHasContent(localData)){
+    try{
+      const previous=localStorage.getItem('jay_sync_stash');
+      if(previous) _origSetItem('jay_sync_stash_backup_'+Date.now(), previous);
+      _origSetItem('jay_sync_stash', JSON.stringify({at:new Date().toISOString(),why:'before remote replacement',data:localData}));
+    }catch(e){ console.warn('[보호] 덮어쓰기 전 로컬 스태시 실패',e); return false; }
+  }
   _syncApplying=true;
-  const rm=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) rm.push(k); }
-  rm.forEach(k=>localStorage.removeItem(k));                    // 통짜 덮어쓰기(삭제도 전파)
-  Object.keys(data).forEach(k=>{ if(k.startsWith('jay_') && !_syncExcluded(k)) _origSetItem(k, data[k]); });
-  _syncApplying=false;
+  try{
+    const rm=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) rm.push(k); }
+    rm.forEach(k=>localStorage.removeItem(k));
+    Object.keys(data||{}).forEach(k=>{ if(k.startsWith('jay_') && !_syncExcluded(k)) _origSetItem(k, data[k]); });
+  }finally{ _syncApplying=false; }
+  return true;
 }
 function _handleSyncErr(e){
   if(e && e.code==='unauthorized'){ _setSyncState('error'); showToast('⚠ 동기화 토큰이 만료됐어 — 탭해서 다시 입력해줘'); return; }
@@ -6277,7 +6302,7 @@ window.addEventListener('beforeunload', () => {
   const SEED_KEY   = 'jay_sync_seeded';         /* 이 기기가 원격 시딩을 마쳤는가 */
   const SNAP_KEY   = 'jay_sync_last_snapshot';  /* 마지막 스냅샷 날짜 YYYYMMDD */
   const GUARD_RATIO = 0.5;                      /* 원격 대비 이 비율 미만이면 차단 */
-  const SNAP_KEEP  = 7;
+  const SNAP_KEEP  = 30;
   /* jay_sync_* 는 앱이 동기화에서 제외하는 접두사 → 기기 로컬 전용이고 푸시를 유발하지 않는다 */
   const setLocal = (typeof _origSetItem === 'function')
       ? _origSetItem : localStorage.setItem.bind(localStorage);
@@ -6355,10 +6380,10 @@ window.addEventListener('beforeunload', () => {
     /* ① 로컬이 비었으면 원격을 읽을 것도 없이 차단.
           원격 조회가 실패해도 이 검사만은 살아 있어야 한다. */
     const local = _collectSyncData(), lw = weigh(local);
-    if(lw === 0) return { ok:false, block:{ lw:0, rw:null, why:'이 기기의 데이터가 비어 있다' } };
+    if(lw === 0) return { ok:false, pull:true };
 
     const rd = await remoteData();
-    if(!rd) return { ok:true };   /* 원격을 못 읽었다 — 저장 자체를 막으면 그게 더 큰 손실 */
+    if(rd === null) return { ok:false, block:{ lw, rw:null, why:'원격 데이터를 확인하지 못했다' } };
     const rw = weigh(rd);
     /* 승인된 삭제분은 정당한 감소로 되돌려 계산한다 — 가드 자체는 그대로다 */
     const effective = lw + allowance();
@@ -6371,7 +6396,7 @@ window.addEventListener('beforeunload', () => {
   _syncPushNow = async function(){
     let v;
     try { v = await precheck(); }
-    catch(e){ console.warn('[보호] 가드 판단 실패 — 그대로 진행', e); v = { ok:true }; }
+    catch(e){ console.warn('[보호] 가드 판단 실패 — 안전을 위해 푸시 차단', e); v = { ok:false, block:{lw:null,rw:null,why:'안전 검사 실패'} }; }
 
     if(v.pull) return _syncPullOnLoad();
     if(v.block){
@@ -6386,6 +6411,7 @@ window.addEventListener('beforeunload', () => {
     _overrideOnce = false;
     _blocked = null;
     const r = await _origPush.apply(this, arguments);
+    if(_syncState !== 'ok') return r;  /* 차단·실패 시 성공 처리나 백업 PATCH를 하지 않는다 */
     setAllowance(0);   /* 푸시가 나갔으면 삭제 장부는 청산됐다 */
     maybeSnapshot().catch(e => console.warn('[보호] 스냅샷 실패', e));
     return r;
@@ -6435,7 +6461,7 @@ window.addEventListener('beforeunload', () => {
   }
 
   /* ── ③ 일일 스냅샷 ──────────────────────────────────────────────────────
-     같은 Gist에 backup-YYYYMMDD.json 으로 하루 1개. 최근 7개만 남긴다.
+     같은 Gist에 backup-YYYYMMDD.json 으로 하루 1개. 최근 30개만 남긴다.
      coach-*.json 과 앱 파일은 건드리지 않는다 — PATCH는 이름 붙인 파일만 바꾼다. */
   function stamp(){
     const d = new Date();
@@ -6447,14 +6473,16 @@ window.addEventListener('beforeunload', () => {
     const id = localStorage.getItem(gistKey);
     if(!id) return;
 
+    const snapshotData = _collectSyncData();
+    if(!_bkDataHasContent(snapshotData)) return;
     const name = 'backup-' + today + '.json';
     const files = { [name]: { content: JSON.stringify({
-      updated_at: new Date().toISOString(), data: _collectSyncData() }) } };
+      updated_at: new Date().toISOString(), data: snapshotData }) } };
 
     const g = await _gistApi('gists/'+id);
     const olds = Object.keys((g && g.files) || {})
       .filter(n => /^backup-\d{8}\.json$/.test(n) && n !== name).sort();
-    const drop = Math.max(0, olds.length - (SNAP_KEEP - 1));   /* 오늘 것 포함 7개 */
+    const drop = Math.max(0, olds.length - (SNAP_KEEP - 1));   /* 오늘 것 포함 30개 */
     olds.slice(0, drop).forEach(n => { files[n] = null; });      /* null = 삭제 */
 
     await _gistApi('gists/'+id, {
@@ -6667,11 +6695,15 @@ window.addEventListener('beforeunload', () => {
           touchReg(null);
         }
       } catch(e){
-        /* 원격 확인 실패는 저장을 막을 이유가 못 된다 — 원래 경로로 간다 */
-        console.warn('[동기화] 원격 확인 실패 — 그대로 진행', e);
+        /* 원격 최신 여부를 확인하지 못했으므로 덮어쓰지 않는다 */
+        console.warn('[동기화] 원격 확인 실패 — 푸시 중단', e);
+        try { _setSyncState('error'); } catch(_){}
+        toast('⚠ 서버 상태를 확인하지 못해 저장을 멈췄어. 데이터는 이 기기에 남아 있어');
+        return;
       }
     }
     var r = await _origPush.apply(this, arguments);
+    if (_syncState !== 'ok') return r; /* 차단된 푸시는 성공 시각을 기록하지 않는다 */
     /* 앱은 LAST 에 gist 시각을 넣는다. 그러면 봇이 다른 파일을 쓰는 순간
        "원격이 더 최신"이 되어 리로드가 걸린다. 우리가 방금 쓴 시점으로 덮는다. */
     try {
