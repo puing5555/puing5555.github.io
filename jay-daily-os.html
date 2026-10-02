@@ -496,6 +496,25 @@ body {
 }
 .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 
+.today-top-bar { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.today-top-bar .chip-row { margin-bottom: 0; flex-shrink: 0; }
+.today-scratch-wrap {
+  flex: 1; min-width: 0;
+}
+.today-scratch {
+  width: 100%; resize: none; border: 1.5px solid var(--border2); border-radius: 10px;
+  background: var(--surface); padding: 8px 12px; font-size: 13px; line-height: 1.7;
+  font-family: 'Noto Sans KR', sans-serif; color: var(--text); outline: none;
+  transition: height 0.2s ease;
+  height: 3.4em;            /* 기본 ~2줄 */
+}
+.today-scratch:focus { height: 8.5em; /* ~6줄 */ }
+.today-scratch::placeholder { color: var(--muted); opacity: 0.55; }
+.today-scratch-date {
+  font-size: 10px; font-weight: 600; color: var(--muted); margin-bottom: 3px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 /* 로딩 dots */
 @keyframes dotBounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
 .dots span {
@@ -879,6 +898,9 @@ body {
   .dump-map-col  { flex: 1 1 auto !important; width: 100% !important; min-height: 34vh; }
   .dump-resizer  { display: none !important; }
 
+  /* 오늘: 필터+낙서 줄바꿈 */
+  .today-top-bar { flex-direction: column; }
+  .today-scratch-wrap { width: 100%; }
   /* 오늘: 할일/타임라인 2열 → 1열 */
   .today-grid { grid-template-columns: 1fr !important; height: auto !important; gap: 12px; }
 
@@ -1205,12 +1227,20 @@ body {
 
     <!-- 오늘 패널 -->
     <div id="panel-today" class="panel" style="padding:20px 24px">
-      <div class="chip-row">
-        <button class="chip on" onclick="filterTasks('today',this)">오늘</button>
-        <button class="chip" onclick="filterTasks('tomorrow',this)">내일</button>
-        <button class="chip" onclick="filterTasks('week',this)">이번주</button>
-        <button class="chip" onclick="filterTasks('later',this)">나중에</button>
-        <button class="chip" onclick="filterTasks('past',this)">지난 할일</button>
+      <div class="today-top-bar">
+        <div class="chip-row">
+          <button class="chip on" onclick="filterTasks('today',this)">오늘</button>
+          <button class="chip" onclick="filterTasks('tomorrow',this)">내일</button>
+          <button class="chip" onclick="filterTasks('week',this)">이번주</button>
+          <button class="chip" onclick="filterTasks('later',this)">나중에</button>
+          <button class="chip" onclick="filterTasks('past',this)">지난 할일</button>
+        </div>
+        <div class="today-scratch-wrap">
+          <div class="today-scratch-date" id="scratchDateLabel"></div>
+          <textarea id="todayScratch" class="today-scratch"
+            placeholder="오늘 머릿속에 떠오르는 거 막 적기..."
+            oninput="_scratchInput()"></textarea>
+        </div>
       </div>
       <div class="today-grid" style="flex:1;overflow:hidden">
         <div class="today-col">
@@ -1683,6 +1713,39 @@ function save() {
 function getDay() {
   if (!allData[TODAY_KEY]) allData[TODAY_KEY] = { tasks:[], schedule:[], dumps:[], diary:'', report:'' };
   return allData[TODAY_KEY];
+}
+
+// ── 오늘의 낙서장 ──
+if (!allData.scratch) allData.scratch = {};
+let _scratchTimer = null;
+let _scratchDate = TODAY_KEY; // 현재 낙서장이 보여주는 날짜
+
+function _scratchInput() {
+  clearTimeout(_scratchTimer);
+  _scratchTimer = setTimeout(function(){
+    const el = document.getElementById('todayScratch');
+    if (!el) return;
+    if (!allData.scratch) allData.scratch = {};
+    allData.scratch[_scratchDate] = el.value;
+    save();
+  }, 500);
+}
+
+function _scratchLoad(dateKey) {
+  _scratchDate = dateKey || TODAY_KEY;
+  const el = document.getElementById('todayScratch');
+  const lbl = document.getElementById('scratchDateLabel');
+  if (!el) return;
+  if (!allData.scratch) allData.scratch = {};
+  // 포커스 중(입력 중)이면 덮어쓰지 않음
+  if (document.activeElement === el) return;
+  el.value = allData.scratch[_scratchDate] || '';
+  // 오늘이 아니면 읽기 전용
+  const isToday = _scratchDate === TODAY_KEY;
+  el.readOnly = !isToday;
+  el.style.opacity = isToday ? '1' : '0.6';
+  el.placeholder = isToday ? '오늘 머릿속에 떠오르는 거 막 적기...' : '';
+  if (lbl) lbl.textContent = isToday ? '' : _scratchDate.slice(5);
 }
 
 // ── 날짜 ──
@@ -5296,6 +5359,7 @@ function init() {
   const _moved = carryOverTasks(); // 지난 미완료 할일 오늘로 이월
   if (_moved) showToast(`📌 지난 미완료 할일 ${_moved}개를 오늘로 가져왔어`);
   renderTasks();
+  _scratchLoad(TODAY_KEY);
   renderRightGoals();
   renderMiniCal();
   if (_apiKey) { const st = document.getElementById('apiKeyStatus'); if (st) st.textContent = '✅'; }
@@ -7984,8 +8048,9 @@ window.addEventListener('beforeunload', () => {
       + '-' + String(dt.getDate()).padStart(2, '0');
     _armed = null;
     draw();
+    if (typeof _scratchLoad === 'function') _scratchLoad(_date);
   };
-  window._tbToday = function(){ _date = todayKey(); _armed = null; draw(); };
+  window._tbToday = function(){ _date = todayKey(); _armed = null; draw(); if (typeof _scratchLoad === 'function') _scratchLoad(todayKey()); };
   window._tbDelete = function(id){
     setBlocks(blocks().filter(function(b){ return b.id !== id; }));
     draw();
@@ -8319,8 +8384,8 @@ window.addEventListener('beforeunload', () => {
       + '<span id="psNum">0/0 · 0%</span>'
       + '<span id="psCarry" style="display:none"></span>'
       + '<span id="psStreak"></span>';
-    var chips = panel.querySelector('.chip-row');
-    if (chips && chips.nextSibling) panel.insertBefore(bar, chips.nextSibling);
+    var topBar = panel.querySelector('.today-top-bar') || panel.querySelector('.chip-row');
+    if (topBar && topBar.nextSibling) panel.insertBefore(bar, topBar.nextSibling);
     else panel.insertBefore(bar, panel.firstChild);
     return bar;
   }
