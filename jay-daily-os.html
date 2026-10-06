@@ -489,13 +489,7 @@ body {
 .empty-text { font-size: 13px; line-height: 1.6; }
 
 .chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-.chip {
-  padding: 5px 12px; border-radius: 100px; border: 1.5px solid var(--border2);
-  background: transparent; color: var(--text2); font-size: 12px;
-  cursor: pointer; font-family: inherit; font-weight: 500; transition: all 0.15s;
-}
-.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
-
+/* ── 오늘 패널 필터+낙서 한 줄 ── */
 .today-top-bar { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
 .today-top-bar .chip-row { margin-bottom: 0; flex-shrink: 0; }
 .today-scratch-wrap {
@@ -514,6 +508,12 @@ body {
   font-size: 10px; font-weight: 600; color: var(--muted); margin-bottom: 3px;
   font-family: 'JetBrains Mono', monospace;
 }
+.chip {
+  padding: 5px 12px; border-radius: 100px; border: 1.5px solid var(--border2);
+  background: transparent; color: var(--text2); font-size: 12px;
+  cursor: pointer; font-family: inherit; font-weight: 500; transition: all 0.15s;
+}
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 
 /* 로딩 dots */
 @keyframes dotBounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
@@ -1626,7 +1626,7 @@ body {
   </div>
 </div>
 
-<script>
+<script type="text/daily-os-deferred">
 // ── 마이그레이션: 저장된 옛날 모델명 → claude-sonnet-4-6 자동 치환 ──
 // localStorage에 저장된 채팅/세션/메모 기록에 남아있는 예전 에러 메시지·모델명을 정리.
 (function migrateModelName() {
@@ -5444,9 +5444,9 @@ function deleteCountdown(){
   countdown=null; saveCountdownData(); closeModal('countdownModal'); renderCountdown(); showToast('카운트다운 삭제됨');
 }
 
-// ═══════════ 로컬 자동 백업 (IndexedDB 스냅샷, 최근 30일) + 파일 내보내기/가져오기 ═══════════
+// ═══════════ 로컬 자동 백업 (IndexedDB 스냅샷, 최근 7일) + 파일 내보내기/가져오기 ═══════════
 // 마커 키는 'jay_' 프리픽스를 피해(‘jaybk_’) Gist 동기화 대상에서 제외 → 기기별 독립 유지.
-const _BK_MARKER='jaybk_last_date', _BK_MAX=30, _IDB_NAME='jay_backup', _IDB_STORE='snapshots';
+const _BK_MARKER='jaybk_last_date', _BK_MAX=7, _IDB_NAME='jay_backup', _IDB_STORE='snapshots';
 // 진짜 사용자 데이터가 담기는 키들 — 이게 다 비면 "빈 상태"로 판단(복원 안내 트리거)
 const _CONTENT_KEYS=['jay_allData','jay_goals','jay_memoData','jay_docsData','jay_sessions','jay_currentSession','jay_mmState','jay_routine','jay_poker_sessions','jay_bankroll','jay_poker_learn','jay_countdown','jay_scratchpad','jay_profile'];
 // 기기 전용 키 — 복원/가져오기 시 현재 기기 값을 보존(옛 토큰/키로 덮어쓰지 않음)
@@ -5568,101 +5568,70 @@ async function _ensureGistId(){
   const created=await _gistApi('gists',{ method:'POST', body:JSON.stringify({ description:'JAY Daily OS sync', public:false, files:{ [SYNC_FILENAME]:{ content: JSON.stringify({updated_at:new Date().toISOString(), data:{}}) } } }) });
   id=created.id; _origSetItem(SYNC_GIST_KEY, id); return id;
 }
-function _syncWeight(data){
-  try{ if(window.dataGuard && typeof window.dataGuard.weigh==='function') return window.dataGuard.weigh(data||{}); }catch(_){}
-  let n=0; for(const [k,v] of Object.entries(data||{})){ n++; try{ const x=JSON.parse(v); if(Array.isArray(x)) n+=x.length; else if(x&&Array.isArray(x.els)) n+=x.els.length; else if(x&&x.entries&&typeof x.entries==='object') n+=Object.keys(x.entries).length; else if(x&&typeof x==='object') n+=Object.keys(x).length; }catch(_){ if(_bkValHasContent(v)) n++; } } return n;
-}
 async function _syncPushNow(){
   if(!_syncToken()){ _setSyncState('local'); return; }
   if(!navigator.onLine){ _syncPending=true; _setSyncState('offline'); return; }
   _setSyncState('syncing');
   try{
     const id=await _ensureGistId();
-    const gist=await _gistApi('gists/'+id);
-    const file=gist && gist.files && gist.files[SYNC_FILENAME];
-    let priorText=null, remoteData={}, remoteStamp=null;
-    if(file){
-      priorText=file.content;
-      if(file.truncated && file.raw_url){ const rr=await fetch(file.raw_url); if(!rr.ok) throw {code:'remote_backup_read_failed'}; priorText=await rr.text(); }
-      let prior; try{ prior=JSON.parse(priorText||'{}'); }catch(_){ throw {code:'remote_json_invalid'}; }
-      remoteData=prior && prior.data && typeof prior.data==='object' ? prior.data : {}; remoteStamp=prior && prior.updated_at || gist.updated_at;
-    }
-    const localData=_collectSyncData();
-    const localHas=_bkDataHasContent(localData), remoteHas=_bkDataHasContent(remoteData);
-    if(!localHas && remoteHas){
-      if(_applySyncData(remoteData)===false){ _setSyncState('error'); showToast('⚠ 복원 전 백업을 만들지 못해 적용을 멈췄어'); return; }
-      _origSetItem(SYNC_LAST_KEY, (remoteStamp||new Date().toISOString()));
-      _setSyncState('ok'); showToast('↓ 이 기기는 비어 있어 서버 데이터를 복원했어'); location.reload(); return;
-    }
-    if(!localHas){ _setSyncState('error'); showToast('⚠ 데이터가 비어 있어 서버에 저장하지 않았어'); return; }
-    const lw=_syncWeight(localData), rw=_syncWeight(remoteData);
-    let approved=0; try{ approved=window.dataGuard.status().deleteAllowance||0; }catch(_){}
-    if(remoteHas && rw>0 && lw+approved<rw*0.5){ _setSyncState('error'); showToast('⚠ 데이터가 절반 이상 줄어 푸시를 막았어. 서버 원본은 그대로야'); console.warn('[보호] 급감 차단', {lw,rw}); return; }
-    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:localData });
-    const files={};
-    if(priorText && remoteHas) files['jay-daily-os-prepush.json']={ content:priorText };
-    files[SYNC_FILENAME]={ content:payload };
-    const res=await _gistApi('gists/'+id,{ method:'PATCH', body:JSON.stringify({ files }) });
+    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:_collectSyncData() });
+    const res=await _gistApi('gists/'+id,{ method:'PATCH', body:JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } }) });
     const upd=(res && res.updated_at) ? res.updated_at : new Date().toISOString();
-    _origSetItem(SYNC_LAST_KEY, upd); localStorage.removeItem(SYNC_DIRTY_KEY);
+    _origSetItem(SYNC_LAST_KEY, upd);
+    localStorage.removeItem(SYNC_DIRTY_KEY); // 푸시 완료 → 미푸시 마커 해제
     _syncPending=false; _setSyncState('ok');
-  }catch(e){ console.warn('[보호] 푸시 전 확인/백업 실패 — 푸시하지 않음',e); _handleSyncErr(e); }
+  }catch(e){ _handleSyncErr(e); }
 }
 async function _syncPullOnLoad(){
   if(!_syncToken()){ _setSyncState('local'); return; }
   if(!navigator.onLine){ _setSyncState('offline'); return; }
   _setSyncState('syncing');
   try{
-    const id=await _ensureGistId(), gist=await _gistApi('gists/'+id);
-    const remoteUpdated=gist.updated_at, lastPush=localStorage.getItem(SYNC_LAST_KEY);
-    const localData=_collectSyncData(), localEmpty=_bkLocalLooksEmpty(), localDirty=localStorage.getItem(SYNC_DIRTY_KEY)==='1';
-    const localWeight=_syncWeight(localData), file=gist.files && gist.files[SYNC_FILENAME];
-    if(file){
-      let content=file.content;
-      if(file.truncated && file.raw_url){ const rr=await fetch(file.raw_url); if(!rr.ok) throw {code:'remote_pull_failed'}; content=await rr.text(); }
-      const parsed=JSON.parse(content), remoteData=parsed && parsed.data && typeof parsed.data==='object' ? parsed.data : {};
-      const remoteWeight=_syncWeight(remoteData), remoteMuchRicher=_bkDataHasContent(remoteData) && remoteWeight>=8 && localWeight<remoteWeight*0.5;
-      if(remoteMuchRicher && localDirty){
-        try{ const priorStash=localStorage.getItem('jay_sync_stash'); if(priorStash) _origSetItem('jay_sync_stash_backup_'+Date.now(),priorStash); _origSetItem('jay_sync_stash',JSON.stringify({at:new Date().toISOString(),why:'local data far smaller than Gist',data:localData})); }catch(_){}
-        _setSyncState('error'); showToast('⚠ 서버 데이터가 더 많아 자동 덮어쓰기를 멈췄어. 로컬 변경은 보관했어'); return;
+    const id=await _ensureGistId();
+    const gist=await _gistApi('gists/'+id);
+    const remoteUpdated=gist.updated_at;
+    const lastPush=localStorage.getItem(SYNC_LAST_KEY);
+    const file=gist.files && gist.files[SYNC_FILENAME];
+    if(file && (!lastPush || new Date(remoteUpdated) > new Date(lastPush))){
+      // 보험 가드: 이전에 동기화한 적 있고(lastPush) 미푸시 로컬 변경이 남아 있으면
+      // 원격으로 덮어쓰지 말고 로컬 우선 → 로컬을 즉시 푸시. (역류로 인한 데이터 소실 방지)
+      if(lastPush && localStorage.getItem(SYNC_DIRTY_KEY)==='1'){
+        _setSyncState('ok'); _syncPushNow(); return;
       }
-      if(_bkDataHasContent(remoteData) && (localEmpty || remoteMuchRicher || !lastPush || new Date((parsed.updated_at||remoteUpdated)) > new Date(lastPush))){
-        if(!localEmpty && lastPush && localDirty){
-          _setSyncState('ok'); _syncPushNow(); return;
-        }
-        if(_applySyncData(remoteData)===false){ _setSyncState('error'); showToast('⚠ 복원 전 백업을 만들지 못해 적용을 멈췄어'); return; }
-        _origSetItem(SYNC_LAST_KEY, parsed.updated_at||remoteUpdated);
-        location.reload(); return;
+      let content=file.content;
+      if(file.truncated && file.raw_url){ content=await (await fetch(file.raw_url)).text(); }
+      const parsed=JSON.parse(content);
+      if(parsed && parsed.data && Object.keys(parsed.data).length){
+        _applySyncData(parsed.data);
+        _origSetItem(SYNC_LAST_KEY, remoteUpdated);
+        location.reload(); return;                             // 적용 후 새로고침
       }
     }
     _setSyncState('ok');
-    if(localEmpty){ showToast('⚠ 이 기기 데이터가 비어 있어 푸시하지 않았어'); return; }
-    if(!lastPush || localStorage.getItem(SYNC_DIRTY_KEY)==='1') _syncPushNow();
+    if(!localStorage.getItem(SYNC_LAST_KEY)) { _syncPushNow(); return; } // 최초 연결 → 로컬 백업 업로드
+    if(localStorage.getItem(SYNC_DIRTY_KEY)==='1') _syncPushNow();       // 미푸시 로컬 변경 플러시
   }catch(e){ _handleSyncErr(e); }
 }
-// beforeunload에서는 네트워크 쓰기를 하지 않는다. 미푸시 표시는 다음 로드까지 유지.
-// 언로드 중에는 원격 상태 확인과 백업을 보장할 수 없으므로 Gist에 직접 PATCH하지 않는다.
-// dirty 표시는 유지해 다음 정상 로드에서 pull/검증 후 저장한다.
+// beforeunload 강제 푸시 — keepalive fetch로 언로드 중에도 전송 (미푸시 변경 있을 때만)
 function _syncFlushOnUnload(){
-  if(!_syncToken() || localStorage.getItem(SYNC_DIRTY_KEY)!=='1') return;
-  _syncPending=true; _setSyncState('pending');
+  try{
+    if(!_syncToken() || localStorage.getItem(SYNC_DIRTY_KEY)!=='1') return;
+    const id=localStorage.getItem(SYNC_GIST_KEY); if(!id) return;
+    const payload=JSON.stringify({ updated_at:new Date().toISOString(), data:_collectSyncData() });
+    fetch('https://api.github.com/gists/'+id, {
+      method:'PATCH', keepalive:true,
+      headers:{ 'Authorization':'Bearer '+_syncToken(), 'Accept':'application/vnd.github+json', 'Content-Type':'application/json' },
+      body: JSON.stringify({ files:{ [SYNC_FILENAME]:{ content: payload } } })
+    });
+    // 응답을 못 받으니 lastPush은 갱신하지 않음 → 다음 로드에서 dirty 가드가 로컬을 다시 푸시하며 정리
+  }catch(_){}
 }
 function _applySyncData(data){
-  const localData=_collectSyncData();
-  if(_bkDataHasContent(localData)){
-    try{
-      const previous=localStorage.getItem('jay_sync_stash');
-      if(previous) _origSetItem('jay_sync_stash_backup_'+Date.now(), previous);
-      _origSetItem('jay_sync_stash', JSON.stringify({at:new Date().toISOString(),why:'before remote replacement',data:localData}));
-    }catch(e){ console.warn('[보호] 덮어쓰기 전 로컬 스태시 실패',e); return false; }
-  }
   _syncApplying=true;
-  try{
-    const rm=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) rm.push(k); }
-    rm.forEach(k=>localStorage.removeItem(k));
-    Object.keys(data||{}).forEach(k=>{ if(k.startsWith('jay_') && !_syncExcluded(k)) _origSetItem(k, data[k]); });
-  }finally{ _syncApplying=false; }
-  return true;
+  const rm=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.startsWith('jay_') && !_syncExcluded(k)) rm.push(k); }
+  rm.forEach(k=>localStorage.removeItem(k));                    // 통짜 덮어쓰기(삭제도 전파)
+  Object.keys(data).forEach(k=>{ if(k.startsWith('jay_') && !_syncExcluded(k)) _origSetItem(k, data[k]); });
+  _syncApplying=false;
 }
 function _handleSyncErr(e){
   if(e && e.code==='unauthorized'){ _setSyncState('error'); showToast('⚠ 동기화 토큰이 만료됐어 — 탭해서 다시 입력해줘'); return; }
@@ -5762,7 +5731,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function () {
   'use strict';
 
@@ -6361,7 +6330,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   /* 앱의 동기화 계층이 없으면 얹을 것도 없다 */
   if(typeof _syncPushNow !== 'function' || typeof _collectSyncData !== 'function'){
@@ -6372,7 +6341,7 @@ window.addEventListener('beforeunload', () => {
   const SEED_KEY   = 'jay_sync_seeded';         /* 이 기기가 원격 시딩을 마쳤는가 */
   const SNAP_KEY   = 'jay_sync_last_snapshot';  /* 마지막 스냅샷 날짜 YYYYMMDD */
   const GUARD_RATIO = 0.5;                      /* 원격 대비 이 비율 미만이면 차단 */
-  const SNAP_KEEP  = 30;
+  const SNAP_KEEP  = 7;
   /* jay_sync_* 는 앱이 동기화에서 제외하는 접두사 → 기기 로컬 전용이고 푸시를 유발하지 않는다 */
   const setLocal = (typeof _origSetItem === 'function')
       ? _origSetItem : localStorage.setItem.bind(localStorage);
@@ -6450,10 +6419,10 @@ window.addEventListener('beforeunload', () => {
     /* ① 로컬이 비었으면 원격을 읽을 것도 없이 차단.
           원격 조회가 실패해도 이 검사만은 살아 있어야 한다. */
     const local = _collectSyncData(), lw = weigh(local);
-    if(lw === 0) return { ok:false, pull:true };
+    if(lw === 0) return { ok:false, block:{ lw:0, rw:null, why:'이 기기의 데이터가 비어 있다' } };
 
     const rd = await remoteData();
-    if(rd === null) return { ok:false, block:{ lw, rw:null, why:'원격 데이터를 확인하지 못했다' } };
+    if(!rd) return { ok:true };   /* 원격을 못 읽었다 — 저장 자체를 막으면 그게 더 큰 손실 */
     const rw = weigh(rd);
     /* 승인된 삭제분은 정당한 감소로 되돌려 계산한다 — 가드 자체는 그대로다 */
     const effective = lw + allowance();
@@ -6466,7 +6435,7 @@ window.addEventListener('beforeunload', () => {
   _syncPushNow = async function(){
     let v;
     try { v = await precheck(); }
-    catch(e){ console.warn('[보호] 가드 판단 실패 — 안전을 위해 푸시 차단', e); v = { ok:false, block:{lw:null,rw:null,why:'안전 검사 실패'} }; }
+    catch(e){ console.warn('[보호] 가드 판단 실패 — 그대로 진행', e); v = { ok:true }; }
 
     if(v.pull) return _syncPullOnLoad();
     if(v.block){
@@ -6481,7 +6450,6 @@ window.addEventListener('beforeunload', () => {
     _overrideOnce = false;
     _blocked = null;
     const r = await _origPush.apply(this, arguments);
-    if(_syncState !== 'ok') return r;  /* 차단·실패 시 성공 처리나 백업 PATCH를 하지 않는다 */
     setAllowance(0);   /* 푸시가 나갔으면 삭제 장부는 청산됐다 */
     maybeSnapshot().catch(e => console.warn('[보호] 스냅샷 실패', e));
     return r;
@@ -6531,7 +6499,7 @@ window.addEventListener('beforeunload', () => {
   }
 
   /* ── ③ 일일 스냅샷 ──────────────────────────────────────────────────────
-     같은 Gist에 backup-YYYYMMDD.json 으로 하루 1개. 최근 30개만 남긴다.
+     같은 Gist에 backup-YYYYMMDD.json 으로 하루 1개. 최근 7개만 남긴다.
      coach-*.json 과 앱 파일은 건드리지 않는다 — PATCH는 이름 붙인 파일만 바꾼다. */
   function stamp(){
     const d = new Date();
@@ -6543,16 +6511,14 @@ window.addEventListener('beforeunload', () => {
     const id = localStorage.getItem(gistKey);
     if(!id) return;
 
-    const snapshotData = _collectSyncData();
-    if(!_bkDataHasContent(snapshotData)) return;
     const name = 'backup-' + today + '.json';
     const files = { [name]: { content: JSON.stringify({
-      updated_at: new Date().toISOString(), data: snapshotData }) } };
+      updated_at: new Date().toISOString(), data: _collectSyncData() }) } };
 
     const g = await _gistApi('gists/'+id);
     const olds = Object.keys((g && g.files) || {})
       .filter(n => /^backup-\d{8}\.json$/.test(n) && n !== name).sort();
-    const drop = Math.max(0, olds.length - (SNAP_KEEP - 1));   /* 오늘 것 포함 30개 */
+    const drop = Math.max(0, olds.length - (SNAP_KEEP - 1));   /* 오늘 것 포함 7개 */
     olds.slice(0, drop).forEach(n => { files[n] = null; });      /* null = 삭제 */
 
     await _gistApi('gists/'+id, {
@@ -6580,7 +6546,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   if (typeof _syncPushNow !== 'function' || typeof _syncPullOnLoad !== 'function'
       || typeof _collectSyncData !== 'function' || typeof _applySyncData !== 'function') {
@@ -6765,15 +6731,11 @@ window.addEventListener('beforeunload', () => {
           touchReg(null);
         }
       } catch(e){
-        /* 원격 최신 여부를 확인하지 못했으므로 덮어쓰지 않는다 */
-        console.warn('[동기화] 원격 확인 실패 — 푸시 중단', e);
-        try { _setSyncState('error'); } catch(_){}
-        toast('⚠ 서버 상태를 확인하지 못해 저장을 멈췄어. 데이터는 이 기기에 남아 있어');
-        return;
+        /* Fail closed: failed remote verification must never reach PATCH. */
+        console.warn('[동기화] 원격 확인 실패 — 차단', e); return false;
       }
     }
     var r = await _origPush.apply(this, arguments);
-    if (_syncState !== 'ok') return r; /* 차단된 푸시는 성공 시각을 기록하지 않는다 */
     /* 앱은 LAST 에 gist 시각을 넣는다. 그러면 봇이 다른 파일을 쓰는 순간
        "원격이 더 최신"이 되어 리로드가 걸린다. 우리가 방금 쓴 시점으로 덮는다. */
     try {
@@ -6808,7 +6770,8 @@ window.addEventListener('beforeunload', () => {
       toast('↑ 서버에 올리는 중…');
       touchReg(null);
       _forcing = true;                 /* 우리 CAS만 건너뛴다 — 무게 가드는 그대로 */
-      await _origPush.call(window);
+      var pushed = await _origPush.call(window);
+      if (pushed !== true) { _forcing = false; toast('업로드 확인 안 됨 — 성공으로 표시하지 않음'); return false; }
       _forcing = false;
       toast('✅ 서버를 이 기기 데이터로 맞췄어');
       renderPanel();
@@ -6892,7 +6855,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   if (typeof save !== 'function' || typeof getDay !== 'function') {
     console.warn('[할일] 앱 함수를 못 찾았다 — 중복 가드 미설치');
@@ -7229,7 +7192,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   if (typeof getDay !== 'function' || typeof save !== 'function') {
     console.warn('[타임박스] 앱 함수를 못 찾았다 — 미설치');
@@ -8239,7 +8202,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function () {
   'use strict';
 
@@ -8515,7 +8478,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function () {
   'use strict';
 
@@ -8704,7 +8667,7 @@ window.addEventListener('beforeunload', () => {
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 /* ── 토니 코치 탭 (읽기 전용) ─────────────────────────────────────────────
    봇이 Gist에 쓴 coach-map.json / coach-log.json 을 읽어 렌더한다.
    Daily OS 앱은 jay-daily-os-data.json 만 쓰므로 서로 건드리지 않는다.       */
@@ -9401,7 +9364,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   const DEL_KEY = 'jay_coachDeletedNotes';   /* 동기화됨 — 기기 간에 삭제가 전파된다 */
 
@@ -9452,7 +9415,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   /* 서랍 두 개(좌: 메뉴, 우: 최근 항목)를 여는 헤더 버튼을 만든다.
      네비게이션 자체는 기존 사이드바를 그대로 쓴다 — 하단 탭바를 새로 만들면
@@ -9516,7 +9479,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   /* 열린 오버레이 스택. history 깊이와 1:1로 맞춰 둔다. */
   const stack = [];
@@ -9656,7 +9619,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   const KEY = 'jay_pokerLive';
   const TAGS = ['프리플랍', '콜다운', '블러프', '틸트', '기타'];
@@ -10057,7 +10020,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   if (typeof _gcalRestore !== 'function') {
     console.warn('[gcal] 구글 캘린더 계층을 못 찾았다 — 서버 인증 조각 미설치');
@@ -10272,7 +10235,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   if(!document.getElementById('rightPanel')){
     console.warn('[최근항목] #rightPanel 을 못 찾았다 — 탭 제한 미설치');
@@ -10326,7 +10289,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   if (typeof coVision !== 'function') {
     console.warn('[map-edit] coVision을 못 찾았다 — 코치 탭보다 먼저 실렸다');
@@ -10601,7 +10564,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   /* ── 0) 포커 탭 숨김 — 데이터는 그대로 둔다 ────────────────────────────
      포커 트래킹은 나솔버 전담이 됐다. 패널과 localStorage는 손대지 않는다.
@@ -10896,7 +10859,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   var BOARD_KEY = 'jay_visionBoard';
   var ASSET_KEY = 'jay_visionAssets';
@@ -11688,7 +11651,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   var Q_KEY = 'jay_subQueue';
   var SHOW = 6;                 /* 기본 노출 개수 — 나머지는 아카이브 */
@@ -11959,7 +11922,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   var MASK_OK = (function(){
     try {
@@ -12086,7 +12049,7 @@ async function renderCoach(force){
 </script>
 <!-- TONY-COACH-TAB:END -->
 <!-- TONY-COACH-TAB:BEGIN -->
-<script>
+<script type="text/daily-os-deferred">
 (function(){
   /* 앱 스크립트가 안 붙은 페이지에서도 ①유출 경로 차단 ②키 이관은 돌아야 한다.
      예전엔 여기서 곧장 return 해서, callClaude가 없으면 옛 이름의 키가 그대로
@@ -12658,5 +12621,65 @@ async function renderCoach(force){
 })();
 </script>
 <!-- TONY-COACH-TAB:END -->
+<script id="daily-safety-bootstrap">/* Daily OS safety v1. Runs before any application data readers or seeders. */
+(async function(){
+'use strict';
+const VERSION=1, SCHEMA='jay_sync_schema_version', FILE='jay-daily-os-data.json';
+const set=Storage.prototype.setItem.bind(localStorage), remove=Storage.prototype.removeItem.bind(localStorage);
+const secret=k=>/^jay_sync_/.test(k)||/api.?key|openaiKey|token|secret|authorization|credential/i.test(k);
+const clean=d=>Object.fromEntries(Object.entries(d||{}).filter(([k,v])=>k.startsWith('jay_')&&!secret(k)&&typeof v==='string'));
+const collect=()=>clean(Object.fromEntries(Object.keys(localStorage).map(k=>[k,localStorage.getItem(k)])));
+const parse=v=>{try{return JSON.parse(v)}catch{return v}};
+function amount(v){if(v==null||v===false||v==='')return 0;if(Array.isArray(v))return v.length; if(typeof v==='object')return Object.values(v).reduce((n,x)=>n+amount(x),0);return typeof v==='string'?v.trim().length:0;}
+function metrics(d){const out={};for(const [k,v] of Object.entries(clean(d))){if(/visionSeeded|syncDevices|tasks_backup|taskGuard|chatColW/.test(k))continue;const p=parse(v);if(k==='jay_allData'&&p&&typeof p==='object'){for(const [date,day] of Object.entries(p)){if(date==='scratch'){out[k+'.scratch']=amount(day);continue;}if(day&&typeof day==='object')for(const [field,val]of Object.entries(day))out[k+'.'+field]=(out[k+'.'+field]||0)+amount(val);else out[k+'.scratch']=(out[k+'.scratch']||0)+amount(day);}}else if(k==='jay_visionBoard'&&p&&Array.isArray(p.els)){out[k]=p.els.filter(e=>!(e.id==='v1'&&e.type==='text'&&e.content==='100억대 풀빌라.\n친구들과 가족들 집까지.\n바닷가가 보이는 집.\n매달 토너먼트 하이롤러.\n1조짜리 회사.')).length;}else if(k==='jay_evidenceBoard'&&Array.isArray(p)){const defaults=['아프니까 사장이다 — 180만','은퇴의 정석 — 31만','러브노트 — 50만','사업 매각 이력','방콕 7년'];out[k]=p.filter((e,i)=>!(e.id==='e'+(i+1)&&e.text===defaults[i])).length;}else if(k==='jay_mustPins'&&Array.isArray(p)){out[k]=p.filter(e=>!(e.id==='m1'&&e.date==='2026-08-29'&&e.from==='그래 성공하자'&&e.to==='반드시 성공해야겠다'&&e.why==='내가 원하는 삶이 그려졌다 — 100억대 풀빌라 짓고, 같이 일하는 친구들+가족들 집까지 다 해주고 근처에 같이 살고, 바닷가 보이는 집. 매달 토너먼트 하이롤러 참가. 이러니까 진짜 1조짜리 회사를 만들자는 생각이 들었다.')).length;}else if(/streak/i.test(k)&&p&&typeof p==='object'){out[k]=Object.values(p.days||{}).filter(d=>d&&(d.n>0||d.done>0||d.ok===true)).length+(Number(p.best)>0?1:0);}else out[k]=amount(p);}return out;}
+const rich=d=>Object.values(metrics(d)).some(n=>n>0);
+function losses(local,remote){const l=metrics(local),r=metrics(remote);return Object.keys(r).filter(k=>r[k]>0&&(l[k]||0)<r[k]*0.5);}
+const state=window.dailySafety={version:VERSION,ready:false,blocked:null,clean,metrics,rich,losses,collect};
+const PUSH_OK='jay_sync_last_successful_push', SERVER_SAVE='jay_sync_remote_saved_at';
+// SERVER_SAVE is observed remote metadata, never evidence that this device pushed.
+function renderPushHealth(){if(!document.body)return;let el=document.getElementById('dailyPushHealth');if(!el){el=document.createElement('div');el.id='dailyPushHealth';el.setAttribute('role','status');el.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;padding:9px 12px;border-radius:8px;background:#20262e;color:#d6e2ed;font:11px/1.55 sans-serif;max-width:330px;box-shadow:0 2px 10px #0004;pointer-events:none';document.body.append(el);}const t=Date.parse(localStorage.getItem(PUSH_OK)||''),server=Date.parse(localStorage.getItem(SERVER_SAVE)||''),connected=!!localStorage.getItem('jay_sync_token'),valid=Number.isFinite(t)&&t<=Date.now(),stale=valid&&Date.now()-t>=86400000;const fmt=v=>new Date(v).toLocaleString('ko-KR',{timeZone:'Asia/Bangkok',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});let line=!connected?'미연결 · 이 기기 업로드 확인 불가':!valid?'이 기기 업로드 성공 기록 없음':('이 기기 마지막 업로드 '+fmt(t));if(stale)line+=' · 24시간 이상 미업로드';if(!connected&&valid)line+=' · 마지막 성공 '+fmt(t);el.textContent=line+(Number.isFinite(server)?'\n서버 저장 '+fmt(server)+' (다른 기기 포함)':'\n서버 저장시각 미확인');el.style.whiteSpace='pre-line';el.style.border='1px solid '+(!connected||!valid||stale?'#d99838':'#435464');el.dataset.warning=String(!connected||!valid||stale);el.dataset.connected=String(connected);el.dataset.lastSuccessfulPush=valid?new Date(t).toISOString():'';}
+state.renderPushHealth=renderPushHealth;
+renderPushHealth();document.addEventListener('DOMContentLoaded',renderPushHealth,{once:true});setInterval(renderPushHealth,60000);window.addEventListener('storage',renderPushHealth);document.addEventListener('visibilitychange',renderPushHealth);
+function safeErrorCode(e){const n=Number(e?.status);if(Number.isInteger(n)&&n>=400&&n<=599)return 'HTTP_'+n;if(e?.code==='unauthorized')return 'HTTP_401';if(e?.code==='no_token')return 'NO_TOKEN';if(e?.name==='SyntaxError')return 'REMOTE_PARSE';if(e?.name==='TimeoutError'||e?.name==='AbortError')return 'TIMEOUT';return 'NETWORK_OR_VALIDATION';}
+function httpFailure(status){const e=new Error('원격 조회 실패 (HTTP '+status+')');e.status=status;return e;}
+function block(reason,code='SAFETY_BLOCKED'){state.blocked=reason;if(state.pushInFlight){set('jay_sync_last_push_failure',new Date().toISOString());set('jay_sync_last_push_error_code',code);}renderPushHealth(); const show=()=>{let b=document.getElementById('dailySafetyStatus');if(!b){b=document.createElement('div');b.id='dailySafetyStatus';b.style.cssText='position:fixed;bottom:12px;left:12px;z-index:99999;background:#302b25;color:#fff;padding:10px;border-radius:8px;font:12px sans-serif;max-width:420px';document.body.append(b);}b.textContent='동기화 보호: '+reason;};if(document.body)show();else document.addEventListener('DOMContentLoaded',show,{once:true});return false;}
+function stash(data,why){if(rich(data))set('jay_sync_stash',JSON.stringify({at:new Date().toISOString(),why,data:clean(data)}));}
+async function getRemote(){const token=localStorage.getItem('jay_sync_token');if(!token)throw Error('토큰 없음: 비공개 원격 자동 복원 불가');const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json'};let id=localStorage.getItem('jay_sync_gist_id');if(!id){const r=await fetch('https://api.github.com/gists?per_page=100',{headers,signal:AbortSignal.timeout(15000)});if(!r.ok)throw httpFailure(r.status);const list=await r.json();const matches=list.filter(g=>g.files&&g.files[FILE]);if(matches.length!==1)throw Error('원격 Gist 식별 필요');id=matches[0].id;set('jay_sync_gist_id',id);}const r=await fetch('https://api.github.com/gists/'+id,{headers,signal:AbortSignal.timeout(15000)});if(!r.ok)throw httpFailure(r.status);const g=await r.json(),f=g.files&&g.files[FILE];if(!f)throw Error('원격 데이터 파일 없음');let text=f.content;if(f.truncated){if(!f.raw_url)throw Error('원격 파일 불완전');if(new URL(f.raw_url).hostname!=='gist.githubusercontent.com')throw Error('원격 raw 호스트 차단');const raw=await fetch(f.raw_url,{signal:AbortSignal.timeout(15000)});if(!raw.ok)throw httpFailure(raw.status);text=await raw.text();}const p=JSON.parse(text);if(!p||!p.data||Array.isArray(p.data)||typeof p.data!=='object'||Object.entries(p.data).some(([k,v])=>!k.startsWith('jay_')||typeof v!=='string'))throw Error('원격 형식 오류');if(!p.updated_at||!Number.isFinite(Date.parse(p.updated_at)))throw Error('원격 파일 시각 오류');if(p.schema_version!==undefined&&(!Number.isInteger(p.schema_version)||p.schema_version<0))throw Error('손상 스키마: 읽기 전용');if((p.schema_version||0)>VERSION)throw Error('새 스키마: 읽기 전용');set(SERVER_SAVE,p.updated_at);renderPushHealth();return {id,data:clean(p.data),stamp:p.updated_at};}
+state.getRemote=getRemote;
+function apply(d){for(const k of Object.keys(localStorage))if(k.startsWith('jay_')&&!secret(k))remove(k);for(const [k,v]of Object.entries(clean(d)))set(k,v);}
+const schema=Number(localStorage.getItem(SCHEMA)||0);
+if(!Number.isInteger(schema)||schema<0||schema>VERSION){block('새 스키마: 읽기 전용, 앱 초기화 중단');return;}
+// v0 -> v1 is metadata-only: existing Anthropic key migration remains in its own snippet.
+if(schema<VERSION){stash(collect(),'schema v0 → v1');set(SCHEMA,String(VERSION));}
+async function earlyBackup(data,why){if(!rich(data))return;stash(data,why);await new Promise((resolve,reject)=>{const req=indexedDB.open('jay_backup',1);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('snapshots'))req.result.createObjectStore('snapshots',{keyPath:'id'});};req.onerror=()=>reject(req.error);req.onsuccess=()=>{const db=req.result,tx=db.transaction('snapshots','readwrite');tx.objectStore('snapshots').put({id:'before-restore-'+Date.now(),at:Date.now(),data:clean(data)});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};};});}
+function acknowledge(r){set('jay_sync_last_push',r.stamp);remove('jay_sync_dirty');remove('jay_sync_pending');state.blocked=null;document.getElementById('dailySafetyStatus')?.remove();}
+const dirtyAtBootstrap=localStorage.getItem('jay_sync_dirty')==='1';
+let baseline=null;
+try{const remote=await getRemote(),local=collect();baseline=remote;const dirty=localStorage.getItem('jay_sync_dirty')==='1',last=localStorage.getItem('jay_sync_last_push');const newer=!last||Date.parse(remote.stamp)>Date.parse(last);if(rich(remote.data)&&(!rich(local)||(!dirty&&newer))){await earlyBackup(local,'클린 부팅 원격 복원 전');apply(remote.data);acknowledge(remote);state.restored=true;}else if(rich(local)&&JSON.stringify(local)!==JSON.stringify(remote.data)&&dirty&&newer){stash(local,'부팅 충돌: 로컬 유지');block('미저장 로컬 변경 보존, 수동 병합 필요');}}catch(e){block(e.message);if(/스키마/.test(e.message))return;}
+if(document.readyState==='loading')await new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true}));
+// Parser-inert scripts become executable only after bootstrap. Preserve original order and globals.
+for(const old of [...document.querySelectorAll('script[type="text/daily-os-deferred"]')]){const s=document.createElement('script');s.textContent=old.textContent;old.replaceWith(s);}
+const originalLoad=window.onload;window.onload=null;
+window._bkDeviceKey=secret;window._syncExcluded=secret;window._collectAllJay=collect;window._collectSyncData=collect;window._bkDataHasContent=rich;window._bkLocalLooksEmpty=()=>!rich(collect());
+const put=window._idbPut;if(put)window._idbPut=async rec=>{const data=clean(rec.data);if(!rich(data))return false;return put({...rec,data});};
+window._syncFlushOnUnload=()=>false;
+window._localBackupBoot=async()=>{try{await window._idbDailySnapshot();}catch{block('로컬 스냅샷 실패');}};
+let busy=false;
+window._syncPullOnLoad=async function(){try{const r=await getRemote();baseline=r;const local=collect();if(r.stamp===localStorage.getItem('jay_sync_last_push'))return true;if(JSON.stringify(local)!==JSON.stringify(r.data)&&rich(r.data)){if(rich(local)){stash(local,'원격 변경 발견');set('jay_sync_pending',r.stamp);return block('원격 변경 있음: 로컬 보존, 수동 받기 필요');}return block('원격 복원 준비됨: 새로고침으로 안전하게 복원');}return true;}catch(e){return block(e.message);}};
+window._syncPushNow=async function(){if(busy)return false;busy=true;state.pushInFlight=true;set('jay_sync_last_push_attempt',new Date().toISOString());try{if(state.blocked&&/스키마/.test(state.blocked))return false;const remote=await getRemote();const device=localStorage.getItem('jay_sync_device');if(device){const reg=JSON.parse(localStorage.getItem('jay_syncDevices')||'{}');reg[device]={at:new Date().toISOString()};set('jay_syncDevices',JSON.stringify(reg));}const local=collect();if(!rich(local))return block('빈 로컬 업로드 차단: 원격 먼저 받기');if(losses(local,remote.data).length)return block('컬렉션 급감 차단: 원격 먼저 받기');if((!localStorage.getItem('jay_sync_last_push')||Date.parse(remote.stamp)>Date.parse(localStorage.getItem('jay_sync_last_push')))&&JSON.stringify(local)!==JSON.stringify(remote.data)){stash(local,'푸시 충돌');return block('원격 변경 충돌: 로컬 보존');}if(!window._idbPut)throw Error('백업 저장소 없음');if(rich(remote.data))await window._idbPut({id:'prepush-remote-'+Date.now(),at:Date.now(),data:remote.data});await window._idbPut({id:'prepush-local-'+Date.now(),at:Date.now(),data:local});const stamp=new Date().toISOString();const res=await window._gistApi('gists/'+remote.id,{method:'PATCH',body:JSON.stringify({files:{'jay-daily-os-prepush.json':{content:JSON.stringify({schema_version:VERSION,updated_at:remote.stamp,data:remote.data})},[FILE]:{content:JSON.stringify({schema_version:VERSION,updated_at:stamp,data:local})}}})});if(!res||!res.updated_at||!Number.isFinite(Date.parse(res.updated_at)))throw Error('업로드 응답 확인 실패');set(PUSH_OK,new Date().toISOString());set(SERVER_SAVE,stamp);renderPushHealth();set('jay_sync_last_push',stamp);if(JSON.stringify(collect())===JSON.stringify(local))remove('jay_sync_dirty');state.blocked=null;window._setSyncState('ok');return true;}catch(e){block(e.message||('동기화 실패 ('+safeErrorCode(e)+')'),safeErrorCode(e));return false;}finally{busy=false;state.pushInFlight=false;renderPushHealth();}};
+window._syncForcePush=async()=>{const ok=await window._syncPushNow();window.showToast(ok?'동기화 완료':'보호 차단: 원격은 변경하지 않았어');return ok;};
+window._syncForcePull=async()=>{if(!confirm('로컬을 백업한 뒤 원격 데이터를 받을까요?'))return false;try{const r=await getRemote();if(!rich(r.data))return block('빈 원격 복원 차단');const l=collect();stash(l,'수동 원격 받기');if(rich(l))await window._idbPut({id:'prepull-'+Date.now(),at:Date.now(),data:l});apply(r.data);set('jay_sync_last_push',r.stamp);remove('jay_sync_dirty');remove('jay_sync_pending');setTimeout(()=>location.reload(),700);return true;}catch(e){return block(e.message);}};
+// Token setup after an offline/empty boot restores in-place, without a reload loop.
+const priorSaveToken=window.saveSyncToken;
+window.saveSyncToken=async function(){const value=(document.getElementById('syncTokenInput')?.value||'').trim();set('jay_sync_token',value);renderPushHealth();if(!value)return block('토큰 없음: 비공개 원격 자동 복원 불가');try{const remote=await getRemote(),local=collect();if(!rich(local)&&rich(remote.data)){apply(remote.data);acknowledge(remote);const read=(k,f)=>JSON.parse(localStorage.getItem(k)||f);allData=read('jay_allData','{}');goals=read('jay_goals','[]');memoData=read('jay_memoData','[]');docsData=read('jay_docsData','[]');routine=read('jay_routine','null');userProfile=read('jay_profile','{}');sessionHistory=read('jay_sessions','[]');_currentSessionMsgs=read('jay_currentSession','[]');window.init();window.closeModal('syncModal');state.restored=true;return true;}return window._syncPullOnLoad();}catch(e){return block(e.message);}};
+function meaningfulSignature(){const d=collect(),m=metrics(d);return JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k])=>Object.keys(m).some(mk=>(mk===k||mk.startsWith(k+'.'))&&m[mk]>0)).sort(([a],[b])=>a.localeCompare(b))));}
+let lastMeaningful=meaningfulSignature();const schedule=window._scheduleSyncPush;window._scheduleSyncPush=function(){const sig=meaningfulSignature();if(sig===lastMeaningful)return;lastMeaningful=sig;return schedule();};
+document.dispatchEvent(new Event('DOMContentLoaded'));
+state.ready=true;renderPushHealth();
+if(originalLoad)await originalLoad.call(window);
+if(!dirtyAtBootstrap){remove('jay_sync_dirty');if(typeof _syncTimer!=='undefined'&&_syncTimer){clearTimeout(_syncTimer);_syncTimer=null;}}
+else if(baseline&&Date.parse(baseline.stamp)<=Date.parse(localStorage.getItem('jay_sync_last_push')||''))await window._syncPushNow();
+})();
+</script>
 </body>
 </html>
